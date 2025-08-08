@@ -1,0 +1,45 @@
+# --- Global ---
+.DS_Store
+Thumbs.db
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.swp
+
+# --- Environment files (NEVER COMMIT REAL SECRETS) ---
+.env
+.env.*.local
+
+# --- VSCode/IDE ---
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+.idea/
+
+# --- Node / Monorepo ---
+node_modules/
+**/node_modules/
+
+# --- Dist / Build outputs ---
+dist/
+build/
+out/
+coverage/
+
+# --- Angular cache ---
+**/.angular/
+**/.angular/cache/
+
+# --- Frontend specific ---
+Frontend/.env
+Frontend/.env.*
+Frontend/.vercel/
+Frontend/.netlify/
+
+# --- Backend specific ---
+Backend/.env
+Backend/debug/

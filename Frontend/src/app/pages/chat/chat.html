@@ -1,0 +1,130 @@
+<mat-sidenav-container class="shell">
+
+  <!-- LEFT: Private chats -->
+  <mat-sidenav mode="side" opened class="leftPane">
+    <mat-toolbar color="primary" class="paneHeader">Private</mat-toolbar>
+
+    <mat-nav-list>
+      <a mat-list-item *ngFor="let u of users" [class.active]="u === selectedUser">
+        <mat-icon matListItemIcon>person</mat-icon>
+        <div matListItemTitle (click)="openChat(u)">{{ u }}</div>
+        <div matListItemLine>{{ lastText(u) }}</div>
+        <button mat-icon-button color="warn" (click)="removePrivateChat(u)" matTooltip="Remove chat">
+          <mat-icon>delete</mat-icon>
+        </button>
+      </a>
+    </mat-nav-list>
+  </mat-sidenav>
+
+  <!-- CENTER: Chat area -->
+  <mat-sidenav-content class="centerPane">
+    <mat-toolbar color="primary" class="paneHeader">
+      <ng-container *ngIf="!selectedUser; else privateHeader">
+        <span>Public Room</span>
+      </ng-container>
+      <ng-template #privateHeader>
+        <button mat-icon-button (click)="backToPublic()" matTooltip="Back to public">
+          <mat-icon>arrow_back</mat-icon>
+        </button>
+        <span>Chat with {{ selectedUser }}</span>
+      </ng-template>
+    </mat-toolbar>
+
+    <!-- Messages -->
+    <div class="messages">
+      <ng-container *ngIf="!selectedUser; else privateView">
+        <div class="msg" *ngFor="let m of publicMessages" [class.me]="m.from === myUsername">
+          <button mat-button class="userBtn"
+                  [matMenuTriggerFor]="userMenu"
+                  (click)="$event.stopPropagation(); menuUser=m.from">
+            <mat-icon>account_circle</mat-icon>
+            <span>{{ m.from }}</span>
+          </button>
+          <mat-card class="bubble">
+            <div class="text">{{ m.text }}</div>
+            <div class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</div>
+          </mat-card>
+        </div>
+      </ng-container>
+
+      <ng-template #privateView>
+        <div class="msg" *ngFor="let m of currentThread()" [class.me]="m.from === myUsername">
+          <mat-card class="bubble">
+            <div class="text">{{ m.text }}</div>
+            <div class="meta">
+              <span class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</span>
+              <mat-icon *ngIf="m.from === myUsername" class="status-icon"
+                        [ngClass]="m.status">
+                {{ m.status === 'sent' ? 'done' : 'done_all' }}
+              </mat-icon>
+            </div>
+          </mat-card>
+        </div>
+      </ng-template>
+    </div>
+
+    <!-- Menu for public usernames -->
+    <mat-menu #userMenu="matMenu">
+      <button mat-menu-item (click)="startChatFromPublic(menuUser)">
+        <mat-icon>chat</mat-icon>
+        <span>Message privately</span>
+      </button>
+    </mat-menu>
+
+    <!-- Composer -->
+    <form class="composer" (ngSubmit)="selectedUser ? sendPrivate() : sendPublic()">
+      <mat-form-field appearance="outline" class="composerInput">
+        <mat-label>{{ selectedUser ? 'Type a private message' : 'Type a public message' }}</mat-label>
+        <input matInput [(ngModel)]="message" name="msg" autocomplete="off" />
+      </mat-form-field>
+      <button mat-raised-button color="primary" type="submit">Send</button>
+    </form>
+  </mat-sidenav-content>
+
+  <!-- RIGHT: Online users -->
+  <mat-sidenav mode="side" opened position="end" class="rightPane">
+    <mat-toolbar color="primary" class="paneHeader">
+      Online ({{ filteredOnlineUsers.length }})
+      <span class="flex-spacer"></span>
+      <button mat-icon-button (click)="openAddUserDialog()" matTooltip="Start chat with any user">
+        <mat-icon>add</mat-icon>
+      </button>
+    </mat-toolbar>
+
+    <div class="rightBody">
+      <mat-form-field appearance="outline" class="w100">
+        <mat-label>Search online users</mat-label>
+        <input matInput [(ngModel)]="searchTerm" (input)="applyFilter()" />
+      </mat-form-field>
+
+      <mat-nav-list *ngIf="filteredOnlineUsers.length; else nobody">
+        <a mat-list-item *ngFor="let u of filteredOnlineUsers" (click)="openDmFromSidebar(u)">
+          <mat-icon matListItemIcon>circle</mat-icon>
+          <div matListItemTitle>{{ u }}</div>
+          <div matListItemLine>Click to DM</div>
+        </a>
+      </mat-nav-list>
+
+      <ng-template #nobody>
+        <p class="muted">No matching online users.</p>
+      </ng-template>
+    </div>
+  </mat-sidenav>
+</mat-sidenav-container>
+
+<!-- Add user dialog -->
+<ng-template #startChatTpl let-dialogRef="dialogRef">
+  <div class="dialogBody">
+    <h3>Start a Private Chat</h3>
+
+    <mat-form-field appearance="outline" class="w100">
+      <mat-label>Username</mat-label>
+      <input matInput [(ngModel)]="newUser" />
+    </mat-form-field>
+
+    <div class="dialogActions">
+      <button mat-stroked-button (click)="dialogRef.close()">Cancel</button>
+      <button mat-flat-button color="primary" (click)="dialogRef.close(newUser)">Start</button>
+    </div>
+  </div>
+</ng-template>
