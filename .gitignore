@@ -43,3 +43,4 @@ Frontend/.netlify/
 # --- Backend specific ---
 Backend/.env
 Backend/debug/
+Backend/uploads/voice/*

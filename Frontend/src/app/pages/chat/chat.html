@@ -40,6 +40,7 @@
 
     <!-- Messages -->
     <div class="messages">
+      <!-- PUBLIC VIEW -->
       <ng-container *ngIf="!selectedUser; else privateView">
         <div class="msg" *ngFor="let m of publicMessages" [class.me]="m.from === myUsername">
           <button mat-button class="userBtn"
@@ -48,24 +49,56 @@
             <mat-icon>account_circle</mat-icon>
             <span>{{ m.from }}</span>
           </button>
+
           <mat-card class="bubble">
-            <div class="text">{{ m.text }}</div>
-            <div class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</div>
+            <ng-container [ngSwitch]="m.kind">
+              <ng-container *ngSwitchCase="'voice'">
+                <div class="voice-row">
+                  <mat-icon>graphic_eq</mat-icon>
+                  <audio [src]="m.mediaUrl" controls preload="metadata"></audio>
+                  <span class="time" *ngIf="m.durationMs">{{ (m.durationMs/1000) | number:'1.0-1' }}s</span>
+                </div>
+                <div class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</div>
+              </ng-container>
+
+              <ng-container *ngSwitchDefault>
+                <div class="text">{{ m.text }}</div>
+                <div class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</div>
+              </ng-container>
+            </ng-container>
           </mat-card>
         </div>
       </ng-container>
 
+      <!-- PRIVATE VIEW -->
       <ng-template #privateView>
         <div class="msg" *ngFor="let m of currentThread()" [class.me]="m.from === myUsername">
           <mat-card class="bubble">
-            <div class="text">{{ m.text }}</div>
-            <div class="meta">
-              <span class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</span>
-              <mat-icon *ngIf="m.from === myUsername" class="status-icon"
-                        [ngClass]="m.status">
-                {{ m.status === 'sent' ? 'done' : 'done_all' }}
-              </mat-icon>
-            </div>
+            <ng-container [ngSwitch]="m.kind">
+              <ng-container *ngSwitchCase="'voice'">
+                <div class="voice-row">
+                  <mat-icon>graphic_eq</mat-icon>
+                  <audio [src]="m.mediaUrl" controls preload="metadata"></audio>
+                  <span class="time" *ngIf="m.durationMs">{{ (m.durationMs/1000) | number:'1.0-1' }}s</span>
+                </div>
+                <div class="meta">
+                  <span class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</span>
+                  <mat-icon *ngIf="m.from === myUsername" class="status-icon" [ngClass]="m.status">
+                    {{ m.status === 'sent' ? 'done' : 'done_all' }}
+                  </mat-icon>
+                </div>
+              </ng-container>
+
+              <ng-container *ngSwitchDefault>
+                <div class="text">{{ m.text }}</div>
+                <div class="meta">
+                  <span class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</span>
+                  <mat-icon *ngIf="m.from === myUsername" class="status-icon" [ngClass]="m.status">
+                    {{ m.status === 'sent' ? 'done' : 'done_all' }}
+                  </mat-icon>
+                </div>
+              </ng-container>
+            </ng-container>
           </mat-card>
         </div>
       </ng-template>
@@ -90,9 +123,24 @@
           autocomplete="off"
           (input)="selectedUser ? onPrivateInput() : onPublicInput()"
           (blur)="onInputBlur()"
+          [disabled]="isRecording"
         />
       </mat-form-field>
-      <button mat-raised-button color="primary" type="submit">Send</button>
+
+      <!-- Mic: click to start/stop. Dialog handles preview -->
+      <button
+        mat-icon-button
+        type="button"
+        [color]="isRecording ? 'warn' : undefined"
+        (click)="toggleRecording()"
+        matTooltip="{{ isRecording ? 'Tap to stop' : 'Tap to record voice' }}"
+      >
+        <mat-icon>{{ isRecording ? 'stop_circle' : 'mic' }}</mat-icon>
+      </button>
+
+      <button mat-raised-button color="primary" type="submit" [disabled]="isRecording">
+        Send
+      </button>
     </form>
   </mat-sidenav-content>
 
@@ -140,6 +188,33 @@
     <div class="dialogActions">
       <button mat-stroked-button (click)="dialogRef.close()">Cancel</button>
       <button mat-flat-button color="primary" (click)="dialogRef.close(newUser)">Start</button>
+    </div>
+  </div>
+</ng-template>
+
+<!-- Voice preview dialog -->
+<ng-template #voicePreviewTpl>
+  <div class="dialogBody voice-preview">
+    <h3>Voice message</h3>
+    <div class="voice-row">
+      <mat-icon>play_circle</mat-icon>
+      <audio [src]="previewUrl!" controls></audio>
+      <span class="time">{{ (previewDurationMs/1000) | number:'1.0-1' }}s</span>
+    </div>
+
+    <div class="dialogActions">
+      <button mat-stroked-button color="primary" (click)="sendRecorded()">
+        <mat-icon>send</mat-icon>
+        Send
+      </button>
+      <button mat-stroked-button color="warn" (click)="cancelRecording()">
+        <mat-icon>delete</mat-icon>
+        Delete
+      </button>
+      <button mat-stroked-button (click)="rerecord()">
+        <mat-icon>mic</mat-icon>
+        Re-record
+      </button>
     </div>
   </div>
 </ng-template>

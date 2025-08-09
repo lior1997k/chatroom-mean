@@ -1,3 +1,4 @@
+// src/app/services/socket.ts
 import { Injectable } from '@angular/core';
 import { io, Socket } from 'socket.io-client';
 import { BehaviorSubject, Observable } from 'rxjs';
@@ -13,25 +14,43 @@ export class SocketService {
   private privateMessages$ = new BehaviorSubject<ChatMessage[]>([]);
   private onlineUsers$     = new BehaviorSubject<string[]>([]);
 
+  // NEW: ensure we only bind listeners once
+  private listenersBound = false;
+
   constructor(private auth: AuthService) {}
 
   connect(): void {
-    if (this.socket && this.socket.connected) return;
-
     const token = this.auth.getToken();
     if (!token) {
       console.error('❌ No token available for socket connection');
       return;
     }
 
-    this.socket = io(environment.apiUrl, {
-      query: { token }
-    });
+    // Create or reconnect socket
+    if (!this.socket) {
+      this.socket = io(environment.apiUrl, { query: { token } });
+      this.socket.on('connect',    () => console.log('✅ Socket connected'));
+      this.socket.on('disconnect', () => console.log('❌ Socket disconnected'));
+    } else if (!this.socket.connected) {
+      this.socket.connect();
+    }
 
-    this.socket.on('connect',    () => console.log('✅ Socket connected'));
-    this.socket.on('disconnect', () => console.log('❌ Socket disconnected'));
+    // Bind core listeners ONCE
+    if (!this.listenersBound) {
+      this.bindCoreListeners();
+      this.listenersBound = true;
+    }
+  }
 
-    // Streams
+  private bindCoreListeners() {
+    // Remove any existing handlers (useful in HMR/dev)
+    this.socket.off('publicMessage');
+    this.socket.off('privateMessage');
+    this.socket.off('publicVoice');
+    this.socket.off('privateVoice');
+    this.socket.off('onlineUsers');
+
+    // ---- Text message listeners ----
     this.socket.on('publicMessage', (msg: ChatMessage) => {
       this.publicMessages$.next([...this.publicMessages$.value, msg]);
     });
@@ -40,12 +59,22 @@ export class SocketService {
       this.privateMessages$.next([...this.privateMessages$.value, msg]);
     });
 
+    // ---- Voice message listeners ----
+    this.socket.on('publicVoice', (msg: ChatMessage) => {
+      this.publicMessages$.next([...this.publicMessages$.value, msg]);
+    });
+
+    this.socket.on('privateVoice', (msg: ChatMessage) => {
+      this.privateMessages$.next([...this.privateMessages$.value, msg]);
+    });
+
+    // ---- Online users list ----
     this.socket.on('onlineUsers', (list: string[]) => {
       this.onlineUsers$.next(list || []);
     });
   }
 
-  // Send
+  // ---- Send (text) ----
   sendPublicMessage(text: string): void {
     this.socket.emit('publicMessage', { text });
   }
@@ -54,23 +83,24 @@ export class SocketService {
     this.socket.emit('privateMessage', { to, text, tempId });
   }
 
-  // Typing: public
-  typingPublicStart(): void {
-    this.socket.emit('typing:public');
-  }
-  typingPublicStop(): void {
-    this.socket.emit('typing:publicStop');
+  // ---- Send (voice) ----
+  sendPublicVoice(url: string, durationMs: number): void {
+    this.socket.emit('publicVoice', { url, durationMs });
   }
 
-  // Typing: private
-  typingPrivateStart(to: string): void {
-    this.socket.emit('typing:private', { to });
-  }
-  typingPrivateStop(to: string): void {
-    this.socket.emit('typing:privateStop', { to });
+  sendPrivateVoice(to: string, url: string, durationMs: number, tempId?: string): void {
+    this.socket.emit('privateVoice', { to, url, durationMs, tempId });
   }
 
-  // Observe
+  // ---- Typing: public ----
+  typingPublicStart(): void { this.socket.emit('typing:public'); }
+  typingPublicStop(): void  { this.socket.emit('typing:publicStop'); }
+
+  // ---- Typing: private ----
+  typingPrivateStart(to: string): void { this.socket.emit('typing:private', { to }); }
+  typingPrivateStop(to: string): void  { this.socket.emit('typing:privateStop', { to }); }
+
+  // ---- Observers ----
   getMessages(): Observable<ChatMessage[]> {
     return this.publicMessages$.asObservable();
   }
@@ -81,6 +111,7 @@ export class SocketService {
     return this.onlineUsers$.asObservable();
   }
 
+  // Generic event listener
   onEvent<T = any>(event: string): Observable<T> {
     return new Observable<T>((observer) => {
       const handler = (data: T) => observer.next(data);
@@ -89,8 +120,10 @@ export class SocketService {
     });
   }
 
+  // Generic emitter
   emitEvent(event: string, data: any): void {
     this.socket.emit(event, data);
   }
 }
+
 export { Socket };

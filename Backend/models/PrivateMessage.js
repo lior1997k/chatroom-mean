@@ -1,18 +1,20 @@
 const mongoose = require('mongoose');
-const { Schema } = mongoose;
 
-const privateMessageSchema = new Schema(
-  {
-    fromId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
-    toId:   { type: Schema.Types.ObjectId, ref: 'User', index: true },
-    from:   { type: String, index: true },
-    to:     { type: String, index: true },
-    text:   { type: String, required: true },
-    ts:     { type: Date, default: Date.now, index: true },
-  },
-  { timestamps: false }
-);
+const PrivateMessageSchema = new mongoose.Schema({
+  fromId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  toId:   { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  from:   { type: String, required: true },
+  to:     { type: String, required: true },
 
-privateMessageSchema.index({ fromId: 1, toId: 1, ts: 1 });
+  // Text content (optional for voice)
+  text:   { type: String },
 
-module.exports = mongoose.model('PrivateMessage', privateMessageSchema);
+  // Voice fields
+  kind:       { type: String, enum: ['text', 'voice'], default: 'text' },
+  mediaUrl:   { type: String },
+  durationMs: { type: Number },
+
+  ts: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+module.exports = mongoose.model('PrivateMessage', PrivateMessageSchema);
