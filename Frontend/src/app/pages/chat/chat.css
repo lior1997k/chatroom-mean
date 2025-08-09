@@ -113,14 +113,36 @@
    VOICE MESSAGE UI
    ========================================================= */
 .voice-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
-.voice-row mat-icon { opacity: 0.75; }
-.voice-row audio { width: 220px; outline: none; }
 
-/* Waveform preview container */
+.voice-progress { width: 220px; cursor: pointer; }
+.voice-progress .bar {
+  height: 6px;
+  background: #e9ecff;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.voice-progress .bar .fill {
+  height: 100%;
+  width: 0%;
+  background: #3f51b5;
+  transition: width 80ms linear;
+}
+
+.voice-times {
+  font-size: 12px;
+  color: #555;
+  display: inline-flex;
+  gap: 2px;
+}
+
+.inline-audio { display: none; } /* we render our own controls */
+
+/* Waveform preview container (dialog) */
 .wave-wrap {
   width: 100%;
   background: #fafafa;
@@ -215,6 +237,6 @@ button[type="submit"] { border-radius: 20px; font-weight: 500; }
    ========================================================= */
 @media (max-width: 600px) {
   .bubble { max-width: 85%; }
-  .voice-row audio { width: 200px; }
+  .voice-progress { width: 160px; }
   .voice-preview audio { width: 240px; }
 }

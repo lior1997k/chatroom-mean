@@ -82,8 +82,12 @@ export class ChatComponent implements OnDestroy {
   previewUrl: string | null = null;
   previewDurationMs = 0;
 
-  // Waveform preview
+  // Waveform preview (in dialog)
   previewWaveUrl: string | null = null;
+
+  // ===== Inline playback state =====
+  public playback: Record<string, { playing: boolean; current: number; duration: number }> = {};
+  private currentPlayingId: string | null = null;
 
   constructor(
     private socket: SocketService,
@@ -352,7 +356,6 @@ export class ChatComponent implements OnDestroy {
 
         this.openVoicePreviewDialog();
 
-        // draw waveform (async, no await needed)
         this.generateWaveform(this.previewBlob)
           .then(url => this.previewWaveUrl = url)
           .catch(() => this.previewWaveUrl = null);
@@ -468,7 +471,7 @@ export class ChatComponent implements OnDestroy {
     this._revokePreviewUrl();
   }
 
-  // Waveform (draw image data URL for easy binding inside dialog)
+  // Waveform for preview dialog
   private async generateWaveform(blob: Blob): Promise<string> {
     const arrayBuf = await blob.arrayBuffer();
     const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -481,11 +484,9 @@ export class ChatComponent implements OnDestroy {
     off.height = height;
     const ctx = off.getContext('2d')!;
 
-    // background
     ctx.fillStyle = '#fafafa';
     ctx.fillRect(0, 0, width, height);
 
-    // midline
     const mid = height / 2;
     ctx.strokeStyle = '#ddd';
     ctx.beginPath();
@@ -493,7 +494,6 @@ export class ChatComponent implements OnDestroy {
     ctx.lineTo(width, mid);
     ctx.stroke();
 
-    // draw peaks
     const channel = audioBuf.getChannelData(0);
     const block = Math.floor(channel.length / width) || 1;
 
@@ -526,6 +526,109 @@ export class ChatComponent implements OnDestroy {
     const rect = container.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
     audio.currentTime = ratio * audio.duration;
+  }
+
+  // ===== Inline playback controls per message =====
+  togglePlay(m: ChatMessage, audioEl: HTMLAudioElement) {
+    if (!m.id) return;
+    // pause any other playing audio
+    if (this.currentPlayingId && this.currentPlayingId !== m.id) {
+      const others = document.querySelectorAll<HTMLAudioElement>('audio.inline-audio');
+      others.forEach(a => {
+        if ((a as any).__msgId && (a as any).__msgId !== m.id) a.pause();
+      });
+    }
+    (audioEl as any).__msgId = m.id;
+
+    if (audioEl.paused) {
+      audioEl.play();
+    } else {
+      audioEl.pause();
+    }
+  }
+
+  onLoadedMeta(m: ChatMessage, ev: Event) {
+    if (!m.id) return;
+    const a = ev.target as HTMLAudioElement;
+    const duration = isFinite(a.duration) && a.duration > 0
+      ? a.duration
+      : (m.durationMs ? m.durationMs / 1000 : 0);
+    this.ensureState(m.id);
+    this.playback[m.id].duration = duration;
+  }
+
+  onTimeUpdate(m: ChatMessage, ev: Event) {
+    if (!m.id) return;
+    const a = ev.target as HTMLAudioElement;
+    this.ensureState(m.id);
+    this.playback[m.id].current = a.currentTime || 0;
+  }
+
+  onPlay(m: ChatMessage) {
+    if (!m.id) return;
+    this.ensureState(m.id);
+    this.playback[m.id].playing = true;
+    this.currentPlayingId = m.id;
+  }
+
+  onPause(m: ChatMessage) {
+    if (!m.id) return;
+    this.ensureState(m.id);
+    this.playback[m.id].playing = false;
+    if (this.currentPlayingId === m.id) this.currentPlayingId = null;
+  }
+
+  onEnded(m: ChatMessage) {
+    if (!m.id) return;
+    this.ensureState(m.id);
+    this.playback[m.id].playing = false;
+    this.playback[m.id].current = this.playback[m.id].duration;
+    if (this.currentPlayingId === m.id) this.currentPlayingId = null;
+  }
+
+  seekInline(ev: MouseEvent, host: HTMLElement, audioEl: HTMLAudioElement, m: ChatMessage) {
+    if (!m.id) return;
+    const rect = host.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+    const dur = this.totalSeconds(m);
+    if (dur > 0) {
+      audioEl.currentTime = ratio * dur;
+    }
+  }
+
+  progressPct(m: ChatMessage): number {
+    if (!m.id) return 0;
+    const cur = this.playback[m.id]?.current ?? 0;
+    const dur = this.totalSeconds(m);
+    if (dur <= 0) return 0;
+    return Math.max(0, Math.min(100, (cur / dur) * 100));
+    }
+
+  elapsedLabel(m: ChatMessage): string {
+    if (!m.id) return '00:00';
+    return this.formatTime(this.playback[m.id]?.current ?? 0);
+  }
+
+  totalLabel(m: ChatMessage): string {
+    return this.formatTime(this.totalSeconds(m));
+  }
+
+  private totalSeconds(m: ChatMessage): number {
+    if (m.id && this.playback[m.id]?.duration) return this.playback[m.id].duration;
+    if (m.durationMs && m.durationMs > 0) return m.durationMs / 1000;
+    return 0;
+  }
+
+  private ensureState(id: string) {
+    if (!this.playback[id]) this.playback[id] = { playing: false, current: 0, duration: 0 };
+  }
+
+  private formatTime(seconds: number): string {
+    if (!isFinite(seconds) || seconds < 0) seconds = 0;
+    const s = Math.floor(seconds);
+    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    return `${mm}:${ss}`;
   }
 
   // ===== Navigation & dialogs =====

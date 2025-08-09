@@ -54,10 +54,33 @@
             <ng-container [ngSwitch]="m.kind">
               <ng-container *ngSwitchCase="'voice'">
                 <div class="voice-row">
-                  <mat-icon>graphic_eq</mat-icon>
-                  <audio [src]="m.mediaUrl" controls preload="metadata"></audio>
-                  <span class="time" *ngIf="m.durationMs">{{ (m.durationMs/1000) | number:'1.0-1' }}s</span>
+                  <button mat-icon-button (click)="togglePlay(m, audioPub)" [matTooltip]="(playback[m.id!]?.playing ? 'Pause' : 'Play')">
+                    <mat-icon>{{ playback[m.id!]?.playing ? 'pause' : 'play_arrow' }}</mat-icon>
+                  </button>
+
+                  <div class="voice-progress" (click)="seekInline($event, progressHostPub, audioPub, m)" #progressHostPub>
+                    <div class="bar"><div class="fill" [style.width.%]="progressPct(m)"></div></div>
+                  </div>
+
+                  <div class="voice-times">
+                    <span>{{ elapsedLabel(m) }}</span>
+                    <span> / </span>
+                    <span>{{ totalLabel(m) }}</span>
+                  </div>
+
+                  <audio
+                    #audioPub
+                    class="inline-audio"
+                    [src]="m.mediaUrl"
+                    preload="metadata"
+                    (loadedmetadata)="onLoadedMeta(m, $event)"
+                    (timeupdate)="onTimeUpdate(m, $event)"
+                    (ended)="onEnded(m)"
+                    (play)="onPlay(m)"
+                    (pause)="onPause(m)">
+                  </audio>
                 </div>
+
                 <div class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</div>
               </ng-container>
 
@@ -77,10 +100,33 @@
             <ng-container [ngSwitch]="m.kind">
               <ng-container *ngSwitchCase="'voice'">
                 <div class="voice-row">
-                  <mat-icon>graphic_eq</mat-icon>
-                  <audio [src]="m.mediaUrl" controls preload="metadata"></audio>
-                  <span class="time" *ngIf="m.durationMs">{{ (m.durationMs/1000) | number:'1.0-1' }}s</span>
+                  <button mat-icon-button (click)="togglePlay(m, audioPriv)" [matTooltip]="(playback[m.id!]?.playing ? 'Pause' : 'Play')">
+                    <mat-icon>{{ playback[m.id!]?.playing ? 'pause' : 'play_arrow' }}</mat-icon>
+                  </button>
+
+                  <div class="voice-progress" (click)="seekInline($event, progressHostPriv, audioPriv, m)" #progressHostPriv>
+                    <div class="bar"><div class="fill" [style.width.%]="progressPct(m)"></div></div>
+                  </div>
+
+                  <div class="voice-times">
+                    <span>{{ elapsedLabel(m) }}</span>
+                    <span> / </span>
+                    <span>{{ totalLabel(m) }}</span>
+                  </div>
+
+                  <audio
+                    #audioPriv
+                    class="inline-audio"
+                    [src]="m.mediaUrl"
+                    preload="metadata"
+                    (loadedmetadata)="onLoadedMeta(m, $event)"
+                    (timeupdate)="onTimeUpdate(m, $event)"
+                    (ended)="onEnded(m)"
+                    (play)="onPlay(m)"
+                    (pause)="onPause(m)">
+                  </audio>
                 </div>
+
                 <div class="meta">
                   <span class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</span>
                   <mat-icon *ngIf="m.from === myUsername" class="status-icon" [ngClass]="m.status">
