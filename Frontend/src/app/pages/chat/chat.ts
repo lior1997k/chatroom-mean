@@ -43,6 +43,14 @@ export class ChatComponent {
   users: string[] = [];
   onlineUsers: string[] = [];
 
+  // Typing state we SHOW about others
+  isTypingPublic = new Set<string>();        // who is typing in public
+  isTypingMap: Record<string, boolean> = {}; // username -> typing in private
+
+  // Typing state WE EMIT (to avoid spamming start/stop)
+  private publicTypingActive = false;
+  private privateTypingActiveFor: string | null = null;
+
   // Filtering
   searchTerm = '';
   filteredOnlineUsers: string[] = [];
@@ -77,7 +85,7 @@ export class ChatComponent {
       if (m) this.publicMessages.push(m);
     });
 
-    // === PRIVATE (incoming only; your own sends use privateAck below) ===
+    // === PRIVATE (incoming only; your own sends use privateAck) ===
     this.socket.getPrivateMessages().subscribe((messages: ChatMessage[]) => {
       const m = messages[messages.length - 1];
       if (!m) return;
@@ -94,14 +102,14 @@ export class ChatComponent {
 
       if (!this.users.includes(other)) this.users.unshift(other);
 
-      // ✅ Instant read if I'm viewing this thread and the msg is from the other user
+      // Instant read if I'm viewing this thread and msg is from the other user
       if (m.from !== me && this.selectedUser === other && m.id) {
         this.socket.emitEvent('markAsRead', { id: m.id, from: m.from });
-        this.updateMessageStatus(other, m.id, 'read'); // blue ticks right away
+        this.updateMessageStatus(other, m.id, 'read');
       }
     });
 
-    // === ACK: server maps tempId -> real DB id; set delivered ===
+    // === ACK: tempId -> real id ===
     this.socket.onEvent<{ tempId: string; id: string; to: string; timestamp: string }>('privateAck')
       .subscribe((ack) => {
         if (!ack) return;
@@ -133,6 +141,26 @@ export class ChatComponent {
       this.onlineUsers = (list || []).filter(u => u !== me);
       this.applyFilter();
     });
+
+    // === TYPING: PUBLIC ===
+    this.socket.onEvent<{ from: string }>('typing:public')
+      .subscribe((ev) => { if (ev?.from) this.isTypingPublic.add(ev.from); });
+
+    this.socket.onEvent<{ from: string }>('typing:publicStop')
+      .subscribe((ev) => { if (ev?.from) this.isTypingPublic.delete(ev.from); });
+
+    // === TYPING: PRIVATE ===
+    this.socket.onEvent<{ from: string; to: string }>('typing:private')
+      .subscribe((ev) => {
+        if (!ev) return;
+        if (this.selectedUser === ev.from) this.isTypingMap[ev.from] = true;
+      });
+
+    this.socket.onEvent<{ from: string; to: string }>('typing:privateStop')
+      .subscribe((ev) => {
+        if (!ev) return;
+        if (this.selectedUser === ev.from) this.isTypingMap[ev.from] = false;
+      });
   }
 
   // ===== Public Chat =====
@@ -141,16 +169,35 @@ export class ChatComponent {
     if (!text) return;
     this.socket.sendPublicMessage(text);
     this.message = '';
+    this._stopPublicTypingIfActive();
+  }
+
+  // Called on <input> for PUBLIC view
+  onPublicInput() {
+    if (this.selectedUser) return; // only in public
+    const hasText = this.message.trim().length > 0;
+    if (hasText && !this.publicTypingActive) {
+      this.socket.typingPublicStart();
+      this.publicTypingActive = true;
+    } else if (!hasText && this.publicTypingActive) {
+      this._stopPublicTypingIfActive();
+    }
   }
 
   // ===== Private Chat =====
   async openChat(username: string) {
-    this.selectedUser = username;
+    // switching views → stop public typing if active
+    this._stopPublicTypingIfActive();
 
-    // Mark all received messages in this thread as read immediately
+    // switching threads → stop previous private typing if active
+    if (this.privateTypingActiveFor && this.privateTypingActiveFor !== username) {
+      this.socket.typingPrivateStop(this.privateTypingActiveFor);
+      this.privateTypingActiveFor = null;
+    }
+
+    this.selectedUser = username;
     this.markAllAsRead(username);
 
-    // If we already have history loaded, skip fetch
     if (this.privateChats[username]?.length) return;
 
     try {
@@ -179,6 +226,33 @@ export class ChatComponent {
     }
   }
 
+  // Called on <input> for PRIVATE view
+  onPrivateInput() {
+    if (!this.selectedUser) return;
+    const to = this.selectedUser;
+    const hasText = this.message.trim().length > 0;
+
+    if (hasText && this.privateTypingActiveFor !== to) {
+      // start typing for this recipient
+      this.socket.typingPrivateStart(to);
+      this.privateTypingActiveFor = to;
+    } else if (!hasText && this.privateTypingActiveFor === to) {
+      // stop typing if cleared
+      this.socket.typingPrivateStop(to);
+      this.privateTypingActiveFor = null;
+    }
+  }
+
+  onInputBlur() {
+    // If composer loses focus, stop whichever typing mode was active
+    if (!this.selectedUser) {
+      this._stopPublicTypingIfActive();
+    } else if (this.privateTypingActiveFor === this.selectedUser) {
+      this.socket.typingPrivateStop(this.selectedUser);
+      this.privateTypingActiveFor = null;
+    }
+  }
+
   sendPrivate() {
     const text = this.message.trim();
     if (!text || !this.selectedUser) return;
@@ -198,9 +272,20 @@ export class ChatComponent {
 
     this.socket.sendPrivateMessage(this.selectedUser, text, tempId);
     this.message = '';
+
+    // stop private typing after send
+    if (this.privateTypingActiveFor === this.selectedUser) {
+      this.socket.typingPrivateStop(this.selectedUser);
+      this.privateTypingActiveFor = null;
+    }
   }
 
   backToPublic() {
+    // leaving private → stop private typing if active
+    if (this.privateTypingActiveFor) {
+      this.socket.typingPrivateStop(this.privateTypingActiveFor);
+      this.privateTypingActiveFor = null;
+    }
     this.selectedUser = null;
     this.message = '';
   }
@@ -217,10 +302,7 @@ export class ChatComponent {
     this.newUser = '';
     this.dialog.open(this.startChatTpl, { width: '360px' });
   }
-
-  openAddUserDialog() {
-    this.openStartChatDialog();
-  }
+  openAddUserDialog() { this.openStartChatDialog(); }
 
   startChatConfirm(ref: MatDialogRef<any>) {
     const u = (this.newUser || '').trim();
@@ -243,6 +325,11 @@ export class ChatComponent {
   // Helpers
   get myUsername(): string | null {
     return this.auth.getUsername();
+  }
+
+  // Angular template can’t call Array.from directly; provide a getter
+  get typingPublicList(): string[] {
+    return Array.from(this.isTypingPublic);
   }
 
   lastText(u: string): string {
@@ -270,7 +357,6 @@ export class ChatComponent {
     });
   }
 
-  // Filtering
   applyFilter() {
     const term = this.searchTerm.toLowerCase();
     this.filteredOnlineUsers = this.onlineUsers.filter(u => u.toLowerCase().includes(term));
@@ -281,6 +367,14 @@ export class ChatComponent {
     this.users = this.users.filter(user => user !== u);
     if (this.selectedUser === u) {
       this.selectedUser = null;
+    }
+  }
+
+  // Utils
+  private _stopPublicTypingIfActive() {
+    if (this.publicTypingActive) {
+      this.socket.typingPublicStop();
+      this.publicTypingActive = false;
     }
   }
 }

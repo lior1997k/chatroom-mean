@@ -205,3 +205,10 @@ button[type="submit"] {
   color: #2196f3; /* Blue ticks */
 }
 
+.typingHint {
+  font-size: 0.85rem;
+  margin-left: 12px;
+  opacity: 0.85;
+}
+
+

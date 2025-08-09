@@ -30,10 +30,11 @@ app.use('/api/private', privateRoutes);
 
 app.get('/', (_, res) => res.send('ChatRoom Server is running'));
 
-// Check if user exists (used by client when adding offline users)
+// Check if user exists
 app.get('/api/users/:username/exists', async (req, res) => {
   try {
-    const user = await User.findOne({ username: req.params.username }).lean();
+    const username = req.params.username;
+    const user = await User.findOne({ username }).lean();
     res.json({ exists: !!user });
   } catch (err) {
     console.error('Error checking user existence:', err);
@@ -43,7 +44,6 @@ app.get('/api/users/:username/exists', async (req, res) => {
 
 // userId -> Set<socketId>
 const socketsByUserId = new Map();
-// Track usernames that are currently online (for broadcast)
 const onlineUsernames = new Set();
 
 io.use((socket, next) => {
@@ -92,7 +92,6 @@ io.on('connection', (socket) => {
       const toUser = await User.findOne({ username: to }).lean();
       const timestamp = new Date().toISOString();
 
-      // Persist if recipient exists; use DB id when available
       let savedId = tempId || `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
       if (toUser) {
         const saved = await PrivateMessage.create({
@@ -106,24 +105,18 @@ io.on('connection', (socket) => {
         savedId = saved._id.toString();
       }
 
-      // 1) ACK back to the SENDER ONLY — map tempId -> real id (prevents duplicate echo)
+      // ACK only to sender (prevents duplicate echo)
       io.to(myRoom).emit('privateAck', { tempId, id: savedId, to, timestamp });
 
-      // 2) Deliver full message to RECIPIENT (if online), then notify sender as delivered
+      // Deliver to recipient + notify delivered
       if (toUser) {
         const recipientRoom = `user:${toUser._id}`;
         io.to(recipientRoom).emit('privateMessage', {
-          id: savedId,
-          from: username,
-          to,
-          text,
-          timestamp
+          id: savedId, from: username, to, text, timestamp
         });
-
-        // sender sees ✓✓ delivered
         io.to(myRoom).emit('messageDelivered', { id: savedId, to });
       } else {
-        // Recipient offline — mark as "sent" for the sender (single ✓)
+        // offline: mark sent
         io.to(myRoom).emit('messageSent', { id: savedId, to });
       }
     } catch (err) {
@@ -132,15 +125,43 @@ io.on('connection', (socket) => {
   });
 
   // === READ RECEIPT ===
-  // Client emits: { id, from } where "from" = original sender's username
   socket.on('markAsRead', async ({ id, from }) => {
     try {
       const fromUser = await User.findOne({ username: from }).lean();
       if (!fromUser) return;
-      // Notify the original sender that this message was read (blue ✓✓ on their side)
       io.to(`user:${fromUser._id}`).emit('messageRead', { id });
     } catch (e) {
       console.error('markAsRead error', e);
+    }
+  });
+
+  // === TYPING INDICATORS ===
+  // Public typing (everyone sees except the typer if you want)
+  socket.on('typing:public', () => {
+    socket.broadcast.emit('typing:public', { from: username });
+  });
+  socket.on('typing:publicStop', () => {
+    socket.broadcast.emit('typing:publicStop', { from: username });
+  });
+
+  // Private typing (only the recipient sees it)
+  socket.on('typing:private', async ({ to }) => {
+    try {
+      const toUser = await User.findOne({ username: to }).lean();
+      if (!toUser) return;
+      io.to(`user:${toUser._id}`).emit('typing:private', { from: username, to });
+    } catch (e) {
+      console.error('typing:private error', e);
+    }
+  });
+
+  socket.on('typing:privateStop', async ({ to }) => {
+    try {
+      const toUser = await User.findOne({ username: to }).lean();
+      if (!toUser) return;
+      io.to(`user:${toUser._id}`).emit('typing:privateStop', { from: username, to });
+    } catch (e) {
+      console.error('typing:privateStop error', e);
     }
   });
 

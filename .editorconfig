@@ -1,0 +1,36 @@
+# EditorConfig helps maintain consistent coding styles between different editors and IDEs
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+max_line_length = 120
+
+# Markdown: don't trim trailing whitespace (keeps intentional line breaks)
+[*.md]
+trim_trailing_whitespace = false
+
+# JSON/JSONC
+[*.{json,jsonc}]
+indent_size = 2
+
+# YAML
+[*.{yml,yaml}]
+indent_size = 2
+
+# TypeScript/JavaScript
+[*.{ts,tsx,js,jsx,mjs,cjs}]
+indent_size = 2
+
+# HTML/CSS/SCSS
+[*.{html,css,scss}]
+indent_size = 2
+
+# Env files (keep as-is)
+[*.env]
+insert_final_newline = false
+trim_trailing_whitespace = false
