@@ -21,12 +21,20 @@
     <mat-toolbar color="primary" class="paneHeader">
       <ng-container *ngIf="!selectedUser; else privateHeader">
         <span>Public Room</span>
+        <span class="typingHint" *ngIf="typingPublicList.length">
+          •
+          <ng-container *ngFor="let u of typingPublicList; let last = last">
+            {{ u }}<span *ngIf="!last">, </span>
+          </ng-container>
+          is typing…
+        </span>
       </ng-container>
       <ng-template #privateHeader>
         <button mat-icon-button (click)="backToPublic()" matTooltip="Back to public">
           <mat-icon>arrow_back</mat-icon>
         </button>
         <span>Chat with {{ selectedUser }}</span>
+        <span class="typingHint" *ngIf="selectedUser && isTypingMap[selectedUser]">• typing…</span>
       </ng-template>
     </mat-toolbar>
 
@@ -75,7 +83,14 @@
     <form class="composer" (ngSubmit)="selectedUser ? sendPrivate() : sendPublic()">
       <mat-form-field appearance="outline" class="composerInput">
         <mat-label>{{ selectedUser ? 'Type a private message' : 'Type a public message' }}</mat-label>
-        <input matInput [(ngModel)]="message" name="msg" autocomplete="off" />
+        <input
+          matInput
+          [(ngModel)]="message"
+          name="msg"
+          autocomplete="off"
+          (input)="selectedUser ? onPrivateInput() : onPublicInput()"
+          (blur)="onInputBlur()"
+        />
       </mat-form-field>
       <button mat-raised-button color="primary" type="submit">Send</button>
     </form>

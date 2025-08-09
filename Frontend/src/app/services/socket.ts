@@ -31,12 +31,11 @@ export class SocketService {
     this.socket.on('connect',    () => console.log('✅ Socket connected'));
     this.socket.on('disconnect', () => console.log('❌ Socket disconnected'));
 
-    // === Server -> Client streams ===
+    // Streams
     this.socket.on('publicMessage', (msg: ChatMessage) => {
       this.publicMessages$.next([...this.publicMessages$.value, msg]);
     });
 
-    // Only real messages from server (recipient side). Sender gets privateAck instead.
     this.socket.on('privateMessage', (msg: ChatMessage) => {
       this.privateMessages$.next([...this.privateMessages$.value, msg]);
     });
@@ -44,48 +43,54 @@ export class SocketService {
     this.socket.on('onlineUsers', (list: string[]) => {
       this.onlineUsers$.next(list || []);
     });
-
-    // We do NOT add handlers for 'privateAck' / 'messageSent' / 'messageDelivered' / 'messageRead' here,
-    // because the component will subscribe to them via onEvent<T>('eventName').
   }
 
-  // === Client -> Server ===
+  // Send
   sendPublicMessage(text: string): void {
     this.socket.emit('publicMessage', { text });
   }
 
-  // tempId lets the UI show the message immediately and later map to real DB id via privateAck
   sendPrivateMessage(to: string, text: string, tempId?: string): void {
     this.socket.emit('privateMessage', { to, text, tempId });
+  }
+
+  // Typing: public
+  typingPublicStart(): void {
+    this.socket.emit('typing:public');
+  }
+  typingPublicStop(): void {
+    this.socket.emit('typing:publicStop');
+  }
+
+  // Typing: private
+  typingPrivateStart(to: string): void {
+    this.socket.emit('typing:private', { to });
+  }
+  typingPrivateStop(to: string): void {
+    this.socket.emit('typing:privateStop', { to });
+  }
+
+  // Observe
+  getMessages(): Observable<ChatMessage[]> {
+    return this.publicMessages$.asObservable();
+  }
+  getPrivateMessages(): Observable<ChatMessage[]> {
+    return this.privateMessages$.asObservable();
+  }
+  onOnlineUsers(): Observable<string[]> {
+    return this.onlineUsers$.asObservable();
+  }
+
+  onEvent<T = any>(event: string): Observable<T> {
+    return new Observable<T>((observer) => {
+      const handler = (data: T) => observer.next(data);
+      this.socket.on(event, handler);
+      return () => this.socket.off(event, handler);
+    });
   }
 
   emitEvent(event: string, data: any): void {
     this.socket.emit(event, data);
   }
-
-  // === Observables ===
-  getMessages(): Observable<ChatMessage[]> {
-    return this.publicMessages$.asObservable();
-  }
-
-  getPrivateMessages(): Observable<ChatMessage[]> {
-    return this.privateMessages$.asObservable();
-  }
-
-  onOnlineUsers(): Observable<string[]> {
-    return this.onlineUsers$.asObservable();
-  }
-
-  // Subscribe to arbitrary socket events (acks & receipts)
-  onEvent<T = any>(event: string): Observable<T> {
-    return new Observable<T>((observer) => {
-      const handler = (data: T) => observer.next(data);
-      this.socket.on(event, handler);
-      // optional cleanup when subscriber unsubscribes
-      return () => this.socket.off(event, handler);
-    });
-  }
 }
-
-// Some tests import Socket from here; re-export to keep them happy.
 export { Socket };
