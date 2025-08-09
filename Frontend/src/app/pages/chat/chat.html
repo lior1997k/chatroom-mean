@@ -127,6 +127,15 @@
         />
       </mat-form-field>
 
+      <!-- Rec timer & pause/resume when recording -->
+      <div class="rec-indicator" *ngIf="isRecording">
+        <span class="dot"></span>
+        <span class="time">{{ recordingElapsed }}</span>
+        <button mat-icon-button type="button" (click)="togglePause()" [matTooltip]="isPaused ? 'Resume' : 'Pause'">
+          <mat-icon>{{ isPaused ? 'play_arrow' : 'pause' }}</mat-icon>
+        </button>
+      </div>
+
       <!-- Mic: click to start/stop. Dialog handles preview -->
       <button
         mat-icon-button
@@ -196,9 +205,14 @@
 <ng-template #voicePreviewTpl>
   <div class="dialogBody voice-preview">
     <h3>Voice message</h3>
+
+    <div class="wave-wrap" *ngIf="previewWaveUrl as wurl" (click)="seekPreview($event, waveHost)" #waveHost>
+      <img [src]="wurl" alt="waveform" draggable="false" />
+    </div>
+
     <div class="voice-row">
       <mat-icon>play_circle</mat-icon>
-      <audio [src]="previewUrl!" controls></audio>
+      <audio #previewAudio [src]="previewUrl!" controls></audio>
       <span class="time">{{ (previewDurationMs/1000) | number:'1.0-1' }}s</span>
     </div>
 

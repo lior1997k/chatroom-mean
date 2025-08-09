@@ -21,9 +21,8 @@
   flex-direction: column;
   border-right: 1px solid #e0e0e0;
 }
-.rightPane {
-  border-left: 1px solid #e0e0e0;
-}
+.rightPane { border-left: 1px solid #e0e0e0; }
+
 .paneHeader {
   font-weight: bold;
   letter-spacing: 0.5px;
@@ -49,9 +48,7 @@
   margin-left: auto;
   opacity: 0.6;
 }
-.mat-nav-list a:hover button.mat-icon-button {
-  opacity: 1;
-}
+.mat-nav-list a:hover button.mat-icon-button { opacity: 1; }
 
 /* =========================================================
    MESSAGES (CENTER)
@@ -70,9 +67,7 @@
   align-items: flex-end;
   margin-bottom: 8px;
 }
-.msg.me {
-  justify-content: flex-end;
-}
+.msg.me { justify-content: flex-end; }
 
 /* Bubble */
 .bubble {
@@ -92,10 +87,7 @@
 }
 
 /* Text + meta */
-.text {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
+.text { white-space: pre-wrap; word-break: break-word; }
 .meta {
   display: flex;
   align-items: center;
@@ -103,11 +95,7 @@
   gap: 6px;
   margin-top: 4px;
 }
-.time {
-  font-size: 0.7rem;
-  color: #777;
-  text-align: right;
-}
+.time { font-size: 0.7rem; color: #777; text-align: right; }
 
 /* Username button (public) */
 .userBtn {
@@ -116,16 +104,10 @@
   margin-right: 6px;
   padding: 0;
 }
-.userBtn:hover {
-  text-decoration: underline;
-}
+.userBtn:hover { text-decoration: underline; }
 
 /* Typing hints */
-.typingHint {
-  font-size: 0.85rem;
-  margin-left: 12px;
-  opacity: 0.85;
-}
+.typingHint { font-size: 0.85rem; margin-left: 12px; opacity: 0.85; }
 
 /* =========================================================
    VOICE MESSAGE UI
@@ -135,28 +117,31 @@
   align-items: center;
   gap: 8px;
 }
-.voice-row mat-icon {
-  opacity: 0.75;
+.voice-row mat-icon { opacity: 0.75; }
+.voice-row audio { width: 220px; outline: none; }
+
+/* Waveform preview container */
+.wave-wrap {
+  width: 100%;
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 8px;
+  cursor: pointer;
 }
-.voice-row audio {
-  width: 220px;        /* adjust as you like */
-  outline: none;
+.wave-wrap img {
+  display: block;
+  width: 100%;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
-/* Voice preview dialog */
-.voice-preview .voice-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.voice-preview audio { width: 260px; }
-.voice-preview h3 {
-  margin: 0 0 8px 0;
-  font-weight: 600;
-}
-.voice-preview-dialog .mat-mdc-dialog-surface {
-  border-radius: 14px !important;
-}
+/* Voice preview dialog cosmetics */
+.voice-preview .voice-row { display: flex; align-items: center; gap: 10px; }
+.voice-preview audio { width: 320px; }
+.voice-preview h3 { margin: 0 0 8px 0; font-weight: 600; }
+.voice-preview-dialog .mat-mdc-dialog-surface { border-radius: 14px !important; }
 
 /* =========================================================
    COMPOSER (INPUT AREA)
@@ -169,88 +154,67 @@
   border-top: 1px solid #ddd;
   background: #f5f5f5;
 }
-.composerInput {
-  flex: 1;
-}
-button[type="submit"] {
+.composerInput { flex: 1; }
+button[type="submit"] { border-radius: 20px; font-weight: 500; }
+
+/* Recording indicator (timer + pause) */
+.rec-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: #fff3f3;
+  border: 1px solid #ffd9d9;
   border-radius: 20px;
-  font-weight: 500;
 }
+.rec-indicator .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #d32f2f; display: inline-block;
+  box-shadow: 0 0 0 2px rgba(211,47,47,0.2);
+}
+.rec-indicator .time { font-weight: 600; }
+
 /* Mic button visual tweak */
-.composer .mat-icon-button {
-  margin: 0 2px;
-}
+.composer .mat-icon-button { margin: 0 2px; }
 
 /* =========================================================
    RIGHT PANE
    ========================================================= */
-.rightBody {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
-}
-.rightBody .mat-form-field {
-  margin-bottom: 8px;
-}
-.muted {
-  font-size: 0.9rem;
-  color: #888;
-  text-align: center;
-  margin-top: 20px;
-}
+.rightBody { flex: 1; overflow-y: auto; padding: 8px; }
+.rightBody .mat-form-field { margin-bottom: 8px; }
+.muted { font-size: 0.9rem; color: #888; text-align: center; margin-top: 20px; }
 
 /* =========================================================
    RECEIPT ICONS (✓, ✓✓)
    ========================================================= */
-.status-icon {
-  font-size: 16px;
-  vertical-align: middle;
-  margin-left: 4px;
-}
+.status-icon { font-size: 16px; vertical-align: middle; margin-left: 4px; }
 .status-icon.sent,
-.status-icon.delivered {
-  color: gray;
-}
-.status-icon.read {
-  color: #2196f3; /* blue ticks */
-}
+.status-icon.delivered { color: gray; }
+.status-icon.read { color: #2196f3; }
 
 /* =========================================================
    SCROLLBARS
    ========================================================= */
 .messages::-webkit-scrollbar,
-.rightBody::-webkit-scrollbar {
-  width: 6px;
-}
+.rightBody::-webkit-scrollbar { width: 6px; }
 .messages::-webkit-scrollbar-thumb,
-.rightBody::-webkit-scrollbar-thumb {
-  background: rgba(63,81,181,0.3);
-  border-radius: 4px;
-}
+.rightBody::-webkit-scrollbar-thumb { background: rgba(63,81,181,0.3); border-radius: 4px; }
 .messages::-webkit-scrollbar-track,
-.rightBody::-webkit-scrollbar-track {
-  background: transparent;
-}
+.rightBody::-webkit-scrollbar-track { background: transparent; }
 
 /* =========================================================
    DIALOGS & UTIL
    ========================================================= */
-.dialogBody {
-  padding: 16px;
-}
-.dialogActions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
-}
+.dialogBody { padding: 16px; }
+.dialogActions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .w100 { width: 100%; }
 .flex-spacer { flex: 1 1 auto; }
 
 /* =========================================================
-   RESPONSIVE TWEAKS
+   RESPONSIVE
    ========================================================= */
 @media (max-width: 600px) {
   .bubble { max-width: 85%; }
   .voice-row audio { width: 200px; }
+  .voice-preview audio { width: 240px; }
 }

@@ -1,4 +1,4 @@
-import { Component, TemplateRef, ViewChild, OnDestroy } from '@angular/core';
+import { Component, TemplateRef, ViewChild, OnDestroy, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
@@ -64,16 +64,26 @@ export class ChatComponent implements OnDestroy {
   newUser = '';
   @ViewChild('startChatTpl') startChatTpl!: TemplateRef<any>;
   @ViewChild('voicePreviewTpl') voicePreviewTpl!: TemplateRef<any>;
+  @ViewChild('previewAudio') previewAudio?: ElementRef<HTMLAudioElement>;
   private voicePreviewRef?: MatDialogRef<any>;
 
   // Voice recording
   isRecording = false;
+  isPaused = false;
   private mediaRecorder!: MediaRecorder;
   private audioChunks: Blob[] = [];
   private recordStartTime = 0;
+  private pausedAccumulatedMs = 0;
+  private pauseStartedAt = 0;
+  private recTimer?: any;
+  recordingElapsed = '00:00';
+
   previewBlob: Blob | null = null;
   previewUrl: string | null = null;
   previewDurationMs = 0;
+
+  // Waveform preview
+  previewWaveUrl: string | null = null;
 
   constructor(
     private socket: SocketService,
@@ -128,14 +138,13 @@ export class ChatComponent implements OnDestroy {
 
       if (!this.users.includes(other)) this.users.unshift(other);
 
-      // If I'm looking at that thread and it's an incoming message → mark read
       if (m.from !== me && this.selectedUser === other && m.id) {
         this.socket.emitEvent('markAsRead', { id: m.id, from: m.from });
         this.updateMessageStatus(other, m.id, 'read');
       }
     });
 
-    // === ACK: tempId -> real id (convert the local echo) ===
+    // === ACK: tempId -> real id ===
     this.socket.onEvent<{ tempId: string; id: string; to: string; timestamp: string }>('privateAck')
       .subscribe((ack) => {
         if (!ack) return;
@@ -185,6 +194,7 @@ export class ChatComponent implements OnDestroy {
   ngOnDestroy(): void {
     this._stopAndReleaseStream();
     this._revokePreviewUrl();
+    if (this.recTimer) clearInterval(this.recTimer);
   }
 
   // ===== Public Chat =====
@@ -218,7 +228,6 @@ export class ChatComponent implements OnDestroy {
     this.selectedUser = username;
     this.markAllAsRead(username);
 
-    // Fetch history only once (preserve any voice/text already in memory)
     if (this.privateChats[username]?.length) return;
 
     try {
@@ -237,11 +246,10 @@ export class ChatComponent implements OnDestroy {
         }))
         .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
 
-      // merge without duplicates
       const byId = new Map<string, ChatMessage>();
       for (const m of [...existing, ...incoming]) {
         if (m.id) byId.set(m.id, m);
-        else byId.set(`${m.from}-${m.timestamp}-${m.text}`, m); // fallback
+        else byId.set(`${m.from}-${m.timestamp}-${m.text}`, m);
       }
       this.privateChats[username] = Array.from(byId.values());
 
@@ -299,7 +307,7 @@ export class ChatComponent implements OnDestroy {
     }
   }
 
-  // ===== Voice: tap-to-toggle + dialog preview =====
+  // ===== Voice: tap-to-toggle + pause/resume + dialog preview =====
   async toggleRecording() {
     if (this.isRecording) {
       this.stopRecordingToPreview();
@@ -308,36 +316,80 @@ export class ChatComponent implements OnDestroy {
     }
   }
 
+  togglePause() {
+    if (!this.isRecording || !this.mediaRecorder) return;
+    if (this.isPaused) {
+      this.mediaRecorder.resume();
+      this.isPaused = false;
+      this.pausedAccumulatedMs += Date.now() - this.pauseStartedAt;
+    } else {
+      this.mediaRecorder.pause();
+      this.isPaused = true;
+      this.pauseStartedAt = Date.now();
+    }
+  }
+
   private async startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       this.audioChunks = [];
       this.recordStartTime = Date.now();
+      this.pausedAccumulatedMs = 0;
+      this.isPaused = false;
 
       this.mediaRecorder = new MediaRecorder(stream);
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) this.audioChunks.push(event.data);
       };
       this.mediaRecorder.onstop = () => {
-        this.previewDurationMs = Date.now() - this.recordStartTime;
+        const effectiveStop = Date.now() - (this.isPaused ? (Date.now() - this.pauseStartedAt) : 0);
+        this.previewDurationMs = effectiveStop - this.recordStartTime - this.pausedAccumulatedMs;
+        if (this.previewDurationMs < 0) this.previewDurationMs = 0;
+
         this.previewBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
         this._revokePreviewUrl();
         this.previewUrl = URL.createObjectURL(this.previewBlob);
+
         this.openVoicePreviewDialog();
+
+        // draw waveform (async, no await needed)
+        this.generateWaveform(this.previewBlob)
+          .then(url => this.previewWaveUrl = url)
+          .catch(() => this.previewWaveUrl = null);
       };
 
       this.mediaRecorder.start();
       this.isRecording = true;
+      this.startRecTimer();
     } catch (err) {
       console.error('🎤 Error starting recording', err);
       alert('Microphone access denied.');
     }
   }
 
+  private startRecTimer() {
+    if (this.recTimer) clearInterval(this.recTimer);
+    this.updateElapsed();
+    this.recTimer = setInterval(() => this.updateElapsed(), 250);
+  }
+
+  private updateElapsed() {
+    if (!this.isRecording) { this.recordingElapsed = '00:00'; return; }
+    let elapsed = Date.now() - this.recordStartTime - this.pausedAccumulatedMs;
+    if (this.isPaused) elapsed -= (Date.now() - this.pauseStartedAt);
+    if (elapsed < 0) elapsed = 0;
+    const s = Math.floor(elapsed / 1000);
+    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    this.recordingElapsed = `${mm}:${ss}`;
+  }
+
   private stopRecordingToPreview() {
     if (this.mediaRecorder && this.isRecording) {
       this.mediaRecorder.stop();
       this.isRecording = false;
+      this.isPaused = false;
+      if (this.recTimer) clearInterval(this.recTimer);
       this._stopAndReleaseStream();
     }
   }
@@ -345,7 +397,7 @@ export class ChatComponent implements OnDestroy {
   private openVoicePreviewDialog() {
     if (!this.voicePreviewTpl) return;
     this.voicePreviewRef = this.dialog.open(this.voicePreviewTpl, {
-      width: '440px',
+      width: '520px',
       panelClass: 'voice-preview-dialog',
       autoFocus: false,
       restoreFocus: false
@@ -412,7 +464,68 @@ export class ChatComponent implements OnDestroy {
   private clearPreview() {
     this.previewBlob = null;
     this.previewDurationMs = 0;
+    this.previewWaveUrl = null;
     this._revokePreviewUrl();
+  }
+
+  // Waveform (draw image data URL for easy binding inside dialog)
+  private async generateWaveform(blob: Blob): Promise<string> {
+    const arrayBuf = await blob.arrayBuffer();
+    const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const audioBuf = await ac.decodeAudioData(arrayBuf);
+
+    const width = 420;
+    const height = 64;
+    const off = document.createElement('canvas');
+    off.width = width;
+    off.height = height;
+    const ctx = off.getContext('2d')!;
+
+    // background
+    ctx.fillStyle = '#fafafa';
+    ctx.fillRect(0, 0, width, height);
+
+    // midline
+    const mid = height / 2;
+    ctx.strokeStyle = '#ddd';
+    ctx.beginPath();
+    ctx.moveTo(0, mid);
+    ctx.lineTo(width, mid);
+    ctx.stroke();
+
+    // draw peaks
+    const channel = audioBuf.getChannelData(0);
+    const block = Math.floor(channel.length / width) || 1;
+
+    ctx.strokeStyle = '#3f51b5';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < width; x++) {
+      let start = x * block;
+      let end = start + block;
+      let min = 1, max = -1;
+      for (let i = start; i < end && i < channel.length; i++) {
+        const v = channel[i];
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      const y1 = mid + min * (height / 2);
+      const y2 = mid + max * (height / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + 0.5, y1);
+      ctx.lineTo(x + 0.5, y2);
+      ctx.stroke();
+    }
+
+    return off.toDataURL('image/png');
+  }
+
+  // Seek preview by clicking waveform image
+  seekPreview(ev: MouseEvent, container: HTMLElement) {
+    const audio = this.previewAudio?.nativeElement;
+    if (!audio || !audio.duration) return;
+    const rect = container.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+    audio.currentTime = ratio * audio.duration;
   }
 
   // ===== Navigation & dialogs =====
