@@ -1,0 +1,30 @@
+# === Text files: normalize to LF in repo, auto-convert on checkout as needed
+* text=auto eol=lf
+
+# === Mark common binary types so Git won't try to diff/normalize them
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+
+# === Keep lock files exact (no EOL changes)
+package-lock.json -text
+yarn.lock        -text
+pnpm-lock.yaml   -text
+
+# === Treat build outputs as generated (GitHub linguist)
+dist/** linguist-generated=true
+build/** linguist-generated=true
+Frontend/dist/** linguist-generated=true
+Backend/dist/** linguist-generated=true
+
+# === Shell & batch scripts (use LF in repo)
+*.sh  text eol=lf
+*.bash text eol=lf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
