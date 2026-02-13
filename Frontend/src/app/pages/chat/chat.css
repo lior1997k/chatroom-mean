@@ -79,6 +79,7 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  gap: 10px;
 }
 
 .loadOlderBtn {
@@ -89,7 +90,8 @@
 .msg {
   display: flex;
   align-items: flex-end;
-  margin-bottom: 8px;
+  margin-bottom: 0;
+  padding-top: 0;
 }
 
 .msg.me {
@@ -103,6 +105,27 @@
   position: relative;
   overflow: visible;
   box-shadow: 0px 2px 6px rgba(0,0,0,0.05);
+  transition: opacity 0.24s ease, transform 0.24s ease, filter 0.24s ease;
+}
+
+.bubble.is-editing {
+  box-shadow: 0 0 0 2px rgba(60, 112, 177, 0.25), 0px 2px 6px rgba(0,0,0,0.05);
+}
+
+.bubble.is-deleting {
+  opacity: 0.35;
+  transform: scale(0.98);
+  filter: blur(0.8px);
+}
+
+.bubble.was-edited {
+  animation: editedPulse 0.95s ease;
+}
+
+@keyframes editedPulse {
+  0% { box-shadow: 0 0 0 rgba(41, 128, 185, 0); }
+  35% { box-shadow: 0 0 0 3px rgba(41, 128, 185, 0.25); }
+  100% { box-shadow: 0 0 0 rgba(41, 128, 185, 0); }
 }
 
 .msg.me .bubble {
@@ -119,8 +142,132 @@
 .time {
   font-size: 0.7rem;
   color: #777;
-  margin-top: 4px;
-  text-align: right;
+}
+
+.meta {
+  margin-top: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.metaInfo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.deletedText {
+  font-style: italic;
+  color: #7c8794;
+}
+
+.editedTag {
+  font-size: 0.68rem;
+  color: #60758f;
+}
+
+.messageActions {
+  display: inline-flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.actionBtn {
+  border: 1px solid #d7e0ef;
+  background: #ffffff;
+  font-size: 0.72rem;
+  color: #3f5870;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: background-color 0.16s ease, border-color 0.16s ease, transform 0.12s ease;
+}
+
+.actionBtn:hover {
+  background: #eef4ff;
+  border-color: #b9c9e2;
+  transform: translateY(-1px);
+}
+
+.actionBtn mat-icon {
+  font-size: 14px;
+  width: 14px;
+  height: 14px;
+}
+
+.actionBtn.danger {
+  color: #b23d3d;
+  border-color: #e8cfcf;
+}
+
+.actionBtn.danger:hover {
+  background: #fff0f0;
+  border-color: #d8a9a9;
+}
+
+.editInline {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 6px;
+  border: 1px solid rgba(117, 145, 181, 0.45);
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 999px;
+  padding: 4px 5px 4px 10px;
+}
+
+.editInlineInput {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: #243548;
+  font: inherit;
+  padding: 0;
+  min-width: 80px;
+}
+
+.editInlineInput:focus {
+  outline: none;
+}
+
+.editInlineActions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.iconMini {
+  border: 1px solid #c7d6ea;
+  background: #ffffff;
+  color: #4b6078;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.iconMini mat-icon {
+  font-size: 14px;
+  width: 14px;
+  height: 14px;
+}
+
+.iconMini.primary {
+  color: #ffffff;
+  background: #3d63b3;
+  border-color: #3d63b3;
 }
 
 /* Username button in public */
@@ -252,6 +399,58 @@ button[type="submit"] {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
+}
+
+.confirmDeleteBody {
+  padding: 18px;
+  text-align: center;
+}
+
+.confirmDeleteIconWrap {
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  background: #ffeaea;
+  color: #b93434;
+  margin: 0 auto 10px;
+  display: grid;
+  place-items: center;
+}
+
+.confirmDeleteIconWrap mat-icon {
+  font-size: 24px;
+  width: 24px;
+  height: 24px;
+}
+
+.confirmDeleteBody h3 {
+  margin: 0;
+  color: #27384a;
+}
+
+.confirmDeleteBody p {
+  margin: 8px 0 12px;
+  color: #65778d;
+  font-size: 0.9rem;
+}
+
+.confirmDeletePreview {
+  background: #f5f8fd;
+  border: 1px solid #dbe4f0;
+  color: #42566b;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 0.86rem;
+  text-align: left;
+  margin-bottom: 14px;
+  max-height: 80px;
+  overflow: auto;
+}
+
+.confirmDeleteActions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
 }
 
 .w100 {

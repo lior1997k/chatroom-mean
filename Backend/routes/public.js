@@ -25,7 +25,9 @@ router.get('/', auth, async (req, res) => {
         from: m.from,
         text: m.text,
         timestamp: m.ts.toISOString(),
-        reactions: m.reactions || []
+        reactions: m.reactions || [],
+        editedAt: m.editedAt ? m.editedAt.toISOString() : null,
+        deletedAt: m.deletedAt ? m.deletedAt.toISOString() : null
       }));
 
       return res.json({ messages, hasMore: false });
@@ -49,7 +51,9 @@ router.get('/', auth, async (req, res) => {
       from: m.from,
       text: m.text,
       timestamp: m.ts.toISOString(),
-      reactions: m.reactions || []
+      reactions: m.reactions || [],
+      editedAt: m.editedAt ? m.editedAt.toISOString() : null,
+      deletedAt: m.deletedAt ? m.deletedAt.toISOString() : null
     }));
 
     res.json({ messages, hasMore });

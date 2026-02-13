@@ -15,6 +15,8 @@ const publicMessageSchema = new Schema(
       ],
       default: []
     },
+    editedAt: { type: Date, default: null },
+    deletedAt: { type: Date, default: null },
     ts: { type: Date, default: Date.now, index: true }
   },
   { timestamps: false }

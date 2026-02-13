@@ -38,6 +38,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 export class ChatComponent {
   // Composer
   message = '';
+  readonly editWindowMs = 15 * 60 * 1000;
 
   // Data
   readonly messageReactions = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
@@ -49,6 +50,8 @@ export class ChatComponent {
   users: string[] = [];
   onlineUsers: string[] = [];
   unreadCounts: Record<string, number> = {};
+  pendingDeleteIds = new Set<string>();
+  recentlyEditedIds = new Set<string>();
 
   // Typing state we SHOW about others
   isTypingPublic = new Set<string>();        // who is typing in public
@@ -74,6 +77,7 @@ export class ChatComponent {
   menuUser: string | null = null;
   showEmojiPicker = false;
   reactionPicker: { messageId: string; scope: 'public' | 'private' } | null = null;
+  editingMessage: { id: string; scope: 'public' | 'private'; text: string } | null = null;
 
   private reactionPressTimer: ReturnType<typeof setTimeout> | null = null;
   private ignoreNextDocumentClick = false;
@@ -81,6 +85,8 @@ export class ChatComponent {
   // Dialog
   newUser = '';
   @ViewChild('startChatTpl') startChatTpl!: TemplateRef<any>;
+  @ViewChild('confirmDeleteTpl') confirmDeleteTpl!: TemplateRef<any>;
+  deleteCandidate: { id: string; scope: 'public' | 'private'; preview: string } | null = null;
 
   constructor(
     private socket: SocketService,
@@ -179,6 +185,18 @@ export class ChatComponent {
       .subscribe((payload) => {
         if (!payload?.messageId) return;
         this.applyReactionUpdate(payload.scope, payload.messageId, payload.reactions || []);
+      });
+
+    this.socket.onEvent<{ scope: 'public' | 'private'; messageId: string; text: string; editedAt: string }>('messageEdited')
+      .subscribe((payload) => {
+        if (!payload?.messageId) return;
+        this.applyEditUpdate(payload.scope, payload.messageId, payload.text, payload.editedAt);
+      });
+
+    this.socket.onEvent<{ scope: 'public' | 'private'; messageId: string; deletedAt: string }>('messageDeleted')
+      .subscribe((payload) => {
+        if (!payload?.messageId) return;
+        this.applyDeleteUpdate(payload.scope, payload.messageId, payload.deletedAt);
       });
 
     // === ONLINE USERS ===
@@ -430,7 +448,11 @@ export class ChatComponent {
   }
 
   startReactionPress(message: ChatMessage, scope: 'public' | 'private', event: Event) {
-    if (!message?.id || message.id.startsWith('temp-')) return;
+    if (!message?.id || message.id.startsWith('temp-') || message.deletedAt) return;
+    if (this.isEditingMessage(message, scope)) return;
+
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('.messageActions') || target?.closest('.editInline')) return;
 
     this.cancelReactionPress();
     this.reactionPressTimer = setTimeout(() => {
@@ -451,7 +473,83 @@ export class ChatComponent {
   }
 
   visibleReactions(message: ChatMessage): Array<{ emoji: string; users: string[] }> {
+    if (message.deletedAt) return [];
     return (message.reactions || []).filter((r) => (r.users?.length || 0) > 0);
+  }
+
+  canManageMessage(message: ChatMessage): boolean {
+    return message.from === this.myUsername && !message.deletedAt;
+  }
+
+  canEditMessage(message: ChatMessage): boolean {
+    if (!this.canManageMessage(message) || !message.timestamp) return false;
+    return Date.now() - new Date(message.timestamp).getTime() <= this.editWindowMs;
+  }
+
+  editMessage(message: ChatMessage, scope: 'public' | 'private') {
+    if (!this.canEditMessage(message)) return;
+
+    this.editingMessage = {
+      id: message.id,
+      scope,
+      text: message.text || ''
+    };
+  }
+
+  deleteMessage(message: ChatMessage, scope: 'public' | 'private') {
+    if (!this.canManageMessage(message)) return;
+
+    this.deleteCandidate = {
+      id: message.id,
+      scope,
+      preview: (message.text || '').trim().slice(0, 120)
+    };
+
+    const ref = this.dialog.open(this.confirmDeleteTpl, {
+      width: '360px',
+      panelClass: 'confirmDeleteDialog'
+    });
+
+    ref.afterClosed().subscribe((confirmed: boolean) => {
+      if (!confirmed || !this.deleteCandidate) {
+        this.deleteCandidate = null;
+        return;
+      }
+
+      this.socket.deleteMessage(this.deleteCandidate.scope, this.deleteCandidate.id);
+      this.deleteCandidate = null;
+    });
+  }
+
+  isPendingDelete(message: ChatMessage): boolean {
+    return !!message?.id && this.pendingDeleteIds.has(message.id);
+  }
+
+  isEditingMessage(message: ChatMessage, scope: 'public' | 'private'): boolean {
+    return this.editingMessage?.id === message.id && this.editingMessage?.scope === scope;
+  }
+
+  saveMessageEdit(message: ChatMessage, scope: 'public' | 'private') {
+    if (!this.editingMessage || this.editingMessage.id !== message.id || this.editingMessage.scope !== scope) {
+      return;
+    }
+
+    const nextText = this.editingMessage.text.trim();
+    if (!nextText || nextText === (message.text || '').trim()) {
+      this.cancelMessageEdit();
+      return;
+    }
+
+    this.socket.editMessage(scope, message.id, nextText);
+    this.editingMessage = null;
+  }
+
+  cancelMessageEdit() {
+    this.editingMessage = null;
+  }
+
+  isRecentlyEdited(message: ChatMessage): boolean {
+    return !!message?.id && this.recentlyEditedIds.has(message.id);
   }
 
   signOut() {
@@ -567,7 +665,7 @@ export class ChatComponent {
   }
 
   toggleReaction(message: ChatMessage, scope: 'public' | 'private', emoji: string) {
-    if (!message?.id || message.id.startsWith('temp-')) return;
+    if (!message?.id || message.id.startsWith('temp-') || message.deletedAt) return;
     this.socket.reactToMessage(scope, message.id, emoji);
   }
 
@@ -750,6 +848,8 @@ export class ChatComponent {
   private normalizeMessage(message: ChatMessage): ChatMessage {
     return {
       ...message,
+      editedAt: message.editedAt || null,
+      deletedAt: message.deletedAt || null,
       reactions: (message.reactions || []).map((r) => ({
         emoji: r.emoji,
         users: Array.from(new Set(r.users || []))
@@ -779,6 +879,63 @@ export class ChatComponent {
         msg.id === messageId ? { ...msg, reactions: normalized } : msg
       );
     });
+  }
+
+  private applyEditUpdate(scope: 'public' | 'private', messageId: string, text: string, editedAt: string) {
+    const patch = (msg: ChatMessage): ChatMessage => {
+      if (msg.id !== messageId) return msg;
+      this.flagEditedAnimation(messageId);
+      return { ...msg, text, editedAt };
+    };
+
+    if (scope === 'public') {
+      this.publicMessages = this.publicMessages.map(patch);
+      if (this.editingMessage?.id === messageId && this.editingMessage.scope === 'public') {
+        this.editingMessage = null;
+      }
+      return;
+    }
+
+    Object.keys(this.privateChats).forEach((user) => {
+      this.privateChats[user] = (this.privateChats[user] || []).map(patch);
+    });
+
+    if (this.editingMessage?.id === messageId && this.editingMessage.scope === 'private') {
+      this.editingMessage = null;
+    }
+  }
+
+  private applyDeleteUpdate(scope: 'public' | 'private', messageId: string, deletedAt: string) {
+    this.pendingDeleteIds.add(messageId);
+    if (this.reactionPicker?.messageId === messageId) this.reactionPicker = null;
+
+    setTimeout(() => {
+      const patch = (msg: ChatMessage): ChatMessage => {
+        if (msg.id !== messageId) return msg;
+        return {
+          ...msg,
+          text: '',
+          reactions: [],
+          deletedAt,
+          editedAt: msg.editedAt || null
+        };
+      };
+
+      if (scope === 'public') {
+        this.publicMessages = this.publicMessages.map(patch);
+      } else {
+        Object.keys(this.privateChats).forEach((user) => {
+          this.privateChats[user] = (this.privateChats[user] || []).map(patch);
+        });
+      }
+
+      this.pendingDeleteIds.delete(messageId);
+    }, 260);
+  }
+
+  private flagEditedAnimation(messageId: string) {
+    this.recentlyEditedIds.add(messageId);
+    setTimeout(() => this.recentlyEditedIds.delete(messageId), 1100);
   }
 
   private recoverMissedMessages() {

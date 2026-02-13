@@ -5,6 +5,8 @@ export interface Message {
   text: string;
   timestamp?: string;
   reactions?: Array<{ emoji: string; users: string[] }>;
+  editedAt?: string | null;
+  deletedAt?: string | null;
 }
 
 export interface ChatMessage extends Message {
