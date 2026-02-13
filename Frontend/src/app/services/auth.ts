@@ -3,6 +3,11 @@ import { HttpClient } from '@angular/common/http';
 import { environment } from '../../environments/environment';
 import { Observable } from 'rxjs';
 
+interface JwtPayload {
+  username?: string;
+  exp?: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private apiUrl = `${environment.apiUrl}/api/user`;
@@ -19,16 +24,9 @@ export class AuthService {
   }
 
   getUsername(): string | null {
-  const token = this.getToken();
-  if (!token) return null;
-
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    return payload.username;
-    } catch (e) {
-      return null;
-    }
-  } 
+    const payload = this.getTokenPayload();
+    return payload?.username || null;
+  }
 
 
   saveToken(token: string) {
@@ -40,11 +38,36 @@ export class AuthService {
   }
 
   getPrivateChatWith(username: string): Observable<any[]> {
-  const token = this.getToken();
-  return this.http.get<any[]>(`${environment.apiUrl}/api/private/${username}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-}
+    const token = this.getToken();
+    return this.http.get<any[]>(`${environment.apiUrl}/api/private/${username}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+  }
+
+  hasValidSession(): boolean {
+    const token = this.getToken();
+    if (!token) return false;
+
+    const payload = this.getTokenPayload();
+    if (!payload?.exp) return false;
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    return payload.exp > nowSec;
+  }
+
+  getTokenPayload(): JwtPayload | null {
+    const token = this.getToken();
+    if (!token) return null;
+
+    try {
+      const parts = token.split('.');
+      if (parts.length < 2) return null;
+
+      return JSON.parse(atob(parts[1])) as JwtPayload;
+    } catch {
+      return null;
+    }
+  }
 
   logout() {
     localStorage.removeItem(this.tokenKey);

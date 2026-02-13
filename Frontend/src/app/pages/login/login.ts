@@ -1,7 +1,7 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { AuthService } from '../../services/auth';
 import { SocketService } from '../../services/socket';
 
@@ -16,12 +16,25 @@ export class LoginComponent {
   username = '';
   password = '';
   errorMessage = '';
+  infoMessage = '';
 
   constructor(
     private auth: AuthService,
     private socket: SocketService,
-    private router: Router
-  ) {}
+    private router: Router,
+    private route: ActivatedRoute
+  ) {
+    if (this.auth.hasValidSession()) {
+      this.router.navigate(['/chat']);
+    }
+
+    this.route.queryParamMap.subscribe((params) => {
+      const reason = params.get('reason');
+      this.infoMessage = reason === 'session-expired'
+        ? 'Your session expired. Please sign in again.'
+        : '';
+    });
+  }
 
   login() {
     if (!this.username || !this.password) {
@@ -31,17 +44,12 @@ export class LoginComponent {
 
     this.auth.login(this.username, this.password).subscribe({
       next: (res: any) => {
-        // Save token
         this.auth.saveToken(res.token);
-
-        // Connect socket AFTER login
         this.socket.connect();
-
-        // Navigate to chat
         this.router.navigate(['/chat']);
       },
       error: (err) => {
-        this.errorMessage = err.error?.error || 'Login failed';
+        this.errorMessage = err.error?.error?.message || err.error?.error || 'Login failed';
       }
     });
   }

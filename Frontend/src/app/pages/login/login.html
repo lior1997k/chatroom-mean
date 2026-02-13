@@ -1,22 +1,41 @@
-<h2>Login</h2>
+<section class="auth-page">
+  <div class="auth-shell">
+    <div class="brand-panel">
+      <p class="eyebrow">ChatRoom</p>
+      <h1>Welcome back</h1>
+      <p class="lead">Sign in to continue your real-time conversations.</p>
+      <ul>
+        <li>Live public room and direct messages</li>
+        <li>Delivery and read receipts</li>
+        <li>Automatic reconnect and recovery</li>
+      </ul>
+    </div>
 
-<form (ngSubmit)="login()">
-  <label>
-    Username:
-    <input type="text" [(ngModel)]="username" name="username" required />
-  </label>
+    <div class="form-card">
+      <h2>Sign in</h2>
+      <p class="subtitle">Use your username and password to access chat.</p>
 
-  <label>
-    Password:
-    <input type="password" [(ngModel)]="password" name="password" required />
-  </label>
+      <p *ngIf="infoMessage" class="notice info">{{ infoMessage }}</p>
+      <p *ngIf="errorMessage" class="notice error">{{ errorMessage }}</p>
 
-  <button type="submit">Login</button>
-</form>
+      <form (ngSubmit)="login()" class="auth-form">
+        <label class="field">
+          <span>Username</span>
+          <input type="text" [(ngModel)]="username" name="username" autocomplete="username" required />
+        </label>
 
-<p *ngIf="errorMessage" style="color: red">{{ errorMessage }}</p>
+        <label class="field">
+          <span>Password</span>
+          <input type="password" [(ngModel)]="password" name="password" autocomplete="current-password" required />
+        </label>
 
-<p>
-  Don't have an account?
-  <a routerLink="/register" style="color: blue; cursor: pointer;">Register here</a>
-</p>
+        <button type="submit" class="primary-btn">Sign in</button>
+      </form>
+
+      <p class="footnote">
+        New here?
+        <a routerLink="/register">Create an account</a>
+      </p>
+    </div>
+  </div>
+</section>
