@@ -127,17 +127,21 @@ function normalizeReactions(reactions) {
 
 function toggleReactionEntries(reactions, emoji, username) {
   const next = normalizeReactions(reactions);
-  const entry = next.find((r) => r.emoji === emoji);
+  const sameEntry = next.find((r) => r.emoji === emoji);
+  const hadSameReaction = !!sameEntry?.users.includes(username);
 
-  if (!entry) {
-    next.push({ emoji, users: [username] });
-    return next;
+  next.forEach((entry) => {
+    entry.users = (entry.users || []).filter((u) => u !== username);
+  });
+
+  if (!hadSameReaction) {
+    const target = next.find((r) => r.emoji === emoji);
+    if (target) {
+      target.users.push(username);
+    } else {
+      next.push({ emoji, users: [username] });
+    }
   }
-
-  const already = entry.users.includes(username);
-  entry.users = already
-    ? entry.users.filter((u) => u !== username)
-    : [...entry.users, username];
 
   return next.filter((r) => r.users.length > 0);
 }
