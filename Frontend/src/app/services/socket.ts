@@ -4,6 +4,7 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { AuthService } from './auth';
 import { ChatMessage } from '../models/message.model';
+import { Router } from '@angular/router';
 
 @Injectable({ providedIn: 'root' })
 export class SocketService {
@@ -13,7 +14,7 @@ export class SocketService {
   private privateMessages$ = new BehaviorSubject<ChatMessage[]>([]);
   private onlineUsers$     = new BehaviorSubject<string[]>([]);
 
-  constructor(private auth: AuthService) {}
+  constructor(private auth: AuthService, private router: Router) {}
 
   connect(): void {
     if (this.socket && this.socket.connected) return;
@@ -36,6 +37,15 @@ export class SocketService {
 
     this.socket.on('connect',    () => console.log('✅ Socket connected'));
     this.socket.on('disconnect', () => console.log('❌ Socket disconnected'));
+    this.socket.on('connect_error', (err: Error) => {
+      const msg = err?.message || '';
+      if (msg.includes('AUTH_INVALID') || msg.includes('AUTH_REQUIRED')) {
+        this.auth.logout();
+        if (!this.router.url.startsWith('/login')) {
+          this.router.navigate(['/login'], { queryParams: { reason: 'session-expired' } });
+        }
+      }
+    });
 
     // Streams
     this.socket.on('publicMessage', (msg: ChatMessage) => {
@@ -97,6 +107,11 @@ export class SocketService {
 
   emitEvent(event: string, data: any): void {
     this.socket.emit(event, data);
+  }
+
+  disconnect(): void {
+    if (!this.socket) return;
+    this.socket.disconnect();
   }
 }
 export { Socket };

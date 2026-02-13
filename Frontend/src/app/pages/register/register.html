@@ -1,23 +1,47 @@
-<h2>Register</h2>
+<section class="auth-page">
+  <div class="auth-shell">
+    <div class="brand-panel">
+      <p class="eyebrow">ChatRoom</p>
+      <h1>Create your account</h1>
+      <p class="lead">Join the room and start chatting in seconds.</p>
+      <ul>
+        <li>Public channels and direct threads</li>
+        <li>Persistent history and unread counters</li>
+        <li>Typing and delivery status included</li>
+      </ul>
+    </div>
 
-<form (ngSubmit)="register()">
-  <label>
-    Username:
-    <input type="text" [(ngModel)]="username" name="username" required />
-  </label>
+    <div class="form-card">
+      <h2>Sign up</h2>
+      <p class="subtitle">Pick a username and a secure password.</p>
 
-  <label>
-    Password:
-    <input type="password" [(ngModel)]="password" name="password" required />
-  </label>
+      <p *ngIf="infoMessage" class="notice info">{{ infoMessage }}</p>
+      <p *ngIf="error" class="notice error">{{ error }}</p>
+      <p *ngIf="success" class="notice success">{{ success }}</p>
 
-  <label>
-    Confirm Password:
-    <input type="password" [(ngModel)]="confirmPassword" name="confirmPassword" required />
-  </label>
+      <form (ngSubmit)="register()" class="auth-form">
+        <label class="field">
+          <span>Username</span>
+          <input type="text" [(ngModel)]="username" name="username" autocomplete="username" required />
+        </label>
 
-  <button type="submit">Register</button>
-</form>
+        <label class="field">
+          <span>Password</span>
+          <input type="password" [(ngModel)]="password" name="password" autocomplete="new-password" required />
+        </label>
 
-<p *ngIf="error" style="color: red">{{ error }}</p>
-<p *ngIf="success" style="color: green">{{ success }}</p>
+        <label class="field">
+          <span>Confirm password</span>
+          <input type="password" [(ngModel)]="confirmPassword" name="confirmPassword" autocomplete="new-password" required />
+        </label>
+
+        <button type="submit" class="primary-btn">Create account</button>
+      </form>
+
+      <p class="footnote">
+        Already have an account?
+        <a routerLink="/login">Sign in</a>
+      </p>
+    </div>
+  </div>
+</section>
