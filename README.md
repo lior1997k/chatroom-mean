@@ -62,6 +62,8 @@ Frontend runs on `http://localhost:4200`.
 - `POST /api/user/register` - create account
 - `POST /api/user/login` - login and receive JWT
 - `GET /api/me` - current user info (auth required)
+- `GET /api/public` - public room history with cursor pagination (auth required)
+- `GET /api/private/unread-counts` - unread DM counters by sender (auth required)
 - `GET /api/private/:username` - private chat history (auth required)
 
 ## How to keep working on this

@@ -42,6 +42,17 @@
     <!-- Messages -->
     <div class="messages">
       <ng-container *ngIf="!selectedUser; else privateView">
+        <button
+          class="loadOlderBtn"
+          mat-stroked-button
+          type="button"
+          *ngIf="publicHasMore"
+          [disabled]="publicLoading"
+          (click)="loadOlderPublicMessages()"
+        >
+          {{ publicLoading ? 'Loading...' : 'Load older messages' }}
+        </button>
+
         <div class="msg" *ngFor="let m of publicMessages" [class.me]="m.from === myUsername">
           <button mat-button class="userBtn"
                   [matMenuTriggerFor]="userMenu"

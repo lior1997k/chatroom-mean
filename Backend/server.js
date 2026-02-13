@@ -8,10 +8,12 @@ require('dotenv').config();
 
 const User = require('./models/User');
 const PrivateMessage = require('./models/PrivateMessage');
+const PublicMessage = require('./models/PublicMessage');
 
 const userRoutes = require('./routes/user');
 const meRoutes = require('./routes/me');
 const privateRoutes = require('./routes/private');
+const publicRoutes = require('./routes/public');
 
 const app = express();
 const server = http.createServer(app);
@@ -27,6 +29,7 @@ app.use(express.json());
 app.use('/api/user', userRoutes);
 app.use('/api/me', meRoutes);
 app.use('/api/private', privateRoutes);
+app.use('/api/public', publicRoutes);
 
 app.get('/', (_, res) => res.send('ChatRoom Server is running'));
 
@@ -107,14 +110,32 @@ io.on('connection', (socket) => {
   console.log(`✅ User connected: ${username} (${userId})`);
 
   // === PUBLIC CHAT ===
-  socket.on('publicMessage', (data) => {
-    const msg = {
-      id: `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
-      from: username,
-      text: data.text,
-      timestamp: new Date().toISOString()
-    };
-    io.emit('publicMessage', msg);
+  socket.on('publicMessage', async (data) => {
+    const text = (data?.text || '').trim();
+    if (!text) return;
+
+    try {
+      const saved = await PublicMessage.create({
+        fromId: userId,
+        from: username,
+        text
+      });
+
+      io.emit('publicMessage', {
+        id: saved._id.toString(),
+        from: saved.from,
+        text: saved.text,
+        timestamp: saved.ts.toISOString()
+      });
+    } catch (e) {
+      console.error('publicMessage error', e);
+      io.emit('publicMessage', {
+        id: `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+        from: username,
+        text,
+        timestamp: new Date().toISOString()
+      });
+    }
   });
 
   // === PRIVATE CHAT with ACK + DELIVERY ===

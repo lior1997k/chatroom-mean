@@ -40,6 +40,8 @@ export class ChatComponent {
 
   // Data
   publicMessages: ChatMessage[] = [];
+  publicHasMore = true;
+  publicLoading = false;
   privateChats: Record<string, ChatMessage[]> = {};
   users: string[] = [];
   onlineUsers: string[] = [];
@@ -82,11 +84,12 @@ export class ChatComponent {
 
     this.socket.connect();
     this.loadUnreadCounts();
+    this.loadPublicMessages();
 
     // === PUBLIC ===
     this.socket.getMessages().subscribe((messages: ChatMessage[]) => {
       const m = messages[messages.length - 1];
-      if (m) this.publicMessages.push(m);
+      if (m) this.appendPublicMessage(m);
     });
 
     // === PRIVATE (incoming only; your own sends use privateAck) ===
@@ -182,6 +185,13 @@ export class ChatComponent {
     this.socket.sendPublicMessage(text);
     this.message = '';
     this._stopPublicTypingIfActive();
+  }
+
+  loadOlderPublicMessages() {
+    if (this.publicLoading || !this.publicHasMore) return;
+
+    const oldest = this.publicMessages[0]?.timestamp;
+    this.loadPublicMessages(oldest || undefined);
   }
 
   // Called on <input> for PUBLIC view
@@ -433,5 +443,58 @@ export class ChatComponent {
       this.socket.typingPublicStop();
       this.publicTypingActive = false;
     }
+  }
+
+  private loadPublicMessages(before?: string) {
+    const token = this.auth.getToken();
+    if (!token) return;
+
+    this.publicLoading = true;
+    const headers = new HttpHeaders({ Authorization: `Bearer ${token}` });
+
+    const params = new URLSearchParams();
+    params.set('limit', '50');
+    if (before) params.set('before', before);
+
+    this.http
+      .get<{ messages: ChatMessage[]; hasMore: boolean }>(
+        `${environment.apiUrl}/api/public?${params.toString()}`,
+        { headers }
+      )
+      .subscribe({
+        next: (res) => {
+          const page = (res?.messages || []).sort(
+            (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
+          );
+
+          if (before) {
+            this.publicMessages = this.mergePublicMessages(page, this.publicMessages);
+          } else {
+            this.publicMessages = this.mergePublicMessages(this.publicMessages, page);
+          }
+
+          this.publicHasMore = !!res?.hasMore;
+          this.publicLoading = false;
+        },
+        error: () => {
+          this.publicLoading = false;
+        }
+      });
+  }
+
+  private appendPublicMessage(msg: ChatMessage) {
+    this.publicMessages = this.mergePublicMessages(this.publicMessages, [msg]);
+  }
+
+  private mergePublicMessages(base: ChatMessage[], incoming: ChatMessage[]) {
+    const merged = new Map<string, ChatMessage>();
+    [...base, ...incoming].forEach((m) => {
+      const key = m.id || `${m.from}|${m.timestamp}|${m.text}`;
+      merged.set(key, m);
+    });
+
+    return Array.from(merged.values()).sort(
+      (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
+    );
   }
 }
