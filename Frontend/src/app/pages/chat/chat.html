@@ -130,6 +130,10 @@
               </div>
             </div>
             <ng-template #publicTextView>
+              <button class="replySnippet" type="button" *ngIf="m.forwardedFrom" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToForwardTarget(m)">
+                <span class="replyAuthor">Forwarded from {{ replyAuthorLabel(m.forwardedFrom.from) }}</span>
+                <span class="replyText">{{ replyPreviewText(m.forwardedFrom.text) }}</span>
+              </button>
               <button class="replySnippet" type="button" *ngIf="m.replyTo" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToReplyTarget(m)">
                 <span class="replyAuthor">{{ replyAuthorLabel(m.replyTo.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.replyTo.text) }}</span>
@@ -140,6 +144,9 @@
               <div class="messageActions" *ngIf="!isEditingMessage(m, 'public') && !m.deletedAt">
                 <button class="actionBtn" type="button" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); replyToMessage(m, 'public')" matTooltip="Reply">
                   <mat-icon>reply</mat-icon>
+                </button>
+                <button class="actionBtn" type="button" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); openForwardDialog(m, 'public')" matTooltip="Forward">
+                  <mat-icon>forward</mat-icon>
                 </button>
                 <button class="actionBtn" type="button" *ngIf="canEditMessage(m)" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); editMessage(m, 'public')" matTooltip="Edit">
                   <mat-icon>edit</mat-icon>
@@ -209,6 +216,10 @@
               </div>
             </div>
             <ng-template #privateTextView>
+              <button class="replySnippet" type="button" *ngIf="m.forwardedFrom" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToForwardTarget(m)">
+                <span class="replyAuthor">Forwarded from {{ replyAuthorLabel(m.forwardedFrom.from) }}</span>
+                <span class="replyText">{{ replyPreviewText(m.forwardedFrom.text) }}</span>
+              </button>
               <button class="replySnippet" type="button" *ngIf="m.replyTo" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToReplyTarget(m)">
                 <span class="replyAuthor">{{ replyAuthorLabel(m.replyTo.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.replyTo.text) }}</span>
@@ -219,6 +230,9 @@
               <div class="messageActions" *ngIf="!isEditingMessage(m, 'private') && !m.deletedAt">
                 <button class="actionBtn" type="button" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); replyToMessage(m, 'private')" matTooltip="Reply">
                   <mat-icon>reply</mat-icon>
+                </button>
+                <button class="actionBtn" type="button" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); openForwardDialog(m, 'private')" matTooltip="Forward">
+                  <mat-icon>forward</mat-icon>
                 </button>
                 <button class="actionBtn" type="button" *ngIf="canEditMessage(m)" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); editMessage(m, 'private')" matTooltip="Edit">
                   <mat-icon>edit</mat-icon>
@@ -374,6 +388,40 @@
     <div class="confirmDeleteActions">
       <button mat-stroked-button type="button" (click)="dialogRef.close(false)">Cancel</button>
       <button mat-flat-button color="warn" type="button" (click)="dialogRef.close(true)">Delete</button>
+    </div>
+  </div>
+</ng-template>
+
+<ng-template #forwardTpl let-dialogRef="dialogRef">
+  <div class="dialogBody">
+    <h3>Forward Message</h3>
+
+    <div class="confirmDeletePreview" *ngIf="forwardCandidate">
+      <strong>{{ replyAuthorLabel(forwardCandidate.from) }}</strong>
+      <div>{{ replyPreviewText(forwardCandidate.text) }}</div>
+    </div>
+
+    <mat-form-field appearance="outline" class="w100">
+      <mat-label>Search recipients</mat-label>
+      <input matInput [(ngModel)]="forwardSearchTerm" />
+    </mat-form-field>
+
+    <mat-selection-list [(ngModel)]="forwardSelectedUsers" [multiple]="true" style="max-height: 180px; overflow: auto; border: 1px solid #dbe4f0; border-radius: 10px; margin-bottom: 10px;">
+      <mat-list-option *ngFor="let u of forwardRecipientOptions()" [value]="u">
+        {{ u }}
+      </mat-list-option>
+    </mat-selection-list>
+
+    <p class="muted" style="margin: 0 0 10px; text-align: left;">{{ forwardRecipientsLabel() }}</p>
+
+    <mat-form-field appearance="outline" class="w100">
+      <mat-label>Add note (optional)</mat-label>
+      <textarea matInput rows="2" [(ngModel)]="forwardNote"></textarea>
+    </mat-form-field>
+
+    <div class="dialogActions">
+      <button mat-stroked-button type="button" (click)="dialogRef.close()">Cancel</button>
+      <button mat-flat-button color="primary" type="button" (click)="confirmForward(dialogRef)">Forward</button>
     </div>
   </div>
 </ng-template>

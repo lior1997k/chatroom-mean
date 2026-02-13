@@ -73,9 +73,16 @@ export class SocketService {
     to: string,
     text: string,
     tempId?: string,
-    replyTo?: { messageId: string; from: string; text: string; scope?: 'public' | 'private' } | null
+    replyTo?: { messageId: string; from: string; text: string; scope?: 'public' | 'private' } | null,
+    forwardedFrom?: { messageId: string; from: string; text: string; scope?: 'public' | 'private' } | null
   ): void {
-    this.socket.emit('privateMessage', { to, text, tempId, replyTo: replyTo || null });
+    this.socket.emit('privateMessage', {
+      to,
+      text,
+      tempId,
+      replyTo: replyTo || null,
+      forwardedFrom: forwardedFrom || null
+    });
   }
 
   reactToMessage(scope: 'public' | 'private', messageId: string, emoji: string): void {

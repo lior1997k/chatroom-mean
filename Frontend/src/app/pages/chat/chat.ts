@@ -90,6 +90,15 @@ export class ChatComponent {
     sourceScope: 'public' | 'private';
     privatePeer: string | null;
   } | null = null;
+  forwardCandidate: {
+    messageId: string;
+    from: string;
+    text: string;
+    scope: 'public' | 'private';
+  } | null = null;
+  forwardSelectedUsers: string[] = [];
+  forwardSearchTerm = '';
+  forwardNote = '';
 
   private reactionPressTimer: ReturnType<typeof setTimeout> | null = null;
   private ignoreNextDocumentClick = false;
@@ -101,6 +110,7 @@ export class ChatComponent {
   newUser = '';
   @ViewChild('startChatTpl') startChatTpl!: TemplateRef<any>;
   @ViewChild('confirmDeleteTpl') confirmDeleteTpl!: TemplateRef<any>;
+  @ViewChild('forwardTpl') forwardTpl!: TemplateRef<any>;
   @ViewChild('searchInput') searchInput?: ElementRef<HTMLInputElement>;
   deleteCandidate: { id: string; scope: 'public' | 'private'; preview: string } | null = null;
 
@@ -416,6 +426,7 @@ export class ChatComponent {
     if (!text || !this.selectedUser) return;
 
     const replyTo = this.activeReplyPayload('private');
+    const forwardedFrom = null;
 
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     const msg: ChatMessage = {
@@ -424,6 +435,7 @@ export class ChatComponent {
       to: this.selectedUser,
       text,
       replyTo,
+      forwardedFrom,
       timestamp: new Date().toISOString(),
       status: 'sent',
       reactions: []
@@ -432,7 +444,7 @@ export class ChatComponent {
     if (!this.privateChats[this.selectedUser]) this.privateChats[this.selectedUser] = [];
     this.privateChats[this.selectedUser].push(msg);
 
-    this.socket.sendPrivateMessage(this.selectedUser, text, tempId, replyTo);
+    this.socket.sendPrivateMessage(this.selectedUser, text, tempId, replyTo, forwardedFrom);
     this.message = '';
     this.replyingTo = null;
     this.showEmojiPicker = false;
@@ -505,19 +517,110 @@ export class ChatComponent {
     this.replyingTo = null;
   }
 
-  async jumpToReplyTarget(message: ChatMessage) {
-    const targetId = message.replyTo?.messageId;
-    if (!targetId) return;
+  openForwardDialog(message: ChatMessage, scope: 'public' | 'private') {
+    if (!message?.id || message.id.startsWith('temp-') || message.deletedAt) return;
 
-    const targetScope = message.replyTo?.scope || 'private';
-    if (targetScope === 'public') {
-      if (this.selectedUser) this.backToPublic();
-      await this.ensurePublicMessageLoaded(targetId);
-      setTimeout(() => this.scrollToMessage(targetId), 50);
-      return;
+    this.forwardCandidate = {
+      messageId: message.id,
+      from: message.from,
+      text: String(message.text || '').trim().slice(0, 160),
+      scope
+    };
+    this.forwardSelectedUsers = this.selectedUser ? [this.selectedUser] : [];
+    this.forwardSearchTerm = '';
+    this.forwardNote = '';
+
+    const ref = this.dialog.open(this.forwardTpl, {
+      width: '420px'
+    });
+
+    ref.afterClosed().subscribe(() => {
+      this.forwardCandidate = null;
+      this.forwardSelectedUsers = [];
+      this.forwardSearchTerm = '';
+      this.forwardNote = '';
+    });
+  }
+
+  async confirmForward(dialogRef: MatDialogRef<any>) {
+    const candidate = this.forwardCandidate;
+    const recipients = this.forwardRecipients();
+    if (!candidate || !recipients.length) return;
+
+    const note = (this.forwardNote || '').trim();
+    const text = note || 'Forwarded message';
+
+    recipients.forEach((to) => {
+      if (!this.users.includes(to)) this.users.unshift(to);
+      if (!this.privateChats[to]) this.privateChats[to] = [];
+
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+      const msg: ChatMessage = {
+        id: tempId,
+        from: this.myUsername!,
+        to,
+        text,
+        timestamp: new Date().toISOString(),
+        status: 'sent',
+        reactions: [],
+        forwardedFrom: {
+          messageId: candidate.messageId,
+          from: candidate.from,
+          text: candidate.text,
+          scope: candidate.scope
+        }
+      };
+
+      this.privateChats[to].push(msg);
+
+      this.socket.sendPrivateMessage(to, text, tempId, null, {
+        messageId: candidate.messageId,
+        from: candidate.from,
+        text: candidate.text,
+        scope: candidate.scope
+      });
+    });
+
+    if (recipients.length === 1) {
+      await this.openChat(recipients[0]);
     }
 
-    this.scrollToMessage(targetId);
+    this.forwardCandidate = null;
+    this.forwardSelectedUsers = [];
+    this.forwardSearchTerm = '';
+    this.forwardNote = '';
+    dialogRef.close();
+  }
+
+  forwardRecipientOptions(): string[] {
+    const me = this.myUsername;
+    const merged = new Set<string>([...this.users, ...this.onlineUsers]);
+    const term = this.forwardSearchTerm.trim().toLowerCase();
+
+    return Array.from(merged)
+      .filter((u) => !!u && u !== me)
+      .filter((u) => !term || u.toLowerCase().includes(term))
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  forwardRecipientsLabel(): string {
+    const count = this.forwardRecipients().length;
+    if (!count) return 'No recipients selected';
+    return `${count} recipient${count === 1 ? '' : 's'} selected`;
+  }
+
+  private forwardRecipients(): string[] {
+    const me = this.myUsername;
+    return Array.from(new Set((this.forwardSelectedUsers || []).map((u) => String(u || '').trim())))
+      .filter((u) => !!u && u !== me);
+  }
+
+  async jumpToReplyTarget(message: ChatMessage) {
+    await this.jumpToReference(message.replyTo || null);
+  }
+
+  async jumpToForwardTarget(message: ChatMessage) {
+    await this.jumpToReference(message.forwardedFrom || null);
   }
 
   replyAuthorLabel(from: string): string {
@@ -1050,6 +1153,14 @@ export class ChatComponent {
           scope: message.replyTo.scope || 'private'
         }
         : null,
+      forwardedFrom: message.forwardedFrom?.messageId
+        ? {
+          messageId: message.forwardedFrom.messageId,
+          from: message.forwardedFrom.from || '',
+          text: String(message.forwardedFrom.text || '').trim().slice(0, 160),
+          scope: message.forwardedFrom.scope || 'private'
+        }
+        : null,
       editedAt: message.editedAt || null,
       deletedAt: message.deletedAt || null,
       reactions: (message.reactions || []).map((r) => ({
@@ -1297,6 +1408,67 @@ export class ChatComponent {
 
       if (!found) return;
       this.publicMessages = this.mergePublicMessages(this.publicMessages, [this.normalizeMessage(found)]);
+    } catch {
+      // no-op
+    }
+  }
+
+  private async jumpToReference(ref: {
+    messageId: string;
+    scope?: 'public' | 'private';
+  } | null) {
+    const targetId = ref?.messageId;
+    if (!targetId) return;
+
+    const targetScope = ref?.scope || 'private';
+    if (targetScope === 'public') {
+      if (this.selectedUser) this.backToPublic();
+      await this.ensurePublicMessageLoaded(targetId);
+      setTimeout(() => this.scrollToMessage(targetId), 50);
+      return;
+    }
+
+    const loadedChat = Object.keys(this.privateChats)
+      .find((user) => (this.privateChats[user] || []).some((m) => m.id === targetId));
+
+    if (loadedChat) {
+      if (this.selectedUser !== loadedChat) await this.openChat(loadedChat);
+      setTimeout(() => this.scrollToMessage(targetId), 50);
+      return;
+    }
+
+    await this.ensurePrivateMessageLoaded(targetId);
+    setTimeout(() => this.scrollToMessage(targetId), 50);
+  }
+
+  private async ensurePrivateMessageLoaded(messageId: string) {
+    const headers = this.getAuthHeaders();
+    if (!headers) return;
+
+    try {
+      const found = await this.http
+        .get<ChatMessage>(`${environment.apiUrl}/api/private/by-id/${messageId}`, { headers })
+        .toPromise();
+      if (!found?.id) return;
+
+      const normalized = this.normalizeMessage(found);
+      const other = normalized.from === this.myUsername ? normalized.to : normalized.from;
+      if (!other) return;
+
+      if (!this.privateChats[other]) this.privateChats[other] = [];
+
+      const merged = new Map<string, ChatMessage>();
+      [...(this.privateChats[other] || []), normalized].forEach((m) => {
+        const key = m.id || `${m.from}|${m.to}|${m.timestamp}|${m.text}`;
+        merged.set(key, m);
+      });
+
+      this.privateChats[other] = Array.from(merged.values()).sort(
+        (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
+      );
+
+      if (!this.users.includes(other)) this.users.unshift(other);
+      await this.openChat(other);
     } catch {
       // no-op
     }

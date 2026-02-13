@@ -14,6 +14,12 @@ const privateMessageSchema = new Schema(
       text: { type: String, default: null },
       scope: { type: String, enum: ['public', 'private'], default: null }
     },
+    forwardedFrom: {
+      messageId: { type: Schema.Types.ObjectId, default: null },
+      from: { type: String, default: null },
+      text: { type: String, default: null },
+      scope: { type: String, enum: ['public', 'private'], default: null }
+    },
     reactions: {
       type: [
         {
