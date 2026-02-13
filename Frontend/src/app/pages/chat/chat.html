@@ -31,32 +31,40 @@
         <span>Chat with {{ selectedUser }}</span>
         <span class="typingHint" *ngIf="selectedUser && isTypingMap[selectedUser]">• typing...</span>
       </ng-template>
-      <div class="toolbarSearch">
-        <mat-icon>search</mat-icon>
-        <input
-          type="text"
-          [(ngModel)]="messageSearchQuery"
-          (input)="onMessageSearchInput()"
-          placeholder="Search messages"
-        />
-        <button mat-icon-button type="button" *ngIf="messageSearchQuery" (click)="clearMessageSearch()">
-          <mat-icon>close</mat-icon>
-        </button>
-      </div>
       <span class="flex-spacer"></span>
+      <button mat-icon-button class="searchToggleBtn" matTooltip="Search in this room" (click)="toggleSearch()">
+        <mat-icon>{{ searchOpen ? 'close' : 'search' }}</mat-icon>
+      </button>
       <button mat-icon-button matTooltip="Sign out" (click)="signOut()">
         <mat-icon>logout</mat-icon>
       </button>
     </mat-toolbar>
 
-    <div class="searchPanel" *ngIf="messageSearchQuery.trim().length >= 2">
-      <div class="searchState" *ngIf="searchingMessages">Searching...</div>
-      <div class="searchState" *ngIf="!searchingMessages && !searchResults.length">No messages found</div>
-      <button class="searchResult" type="button" *ngFor="let r of searchResults" (click)="openSearchResult(r)">
-        <div class="searchScope">{{ resultScopeLabel(r) }}</div>
-        <div class="searchText" [innerHTML]="highlightText(r.text)"></div>
-        <div class="searchMeta">{{ r.from }} • {{ r.timestamp | date:'short' }}</div>
-      </button>
+    <div class="searchPopover" *ngIf="searchOpen">
+      <div class="toolbarSearch">
+        <mat-icon>search</mat-icon>
+        <input
+          #searchInput
+          type="text"
+          [(ngModel)]="messageSearchQuery"
+          (input)="onMessageSearchInput()"
+          placeholder="Search in this room"
+        />
+        <button mat-icon-button type="button" *ngIf="messageSearchQuery" (click)="clearMessageSearch()">
+          <mat-icon>close</mat-icon>
+        </button>
+      </div>
+
+      <div class="searchContext">{{ currentSearchContextLabel() }}</div>
+
+      <div class="searchPanel" *ngIf="messageSearchQuery.trim().length >= 2">
+        <div class="searchState" *ngIf="searchingMessages">Searching...</div>
+        <div class="searchState" *ngIf="!searchingMessages && !searchResults.length">No messages found</div>
+        <button class="searchResult" type="button" *ngFor="let r of searchResults" (click)="openSearchResult(r)">
+          <div class="searchText" [innerHTML]="highlightText(r.text)"></div>
+          <div class="searchMeta">{{ r.from }} • {{ r.timestamp | date:'short' }}</div>
+        </button>
+      </div>
     </div>
 
     <!-- Messages -->

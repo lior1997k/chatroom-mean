@@ -1,4 +1,4 @@
-import { Component, HostListener, TemplateRef, ViewChild } from '@angular/core';
+import { Component, ElementRef, HostListener, TemplateRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
@@ -96,11 +96,13 @@ export class ChatComponent {
   private reactionPressTimer: ReturnType<typeof setTimeout> | null = null;
   private ignoreNextDocumentClick = false;
   private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  searchOpen = false;
 
   // Dialog
   newUser = '';
   @ViewChild('startChatTpl') startChatTpl!: TemplateRef<any>;
   @ViewChild('confirmDeleteTpl') confirmDeleteTpl!: TemplateRef<any>;
+  @ViewChild('searchInput') searchInput?: ElementRef<HTMLInputElement>;
   deleteCandidate: { id: string; scope: 'public' | 'private'; preview: string } | null = null;
 
   constructor(
@@ -323,6 +325,7 @@ export class ChatComponent {
     this.selectedUser = username;
     this.unreadCounts[username] = 0;
     this.markAllAsRead(username);
+    this.refreshSearchForCurrentContext();
 
     if (this.historyLoaded.has(username)) return;
 
@@ -448,6 +451,7 @@ export class ChatComponent {
     this.message = '';
     this.showEmojiPicker = false;
     this.reactionPicker = null;
+    this.refreshSearchForCurrentContext();
   }
 
   toggleEmojiPicker() {
@@ -574,7 +578,18 @@ export class ChatComponent {
     this.router.navigate(['/login']);
   }
 
+  toggleSearch() {
+    this.searchOpen = !this.searchOpen;
+    if (!this.searchOpen) {
+      this.clearMessageSearch();
+      return;
+    }
+
+    setTimeout(() => this.searchInput?.nativeElement.focus(), 0);
+  }
+
   onMessageSearchInput() {
+    if (!this.searchOpen) return;
     if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
 
     const q = this.messageSearchQuery.trim();
@@ -596,18 +611,17 @@ export class ChatComponent {
   }
 
   async openSearchResult(result: SearchResult) {
-    if (result.scope === 'public') {
-      if (this.selectedUser) this.backToPublic();
-    } else {
-      await this.openChat(result.thread);
-    }
-
     setTimeout(() => this.scrollToMessage(result.id), 120);
   }
 
   resultScopeLabel(result: SearchResult): string {
     if (result.scope === 'public') return 'Public room';
     return `DM with ${result.thread}`;
+  }
+
+  currentSearchContextLabel(): string {
+    if (!this.selectedUser) return 'Searching in Public Room';
+    return `Searching in DM with ${this.selectedUser}`;
   }
 
   highlightText(text: string): string {
@@ -758,6 +772,11 @@ export class ChatComponent {
 
     if (!target.closest('.reactionPicker')) {
       this.reactionPicker = null;
+    }
+
+    if (this.searchOpen && !target.closest('.searchPopover') && !target.closest('.searchToggleBtn')) {
+      this.searchOpen = false;
+      this.clearMessageSearch();
     }
   }
 
@@ -1084,6 +1103,12 @@ export class ChatComponent {
     const params = new URLSearchParams();
     params.set('q', query);
     params.set('limit', '40');
+    if (this.selectedUser) {
+      params.set('scope', 'private');
+      params.set('thread', this.selectedUser);
+    } else {
+      params.set('scope', 'public');
+    }
 
     this.http
       .get<{ results: SearchResult[] }>(`${environment.apiUrl}/api/search?${params.toString()}`, { headers })
@@ -1096,6 +1121,13 @@ export class ChatComponent {
           this.searchingMessages = false;
         }
       });
+  }
+
+  private refreshSearchForCurrentContext() {
+    if (!this.searchOpen) return;
+    const q = this.messageSearchQuery.trim();
+    if (q.length < 2) return;
+    this.searchMessages(q);
   }
 
   private scrollToMessage(messageId: string) {

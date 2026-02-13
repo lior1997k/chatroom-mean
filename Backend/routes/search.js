@@ -15,6 +15,8 @@ router.get('/', auth, async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
     if (q.length < 2) return res.json({ query: q, results: [] });
+    const scope = (req.query.scope || '').trim();
+    const thread = (req.query.thread || '').trim();
 
     const limitRaw = Number.parseInt(req.query.limit, 10);
     const limit = Number.isNaN(limitRaw) ? 40 : Math.min(Math.max(limitRaw, 1), 100);
@@ -23,20 +25,39 @@ router.get('/', auth, async (req, res) => {
     const meId = new mongoose.Types.ObjectId(req.user.id);
     const meUsername = req.user.username;
 
-    const [publicRows, privateRows] = await Promise.all([
-      PublicMessage.find({ text: regex, deletedAt: null })
+    let publicRows = [];
+    let privateRows = [];
+
+    if (!scope || scope === 'public') {
+      publicRows = await PublicMessage.find({ text: regex, deletedAt: null })
         .sort({ ts: -1 })
         .limit(limit)
-        .lean(),
-      PrivateMessage.find({
+        .lean();
+    }
+
+    if (!scope || scope === 'private') {
+      const privateQuery = {
         text: regex,
         deletedAt: null,
         $or: [{ fromId: meId }, { toId: meId }]
-      })
+      };
+
+      if (thread) {
+        privateQuery.$and = [
+          {
+            $or: [
+              { from: meUsername, to: thread },
+              { from: thread, to: meUsername }
+            ]
+          }
+        ];
+      }
+
+      privateRows = await PrivateMessage.find(privateQuery)
         .sort({ ts: -1 })
         .limit(limit)
-        .lean()
-    ]);
+        .lean();
+    }
 
     const results = [
       ...publicRows.map((m) => ({
