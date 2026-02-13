@@ -22,17 +22,6 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatCardModule } from '@angular/material/card';
 import { MatTooltipModule } from '@angular/material/tooltip';
 
-type SearchResult = {
-  scope: 'public' | 'private';
-  id: string;
-  from: string;
-  to: string | null;
-  thread: string;
-  text: string;
-  timestamp: string;
-  editedAt?: string | null;
-};
-
 @Component({
   selector: 'app-chat',
   standalone: true,
@@ -55,8 +44,8 @@ export class ChatComponent {
   readonly messageReactions = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
   readonly composerEmojis = ['😀', '😁', '😂', '😊', '😍', '🤝', '👍', '🔥', '🎉', '💬'];
   messageSearchQuery = '';
-  searchResults: SearchResult[] = [];
-  searchingMessages = false;
+  searchMatchIds: string[] = [];
+  currentSearchMatchIndex = -1;
   publicMessages: ChatMessage[] = [];
   publicHasMore = true;
   publicLoading = false;
@@ -593,9 +582,9 @@ export class ChatComponent {
     if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
 
     const q = this.messageSearchQuery.trim();
-    if (q.length < 2) {
-      this.searchResults = [];
-      this.searchingMessages = false;
+    if (!q) {
+      this.searchMatchIds = [];
+      this.currentSearchMatchIndex = -1;
       return;
     }
 
@@ -606,22 +595,30 @@ export class ChatComponent {
 
   clearMessageSearch() {
     this.messageSearchQuery = '';
-    this.searchResults = [];
-    this.searchingMessages = false;
+    this.searchMatchIds = [];
+    this.currentSearchMatchIndex = -1;
   }
 
-  async openSearchResult(result: SearchResult) {
-    setTimeout(() => this.scrollToMessage(result.id), 120);
+  nextSearchMatch() {
+    if (!this.searchMatchIds.length) return;
+    this.currentSearchMatchIndex = (this.currentSearchMatchIndex + 1) % this.searchMatchIds.length;
+    this.scrollToMessage(this.searchMatchIds[this.currentSearchMatchIndex]);
   }
 
-  resultScopeLabel(result: SearchResult): string {
-    if (result.scope === 'public') return 'Public room';
-    return `DM with ${result.thread}`;
+  prevSearchMatch() {
+    if (!this.searchMatchIds.length) return;
+    this.currentSearchMatchIndex = (this.currentSearchMatchIndex - 1 + this.searchMatchIds.length) % this.searchMatchIds.length;
+    this.scrollToMessage(this.searchMatchIds[this.currentSearchMatchIndex]);
   }
 
-  currentSearchContextLabel(): string {
-    if (!this.selectedUser) return 'Searching in Public Room';
-    return `Searching in DM with ${this.selectedUser}`;
+  currentSearchPositionLabel(): string {
+    if (!this.searchMatchIds.length || this.currentSearchMatchIndex < 0) return '0/0';
+    return `${this.currentSearchMatchIndex + 1}/${this.searchMatchIds.length}`;
+  }
+
+  isCurrentSearchMatch(message: ChatMessage): boolean {
+    if (!message?.id || this.currentSearchMatchIndex < 0) return false;
+    return this.searchMatchIds[this.currentSearchMatchIndex] === message.id;
   }
 
   highlightText(text: string): string {
@@ -774,7 +771,10 @@ export class ChatComponent {
       this.reactionPicker = null;
     }
 
-    if (this.searchOpen && !target.closest('.searchPopover') && !target.closest('.searchToggleBtn')) {
+    if (
+      this.searchOpen &&
+      !target.closest('.searchShell')
+    ) {
       this.searchOpen = false;
       this.clearMessageSearch();
     }
@@ -1095,38 +1095,30 @@ export class ChatComponent {
   }
 
   private searchMessages(query: string) {
-    const headers = this.getAuthHeaders();
-    if (!headers) return;
+    const q = query.toLowerCase();
+    this.searchMatchIds = this.currentThread()
+      .filter((m) => !!m.id)
+      .filter((m) => String(m.text ?? '').toLowerCase().includes(q))
+      .map((m) => m.id);
 
-    this.searchingMessages = true;
-
-    const params = new URLSearchParams();
-    params.set('q', query);
-    params.set('limit', '40');
-    if (this.selectedUser) {
-      params.set('scope', 'private');
-      params.set('thread', this.selectedUser);
-    } else {
-      params.set('scope', 'public');
+    if (!this.searchMatchIds.length) {
+      this.currentSearchMatchIndex = -1;
+      return;
     }
 
-    this.http
-      .get<{ results: SearchResult[] }>(`${environment.apiUrl}/api/search?${params.toString()}`, { headers })
-      .subscribe({
-        next: (res) => {
-          this.searchResults = res?.results || [];
-          this.searchingMessages = false;
-        },
-        error: () => {
-          this.searchingMessages = false;
-        }
-      });
+    this.currentSearchMatchIndex = 0;
+    this.scrollToMessage(this.searchMatchIds[0]);
   }
 
   private refreshSearchForCurrentContext() {
     if (!this.searchOpen) return;
     const q = this.messageSearchQuery.trim();
-    if (q.length < 2) return;
+    if (!q) {
+      this.searchMatchIds = [];
+      this.currentSearchMatchIndex = -1;
+      return;
+    }
+
     this.searchMessages(q);
   }
 

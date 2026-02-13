@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 
 const auth = require('../middleware/auth');
+const User = require('../models/User');
 const PublicMessage = require('../models/PublicMessage');
 const PrivateMessage = require('../models/PrivateMessage');
 
@@ -43,11 +44,15 @@ router.get('/', auth, async (req, res) => {
       };
 
       if (thread) {
+        const threadUser = await User.findOne({ username: thread }).select('_id').lean();
+        if (!threadUser) return res.json({ query: q, results: [] });
+
+        const threadId = new mongoose.Types.ObjectId(threadUser._id);
         privateQuery.$and = [
           {
             $or: [
-              { from: meUsername, to: thread },
-              { from: thread, to: meUsername }
+              { fromId: meId, toId: threadId },
+              { fromId: threadId, toId: meId }
             ]
           }
         ];

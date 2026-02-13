@@ -32,40 +32,44 @@
         <span class="typingHint" *ngIf="selectedUser && isTypingMap[selectedUser]">• typing...</span>
       </ng-template>
       <span class="flex-spacer"></span>
-      <button mat-icon-button class="searchToggleBtn" matTooltip="Search in this room" (click)="toggleSearch()">
-        <mat-icon>{{ searchOpen ? 'close' : 'search' }}</mat-icon>
-      </button>
+      <div class="searchShell">
+        <button
+          mat-icon-button
+          class="searchIconBtn"
+          *ngIf="!searchOpen"
+          matTooltip="Search in this room"
+          (mousedown)="$event.stopPropagation()"
+          (click)="$event.stopPropagation(); toggleSearch()"
+        >
+          <mat-icon>search</mat-icon>
+        </button>
+
+        <div class="toolbarSearch" *ngIf="searchOpen">
+          <mat-icon>search</mat-icon>
+          <input
+            #searchInput
+            type="text"
+            [(ngModel)]="messageSearchQuery"
+            (input)="onMessageSearchInput()"
+            (keydown.enter)="nextSearchMatch()"
+            placeholder="Search in this room"
+          />
+          <span class="searchCount">{{ currentSearchPositionLabel() }}</span>
+          <button mat-icon-button type="button" (click)="prevSearchMatch()" [disabled]="searchMatchIds.length < 2" matTooltip="Previous">
+            <mat-icon>keyboard_arrow_up</mat-icon>
+          </button>
+          <button mat-icon-button type="button" (click)="nextSearchMatch()" [disabled]="searchMatchIds.length < 2" matTooltip="Next">
+            <mat-icon>keyboard_arrow_down</mat-icon>
+          </button>
+          <button mat-icon-button type="button" (click)="toggleSearch()">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+      </div>
       <button mat-icon-button matTooltip="Sign out" (click)="signOut()">
         <mat-icon>logout</mat-icon>
       </button>
     </mat-toolbar>
-
-    <div class="searchPopover" *ngIf="searchOpen">
-      <div class="toolbarSearch">
-        <mat-icon>search</mat-icon>
-        <input
-          #searchInput
-          type="text"
-          [(ngModel)]="messageSearchQuery"
-          (input)="onMessageSearchInput()"
-          placeholder="Search in this room"
-        />
-        <button mat-icon-button type="button" *ngIf="messageSearchQuery" (click)="clearMessageSearch()">
-          <mat-icon>close</mat-icon>
-        </button>
-      </div>
-
-      <div class="searchContext">{{ currentSearchContextLabel() }}</div>
-
-      <div class="searchPanel" *ngIf="messageSearchQuery.trim().length >= 2">
-        <div class="searchState" *ngIf="searchingMessages">Searching...</div>
-        <div class="searchState" *ngIf="!searchingMessages && !searchResults.length">No messages found</div>
-        <button class="searchResult" type="button" *ngFor="let r of searchResults" (click)="openSearchResult(r)">
-          <div class="searchText" [innerHTML]="highlightText(r.text)"></div>
-          <div class="searchMeta">{{ r.from }} • {{ r.timestamp | date:'short' }}</div>
-        </button>
-      </div>
-    </div>
 
     <!-- Messages -->
     <div class="messages">
@@ -91,6 +95,7 @@
           <mat-card
             class="bubble"
             [attr.data-msg-id]="m.id"
+            [class.searchCurrent]="isCurrentSearchMatch(m)"
             [class.is-editing]="isEditingMessage(m, 'public')"
             [class.is-deleting]="isPendingDelete(m)"
             [class.was-edited]="isRecentlyEdited(m)"
@@ -161,6 +166,7 @@
           <mat-card
             class="bubble"
             [attr.data-msg-id]="m.id"
+            [class.searchCurrent]="isCurrentSearchMatch(m)"
             [class.is-editing]="isEditingMessage(m, 'private')"
             [class.is-deleting]="isPendingDelete(m)"
             [class.was-edited]="isRecentlyEdited(m)"
