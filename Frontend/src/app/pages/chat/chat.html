@@ -60,6 +60,8 @@
           </button>
           <mat-card
             class="bubble"
+            [class.is-deleting]="isPendingDelete(m)"
+            [class.was-edited]="isRecentlyEdited(m)"
             (mousedown)="startReactionPress(m, 'public', $event)"
             (mouseup)="cancelReactionPress()"
             (mouseleave)="cancelReactionPress()"
@@ -67,8 +69,13 @@
             (touchend)="cancelReactionPress()"
             (touchcancel)="cancelReactionPress()"
           >
-            <div class="text">{{ m.text }}</div>
+            <div class="text" [class.deletedText]="m.deletedAt">{{ m.deletedAt ? 'Message deleted' : m.text }}</div>
             <div class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</div>
+            <div class="editedTag" *ngIf="m.editedAt && !m.deletedAt">edited</div>
+            <div class="messageActions" *ngIf="canManageMessage(m)">
+              <button class="actionBtn" type="button" *ngIf="canEditMessage(m)" (click)="editMessage(m, 'public')">Edit</button>
+              <button class="actionBtn danger" type="button" (click)="deleteMessage(m, 'public')">Delete</button>
+            </div>
             <div class="reactionsSummary" *ngIf="visibleReactions(m).length">
               <span class="reactionPill" *ngFor="let r of visibleReactions(m)">
                 {{ r.emoji }} {{ r.users.length }}
@@ -94,6 +101,8 @@
         <div class="msg" *ngFor="let m of currentThread()" [class.me]="m.from === myUsername">
           <mat-card
             class="bubble"
+            [class.is-deleting]="isPendingDelete(m)"
+            [class.was-edited]="isRecentlyEdited(m)"
             (mousedown)="startReactionPress(m, 'private', $event)"
             (mouseup)="cancelReactionPress()"
             (mouseleave)="cancelReactionPress()"
@@ -101,13 +110,18 @@
             (touchend)="cancelReactionPress()"
             (touchcancel)="cancelReactionPress()"
           >
-            <div class="text">{{ m.text }}</div>
+            <div class="text" [class.deletedText]="m.deletedAt">{{ m.deletedAt ? 'Message deleted' : m.text }}</div>
             <div class="meta">
               <span class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</span>
               <mat-icon *ngIf="m.from === myUsername" class="status-icon"
                         [ngClass]="m.status">
                 {{ m.status === 'sent' ? 'done' : 'done_all' }}
               </mat-icon>
+            </div>
+            <div class="editedTag" *ngIf="m.editedAt && !m.deletedAt">edited</div>
+            <div class="messageActions" *ngIf="canManageMessage(m)">
+              <button class="actionBtn" type="button" *ngIf="canEditMessage(m)" (click)="editMessage(m, 'private')">Edit</button>
+              <button class="actionBtn danger" type="button" (click)="deleteMessage(m, 'private')">Delete</button>
             </div>
             <div class="reactionsSummary" *ngIf="visibleReactions(m).length">
               <span class="reactionPill" *ngFor="let r of visibleReactions(m)">

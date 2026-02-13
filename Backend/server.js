@@ -49,6 +49,7 @@ app.get('/api/users/:username/exists', async (req, res) => {
 const socketsByUserId = new Map();
 const onlineUsernames = new Set();
 const TYPING_TTL_MS = 3000;
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
 const publicTypingActive = new Set();
 const publicTypingTimers = new Map();
 const privateTypingStates = new Map();
@@ -146,6 +147,11 @@ function toggleReactionEntries(reactions, emoji, username) {
   return next.filter((r) => r.users.length > 0);
 }
 
+function isEditable(ts) {
+  if (!ts) return false;
+  return Date.now() - new Date(ts).getTime() <= EDIT_WINDOW_MS;
+}
+
 io.use((socket, next) => {
   const token = socket.handshake.query.token || socket.handshake.auth?.token;
   if (!token) return next(new Error('AUTH_REQUIRED'));
@@ -223,7 +229,9 @@ io.on('connection', (socket) => {
         from: saved.from,
         text: saved.text,
         timestamp: saved.ts.toISOString(),
-        reactions: []
+        reactions: [],
+        editedAt: null,
+        deletedAt: null
       });
     } catch (e) {
       console.error('publicMessage error', e);
@@ -232,7 +240,9 @@ io.on('connection', (socket) => {
         from: username,
         text,
         timestamp: new Date().toISOString(),
-        reactions: []
+        reactions: [],
+        editedAt: null,
+        deletedAt: null
       });
     }
   });
@@ -266,7 +276,14 @@ io.on('connection', (socket) => {
       if (toUser) {
         const recipientRoom = `user:${toUser._id}`;
         io.to(recipientRoom).emit('privateMessage', {
-          id: savedId, from: username, to, text, timestamp, reactions: []
+          id: savedId,
+          from: username,
+          to,
+          text,
+          timestamp,
+          reactions: [],
+          editedAt: null,
+          deletedAt: null
         });
         emitUnreadCounts(toUser._id.toString());
         io.to(myRoom).emit('messageDelivered', { id: savedId, to });
@@ -303,7 +320,7 @@ io.on('connection', (socket) => {
 
       if (scope === 'public') {
         const message = await PublicMessage.findById(messageId);
-        if (!message) return;
+        if (!message || message.deletedAt) return;
 
         message.reactions = toggleReactionEntries(message.reactions, emoji, username);
         await message.save();
@@ -318,7 +335,7 @@ io.on('connection', (socket) => {
 
       if (scope === 'private') {
         const message = await PrivateMessage.findById(messageId);
-        if (!message) return;
+        if (!message || message.deletedAt) return;
 
         const participants = [String(message.fromId), String(message.toId)];
         if (!participants.includes(String(userId))) return;
@@ -337,6 +354,107 @@ io.on('connection', (socket) => {
       }
     } catch (e) {
       console.error('messageReaction error', e);
+    }
+  });
+
+  socket.on('editMessage', async ({ scope, messageId, text }) => {
+    try {
+      const nextText = (text || '').trim();
+      if (!messageId || !nextText) return;
+
+      if (scope === 'public') {
+        const message = await PublicMessage.findById(messageId);
+        if (!message) return;
+
+        if (String(message.fromId) !== String(userId)) return;
+        if (message.deletedAt || !isEditable(message.ts)) return;
+
+        message.text = nextText;
+        message.editedAt = new Date();
+        await message.save();
+
+        io.emit('messageEdited', {
+          scope: 'public',
+          messageId,
+          text: message.text,
+          editedAt: message.editedAt.toISOString()
+        });
+        return;
+      }
+
+      if (scope === 'private') {
+        const message = await PrivateMessage.findById(messageId);
+        if (!message) return;
+
+        if (String(message.fromId) !== String(userId)) return;
+        if (message.deletedAt || !isEditable(message.ts)) return;
+
+        message.text = nextText;
+        message.editedAt = new Date();
+        await message.save();
+
+        const payload = {
+          scope: 'private',
+          messageId,
+          text: message.text,
+          editedAt: message.editedAt.toISOString()
+        };
+
+        io.to(`user:${message.fromId}`).emit('messageEdited', payload);
+        io.to(`user:${message.toId}`).emit('messageEdited', payload);
+      }
+    } catch (e) {
+      console.error('editMessage error', e);
+    }
+  });
+
+  socket.on('deleteMessage', async ({ scope, messageId }) => {
+    try {
+      if (!messageId) return;
+
+      if (scope === 'public') {
+        const message = await PublicMessage.findById(messageId);
+        if (!message) return;
+
+        if (String(message.fromId) !== String(userId)) return;
+        if (message.deletedAt) return;
+
+        message.text = '';
+        message.deletedAt = new Date();
+        message.reactions = [];
+        await message.save();
+
+        io.emit('messageDeleted', {
+          scope: 'public',
+          messageId,
+          deletedAt: message.deletedAt.toISOString()
+        });
+        return;
+      }
+
+      if (scope === 'private') {
+        const message = await PrivateMessage.findById(messageId);
+        if (!message) return;
+
+        if (String(message.fromId) !== String(userId)) return;
+        if (message.deletedAt) return;
+
+        message.text = '';
+        message.deletedAt = new Date();
+        message.reactions = [];
+        await message.save();
+
+        const payload = {
+          scope: 'private',
+          messageId,
+          deletedAt: message.deletedAt.toISOString()
+        };
+
+        io.to(`user:${message.fromId}`).emit('messageDeleted', payload);
+        io.to(`user:${message.toId}`).emit('messageDeleted', payload);
+      }
+    } catch (e) {
+      console.error('deleteMessage error', e);
     }
   });
 

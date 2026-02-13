@@ -74,6 +74,14 @@ export class SocketService {
     this.socket.emit('messageReaction', { scope, messageId, emoji });
   }
 
+  editMessage(scope: 'public' | 'private', messageId: string, text: string): void {
+    this.socket.emit('editMessage', { scope, messageId, text });
+  }
+
+  deleteMessage(scope: 'public' | 'private', messageId: string): void {
+    this.socket.emit('deleteMessage', { scope, messageId });
+  }
+
   // Typing: public
   typingPublicStart(): void {
     this.socket.emit('typing:public');

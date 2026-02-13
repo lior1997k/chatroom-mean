@@ -103,6 +103,23 @@
   position: relative;
   overflow: visible;
   box-shadow: 0px 2px 6px rgba(0,0,0,0.05);
+  transition: opacity 0.24s ease, transform 0.24s ease, filter 0.24s ease;
+}
+
+.bubble.is-deleting {
+  opacity: 0.35;
+  transform: scale(0.98);
+  filter: blur(0.8px);
+}
+
+.bubble.was-edited {
+  animation: editedPulse 0.95s ease;
+}
+
+@keyframes editedPulse {
+  0% { box-shadow: 0 0 0 rgba(41, 128, 185, 0); }
+  35% { box-shadow: 0 0 0 3px rgba(41, 128, 185, 0.25); }
+  100% { box-shadow: 0 0 0 rgba(41, 128, 185, 0); }
 }
 
 .msg.me .bubble {
@@ -121,6 +138,37 @@
   color: #777;
   margin-top: 4px;
   text-align: right;
+}
+
+.deletedText {
+  font-style: italic;
+  color: #7c8794;
+}
+
+.editedTag {
+  font-size: 0.68rem;
+  color: #60758f;
+  margin-top: 3px;
+}
+
+.messageActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.actionBtn {
+  border: 0;
+  background: transparent;
+  font-size: 0.72rem;
+  color: #556f88;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.actionBtn.danger {
+  color: #b94242;
 }
 
 /* Username button in public */
