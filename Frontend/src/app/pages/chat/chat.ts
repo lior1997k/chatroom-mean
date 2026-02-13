@@ -1,4 +1,4 @@
-import { Component, TemplateRef, ViewChild } from '@angular/core';
+import { Component, HostListener, TemplateRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
@@ -73,6 +73,9 @@ export class ChatComponent {
   selectedUser: string | null = null;
   menuUser: string | null = null;
   showEmojiPicker = false;
+  reactionPicker: { messageId: string; scope: 'public' | 'private' } | null = null;
+
+  private reactionPressTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Dialog
   newUser = '';
@@ -216,6 +219,7 @@ export class ChatComponent {
   }
 
   ngOnDestroy() {
+    this.cancelReactionPress();
     this.clearTypingIdleTimer();
     this._stopPublicTypingIfActive();
 
@@ -237,6 +241,7 @@ export class ChatComponent {
     this.socket.sendPublicMessage(text);
     this.message = '';
     this.showEmojiPicker = false;
+    this.reactionPicker = null;
     this._stopPublicTypingIfActive();
   }
 
@@ -387,6 +392,7 @@ export class ChatComponent {
     this.socket.sendPrivateMessage(this.selectedUser, text, tempId);
     this.message = '';
     this.showEmojiPicker = false;
+    this.reactionPicker = null;
 
     // stop private typing after send
     if (this.privateTypingActiveFor === this.selectedUser) {
@@ -406,6 +412,7 @@ export class ChatComponent {
     this.selectedUser = null;
     this.message = '';
     this.showEmojiPicker = false;
+    this.reactionPicker = null;
   }
 
   toggleEmojiPicker() {
@@ -419,6 +426,30 @@ export class ChatComponent {
     } else {
       this.onPublicInput();
     }
+  }
+
+  startReactionPress(message: ChatMessage, scope: 'public' | 'private', event: Event) {
+    if (!message?.id || message.id.startsWith('temp-')) return;
+
+    this.cancelReactionPress();
+    this.reactionPressTimer = setTimeout(() => {
+      this.reactionPicker = { messageId: message.id, scope };
+      event.preventDefault();
+    }, 420);
+  }
+
+  cancelReactionPress() {
+    if (!this.reactionPressTimer) return;
+    clearTimeout(this.reactionPressTimer);
+    this.reactionPressTimer = null;
+  }
+
+  isReactionPickerOpen(message: ChatMessage, scope: 'public' | 'private'): boolean {
+    return this.reactionPicker?.messageId === message.id && this.reactionPicker?.scope === scope;
+  }
+
+  visibleReactions(message: ChatMessage): Array<{ emoji: string; users: string[] }> {
+    return (message.reactions || []).filter((r) => (r.users?.length || 0) > 0);
   }
 
   signOut() {
@@ -548,6 +579,20 @@ export class ChatComponent {
     if (!me) return false;
     const item = (message.reactions || []).find((r) => r.emoji === emoji);
     return !!item?.users?.includes(me);
+  }
+
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: Event) {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+
+    if (!target.closest('.emojiPicker') && !target.closest('.emojiTrigger')) {
+      this.showEmojiPicker = false;
+    }
+
+    if (!target.closest('.reactionPicker')) {
+      this.reactionPicker = null;
+    }
   }
 
   private loadUnreadCounts() {

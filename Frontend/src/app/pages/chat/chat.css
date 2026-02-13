@@ -101,6 +101,7 @@
   border-radius: 16px;
   max-width: 65%;
   position: relative;
+  overflow: visible;
   box-shadow: 0px 2px 6px rgba(0,0,0,0.05);
 }
 
@@ -147,15 +148,22 @@
   flex: 1;
 }
 
-.emojiWrap {
+.composerFieldWrap {
   position: relative;
-  display: flex;
-  align-items: center;
+  flex: 1;
+}
+
+.composerFieldWrap .composerInput {
+  width: 100%;
+}
+
+.emojiTrigger {
+  font-size: 1.05rem;
 }
 
 .emojiPicker {
   position: absolute;
-  bottom: 42px;
+  bottom: 56px;
   right: 0;
   width: 220px;
   background: #fff;
@@ -266,31 +274,57 @@ button[type="submit"] {
   opacity: 0.85;
 }
 
-.reactionsRow {
+.reactionsSummary {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
   margin-top: 8px;
 }
 
-.reactionChip {
+.reactionPill {
   border: 1px solid #d6dce8;
-  background: #f7f9ff;
+  background: #eef3ff;
   border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 0.8rem;
+  padding: 2px 7px;
+  font-size: 0.76rem;
+  color: #324455;
+}
+
+.reactionPicker {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 6px;
+  background: #ffffff;
+  border: 1px solid #d9e2f2;
+  border-radius: 999px;
+  padding: 6px;
+  display: flex;
+  gap: 6px;
+  box-shadow: 0 12px 26px rgba(25, 39, 64, 0.2);
+  z-index: 6;
+}
+
+.reactionOption {
+  border: 1px solid transparent;
+  background: #f4f7ff;
+  border-radius: 999px;
+  min-width: 34px;
+  height: 32px;
+  padding: 0 8px;
+  font-size: 0.95rem;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 4px;
 }
 
-.reactionChip.active {
-  border-color: #3f51b5;
+.reactionOption.active {
+  border-color: #3e56b4;
   background: #e8ecff;
 }
 
-.reactionChip .count {
+.reactionOption span {
   color: #3d4a5a;
   font-weight: 600;
+  font-size: 0.72rem;
 }
