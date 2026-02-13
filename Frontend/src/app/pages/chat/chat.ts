@@ -22,6 +22,8 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatCardModule } from '@angular/material/card';
 import { MatTooltipModule } from '@angular/material/tooltip';
 
+const DRAFTS_STORAGE_KEY = 'chatroom:composerDrafts';
+
 @Component({
   selector: 'app-chat',
   standalone: true,
@@ -55,6 +57,7 @@ export class ChatComponent {
   unreadCounts: Record<string, number> = {};
   pendingDeleteIds = new Set<string>();
   recentlyEditedIds = new Set<string>();
+  draftsByContext: Record<string, string> = {};
 
   // Typing state we SHOW about others
   isTypingPublic = new Set<string>();        // who is typing in public
@@ -130,6 +133,8 @@ export class ChatComponent {
     }
 
     this.socket.connect();
+    this.loadDraftsFromStorage();
+    this.message = this.draftForContext(null);
     this.loadUnreadCounts();
     this.loadPublicMessages();
 
@@ -287,6 +292,7 @@ export class ChatComponent {
     const replyTo = this.activeReplyPayload('public');
     this.socket.sendPublicMessage(text, replyTo);
     this.message = '';
+    this.clearDraftForContext(null);
     this.replyingTo = null;
     this.showEmojiPicker = false;
     this.reactionPicker = null;
@@ -303,6 +309,7 @@ export class ChatComponent {
   // Called on <input> for PUBLIC view
   onPublicInput() {
     if (this.selectedUser) return; // only in public
+    this.saveDraftForContext(null, this.message);
 
     const hasText = this.message.trim().length > 0;
 
@@ -324,6 +331,8 @@ export class ChatComponent {
 
   // ===== Private Chat =====
   async openChat(username: string) {
+    this.saveDraftForContext(this.selectedUser, this.message);
+
     // switching views → stop public typing if active
     this._stopPublicTypingIfActive();
 
@@ -334,6 +343,7 @@ export class ChatComponent {
     }
 
     this.selectedUser = username;
+    this.message = this.draftForContext(username);
     if (this.replyingTo?.scope !== 'private' || this.replyingTo?.privatePeer !== username) this.replyingTo = null;
     this.unreadCounts[username] = 0;
     this.markAllAsRead(username);
@@ -385,6 +395,7 @@ export class ChatComponent {
   // Called on <input> for PRIVATE view
   onPrivateInput() {
     if (!this.selectedUser) return;
+    this.saveDraftForContext(this.selectedUser, this.message);
 
     const to = this.selectedUser;
     const hasText = this.message.trim().length > 0;
@@ -446,6 +457,7 @@ export class ChatComponent {
 
     this.socket.sendPrivateMessage(this.selectedUser, text, tempId, replyTo, forwardedFrom);
     this.message = '';
+    this.clearDraftForContext(this.selectedUser);
     this.replyingTo = null;
     this.showEmojiPicker = false;
     this.reactionPicker = null;
@@ -464,10 +476,11 @@ export class ChatComponent {
       this.privateTypingActiveFor = null;
     }
 
+    this.saveDraftForContext(this.selectedUser, this.message);
     this.clearTypingIdleTimer();
     this.selectedUser = null;
     this.replyingTo = null;
-    this.message = '';
+    this.message = this.draftForContext(null);
     this.showEmojiPicker = false;
     this.reactionPicker = null;
     this.refreshSearchForCurrentContext();
@@ -904,6 +917,12 @@ export class ChatComponent {
   lastText(u: string): string {
     const arr = this.privateChats[u] || [];
     return arr.length ? arr[arr.length - 1].text : '';
+  }
+
+  draftPreview(u: string): string {
+    const draft = this.draftForContext(u);
+    if (!draft) return '';
+    return draft.length > 26 ? `${draft.slice(0, 26)}...` : draft;
   }
 
   currentThread(): ChatMessage[] {
@@ -1382,6 +1401,67 @@ export class ChatComponent {
 
   private escapeRegex(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private contextKey(user: string | null): string {
+    return user ? `dm:${user}` : 'public';
+  }
+
+  private draftForContext(user: string | null): string {
+    return this.draftsByContext[this.contextKey(user)] || '';
+  }
+
+  private saveDraftForContext(user: string | null, value: string) {
+    const key = this.contextKey(user);
+    const next = String(value || '').slice(0, 1000);
+
+    if (!next.trim()) {
+      if (!this.draftsByContext[key]) return;
+      delete this.draftsByContext[key];
+      this.persistDraftsToStorage();
+      return;
+    }
+
+    if (this.draftsByContext[key] === next) return;
+    this.draftsByContext[key] = next;
+    this.persistDraftsToStorage();
+  }
+
+  private clearDraftForContext(user: string | null) {
+    const key = this.contextKey(user);
+    if (!this.draftsByContext[key]) return;
+    delete this.draftsByContext[key];
+    this.persistDraftsToStorage();
+  }
+
+  private loadDraftsFromStorage() {
+    try {
+      const raw = localStorage.getItem(DRAFTS_STORAGE_KEY);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (!parsed || typeof parsed !== 'object') return;
+
+      this.draftsByContext = Object.entries(parsed).reduce((acc, [k, v]) => {
+        if (typeof v === 'string' && v.trim()) acc[k] = v.slice(0, 1000);
+        return acc;
+      }, {} as Record<string, string>);
+    } catch {
+      this.draftsByContext = {};
+    }
+  }
+
+  private persistDraftsToStorage() {
+    try {
+      if (!Object.keys(this.draftsByContext).length) {
+        localStorage.removeItem(DRAFTS_STORAGE_KEY);
+        return;
+      }
+
+      localStorage.setItem(DRAFTS_STORAGE_KEY, JSON.stringify(this.draftsByContext));
+    } catch {
+      // no-op
+    }
   }
 
   private activeReplyPayload(scope: 'public' | 'private') {

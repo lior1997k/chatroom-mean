@@ -5,11 +5,14 @@
     <mat-toolbar color="primary" class="paneHeader">Private</mat-toolbar>
 
     <mat-nav-list>
-      <a mat-list-item *ngFor="let u of users" [class.active]="u === selectedUser" (click)="openChat(u)">
-        <mat-icon matListItemIcon>person</mat-icon>
-        <div matListItemTitle>{{ u }}</div>
-        <div matListItemLine>{{ lastText(u) }}</div>
-        <span class="unreadBadge" *ngIf="unreadCount(u) > 0">{{ unreadCount(u) }}</span>
+        <a mat-list-item *ngFor="let u of users" [class.active]="u === selectedUser" (click)="openChat(u)">
+          <mat-icon matListItemIcon>person</mat-icon>
+          <div matListItemTitle>{{ u }}</div>
+          <div matListItemLine *ngIf="draftPreview(u); else lastMsgLine"><strong>Draft:</strong> {{ draftPreview(u) }}</div>
+          <ng-template #lastMsgLine>
+            <div matListItemLine>{{ lastText(u) }}</div>
+          </ng-template>
+          <span class="unreadBadge" *ngIf="unreadCount(u) > 0">{{ unreadCount(u) }}</span>
         <button mat-icon-button color="warn" (click)="$event.stopPropagation(); removePrivateChat(u)" matTooltip="Remove chat">
           <mat-icon>delete</mat-icon>
         </button>
