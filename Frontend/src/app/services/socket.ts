@@ -18,6 +18,11 @@ export class SocketService {
   connect(): void {
     if (this.socket && this.socket.connected) return;
 
+    if (this.socket && !this.socket.connected) {
+      this.socket.connect();
+      return;
+    }
+
     const token = this.auth.getToken();
     if (!token) {
       console.error('❌ No token available for socket connection');
@@ -25,7 +30,8 @@ export class SocketService {
     }
 
     this.socket = io(environment.apiUrl, {
-      query: { token }
+      query: { token },
+      reconnection: true
     });
 
     this.socket.on('connect',    () => console.log('✅ Socket connected'));

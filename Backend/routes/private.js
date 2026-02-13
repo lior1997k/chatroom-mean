@@ -45,11 +45,21 @@ router.get('/:username', auth, async (req, res) => {
     const other = await User.findOne({ username: req.params.username });
     if (!other) return res.json([]);
 
-    const msgs = await PrivateMessage.find({
+    const query = {
       $or: [{ fromId: meId, toId: other._id }, { fromId: other._id, toId: meId }]
-    })
+    };
+
+    if (req.query.since) {
+      const since = new Date(req.query.since);
+      if (Number.isNaN(since.getTime())) {
+        return res.status(400).json({ error: 'Invalid since timestamp' });
+      }
+      query.ts = { $gt: since };
+    }
+
+    const msgs = await PrivateMessage.find(query)
     .sort({ ts: 1 })
-    .limit(100)
+    .limit(req.query.since ? 200 : 100)
     .lean();
 
     res.json(msgs.map(m => ({

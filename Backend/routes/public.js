@@ -9,6 +9,27 @@ router.get('/', auth, async (req, res) => {
     const limitRaw = Number.parseInt(req.query.limit, 10);
     const limit = Number.isNaN(limitRaw) ? 50 : Math.min(Math.max(limitRaw, 1), 100);
 
+    if (req.query.since) {
+      const since = new Date(req.query.since);
+      if (Number.isNaN(since.getTime())) {
+        return res.status(400).json({ error: 'Invalid since timestamp' });
+      }
+
+      const docs = await PublicMessage.find({ ts: { $gt: since } })
+        .sort({ ts: 1 })
+        .limit(200)
+        .lean();
+
+      const messages = docs.map((m) => ({
+        id: m._id.toString(),
+        from: m.from,
+        text: m.text,
+        timestamp: m.ts.toISOString()
+      }));
+
+      return res.json({ messages, hasMore: false });
+    }
+
     const query = {};
     if (req.query.before) {
       const before = new Date(req.query.before);
