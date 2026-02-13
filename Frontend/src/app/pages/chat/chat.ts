@@ -41,6 +41,7 @@ export class ChatComponent {
 
   // Data
   readonly messageReactions = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
+  readonly composerEmojis = ['😀', '😁', '😂', '😊', '😍', '🤝', '👍', '🔥', '🎉', '💬'];
   publicMessages: ChatMessage[] = [];
   publicHasMore = true;
   publicLoading = false;
@@ -71,6 +72,7 @@ export class ChatComponent {
   // View state
   selectedUser: string | null = null;
   menuUser: string | null = null;
+  showEmojiPicker = false;
 
   // Dialog
   newUser = '';
@@ -234,6 +236,7 @@ export class ChatComponent {
     if (!text) return;
     this.socket.sendPublicMessage(text);
     this.message = '';
+    this.showEmojiPicker = false;
     this._stopPublicTypingIfActive();
   }
 
@@ -383,6 +386,7 @@ export class ChatComponent {
 
     this.socket.sendPrivateMessage(this.selectedUser, text, tempId);
     this.message = '';
+    this.showEmojiPicker = false;
 
     // stop private typing after send
     if (this.privateTypingActiveFor === this.selectedUser) {
@@ -401,6 +405,20 @@ export class ChatComponent {
     this.clearTypingIdleTimer();
     this.selectedUser = null;
     this.message = '';
+    this.showEmojiPicker = false;
+  }
+
+  toggleEmojiPicker() {
+    this.showEmojiPicker = !this.showEmojiPicker;
+  }
+
+  addEmoji(emoji: string) {
+    this.message += emoji;
+    if (this.selectedUser) {
+      this.onPrivateInput();
+    } else {
+      this.onPublicInput();
+    }
   }
 
   signOut() {

@@ -147,6 +147,40 @@
   flex: 1;
 }
 
+.emojiWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.emojiPicker {
+  position: absolute;
+  bottom: 42px;
+  right: 0;
+  width: 220px;
+  background: #fff;
+  border: 1px solid #d8deea;
+  border-radius: 12px;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  box-shadow: 0 10px 28px rgba(20, 31, 51, 0.16);
+  z-index: 5;
+}
+
+.emojiBtn {
+  border: 0;
+  background: #f4f7ff;
+  border-radius: 8px;
+  height: 30px;
+  cursor: pointer;
+}
+
+.emojiBtn:hover {
+  background: #e3ebff;
+}
+
 button[type="submit"] {
   border-radius: 20px;
   font-weight: 500;

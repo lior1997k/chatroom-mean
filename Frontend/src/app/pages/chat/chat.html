@@ -126,6 +126,19 @@
           (blur)="onInputBlur()"
         />
       </mat-form-field>
+      <div class="emojiWrap">
+        <button mat-stroked-button type="button" (click)="toggleEmojiPicker()">Emoji</button>
+        <div class="emojiPicker" *ngIf="showEmojiPicker">
+          <button
+            class="emojiBtn"
+            type="button"
+            *ngFor="let emoji of composerEmojis"
+            (click)="addEmoji(emoji)"
+          >
+            {{ emoji }}
+          </button>
+        </div>
+      </div>
       <button mat-raised-button color="primary" type="submit">Send</button>
     </form>
   </mat-sidenav-content>
