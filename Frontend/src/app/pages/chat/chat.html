@@ -32,6 +32,40 @@
         <span class="typingHint" *ngIf="selectedUser && isTypingMap[selectedUser]">• typing...</span>
       </ng-template>
       <span class="flex-spacer"></span>
+      <div class="searchShell">
+        <button
+          mat-icon-button
+          class="searchIconBtn"
+          *ngIf="!searchOpen"
+          matTooltip="Search in this room"
+          (mousedown)="$event.stopPropagation()"
+          (click)="$event.stopPropagation(); toggleSearch()"
+        >
+          <mat-icon>search</mat-icon>
+        </button>
+
+        <div class="toolbarSearch" *ngIf="searchOpen">
+          <mat-icon>search</mat-icon>
+          <input
+            #searchInput
+            type="text"
+            [(ngModel)]="messageSearchQuery"
+            (input)="onMessageSearchInput()"
+            (keydown.enter)="nextSearchMatch()"
+            placeholder="Search in this room"
+          />
+          <span class="searchCount">{{ currentSearchPositionLabel() }}</span>
+          <button mat-icon-button type="button" (click)="prevSearchMatch()" [disabled]="searchMatchIds.length < 2" matTooltip="Previous">
+            <mat-icon>keyboard_arrow_up</mat-icon>
+          </button>
+          <button mat-icon-button type="button" (click)="nextSearchMatch()" [disabled]="searchMatchIds.length < 2" matTooltip="Next">
+            <mat-icon>keyboard_arrow_down</mat-icon>
+          </button>
+          <button mat-icon-button type="button" (click)="toggleSearch()">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+      </div>
       <button mat-icon-button matTooltip="Sign out" (click)="signOut()">
         <mat-icon>logout</mat-icon>
       </button>
@@ -60,6 +94,8 @@
           </button>
           <mat-card
             class="bubble"
+            [attr.data-msg-id]="m.id"
+            [class.searchCurrent]="isCurrentSearchMatch(m)"
             [class.is-editing]="isEditingMessage(m, 'public')"
             [class.is-deleting]="isPendingDelete(m)"
             [class.was-edited]="isRecentlyEdited(m)"
@@ -88,7 +124,7 @@
               </div>
             </div>
             <ng-template #publicTextView>
-              <div class="text" [class.deletedText]="m.deletedAt">{{ m.deletedAt ? 'Message deleted' : m.text }}</div>
+              <div class="text" [class.deletedText]="m.deletedAt" [innerHTML]="m.deletedAt ? 'Message deleted' : highlightText(m.text)"></div>
             </ng-template>
             <div class="meta">
               <div class="messageActions" *ngIf="canManageMessage(m) && !isEditingMessage(m, 'public')">
@@ -129,6 +165,8 @@
         <div class="msg" *ngFor="let m of currentThread()" [class.me]="m.from === myUsername">
           <mat-card
             class="bubble"
+            [attr.data-msg-id]="m.id"
+            [class.searchCurrent]="isCurrentSearchMatch(m)"
             [class.is-editing]="isEditingMessage(m, 'private')"
             [class.is-deleting]="isPendingDelete(m)"
             [class.was-edited]="isRecentlyEdited(m)"
@@ -157,7 +195,7 @@
               </div>
             </div>
             <ng-template #privateTextView>
-              <div class="text" [class.deletedText]="m.deletedAt">{{ m.deletedAt ? 'Message deleted' : m.text }}</div>
+              <div class="text" [class.deletedText]="m.deletedAt" [innerHTML]="m.deletedAt ? 'Message deleted' : highlightText(m.text)"></div>
             </ng-template>
             <div class="meta">
               <div class="messageActions" *ngIf="canManageMessage(m) && !isEditingMessage(m, 'private')">

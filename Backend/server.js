@@ -14,6 +14,7 @@ const userRoutes = require('./routes/user');
 const meRoutes = require('./routes/me');
 const privateRoutes = require('./routes/private');
 const publicRoutes = require('./routes/public');
+const searchRoutes = require('./routes/search');
 
 const app = express();
 const server = http.createServer(app);
@@ -30,6 +31,7 @@ app.use('/api/user', userRoutes);
 app.use('/api/me', meRoutes);
 app.use('/api/private', privateRoutes);
 app.use('/api/public', publicRoutes);
+app.use('/api/search', searchRoutes);
 
 app.get('/', (_, res) => res.send('ChatRoom Server is running'));
 

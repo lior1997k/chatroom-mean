@@ -1,4 +1,4 @@
-import { Component, HostListener, TemplateRef, ViewChild } from '@angular/core';
+import { Component, ElementRef, HostListener, TemplateRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
@@ -43,6 +43,9 @@ export class ChatComponent {
   // Data
   readonly messageReactions = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
   readonly composerEmojis = ['😀', '😁', '😂', '😊', '😍', '🤝', '👍', '🔥', '🎉', '💬'];
+  messageSearchQuery = '';
+  searchMatchIds: string[] = [];
+  currentSearchMatchIndex = -1;
   publicMessages: ChatMessage[] = [];
   publicHasMore = true;
   publicLoading = false;
@@ -81,11 +84,14 @@ export class ChatComponent {
 
   private reactionPressTimer: ReturnType<typeof setTimeout> | null = null;
   private ignoreNextDocumentClick = false;
+  private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  searchOpen = false;
 
   // Dialog
   newUser = '';
   @ViewChild('startChatTpl') startChatTpl!: TemplateRef<any>;
   @ViewChild('confirmDeleteTpl') confirmDeleteTpl!: TemplateRef<any>;
+  @ViewChild('searchInput') searchInput?: ElementRef<HTMLInputElement>;
   deleteCandidate: { id: string; scope: 'public' | 'private'; preview: string } | null = null;
 
   constructor(
@@ -239,6 +245,7 @@ export class ChatComponent {
 
   ngOnDestroy() {
     this.cancelReactionPress();
+    if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
     this.clearTypingIdleTimer();
     this._stopPublicTypingIfActive();
 
@@ -307,6 +314,7 @@ export class ChatComponent {
     this.selectedUser = username;
     this.unreadCounts[username] = 0;
     this.markAllAsRead(username);
+    this.refreshSearchForCurrentContext();
 
     if (this.historyLoaded.has(username)) return;
 
@@ -432,6 +440,7 @@ export class ChatComponent {
     this.message = '';
     this.showEmojiPicker = false;
     this.reactionPicker = null;
+    this.refreshSearchForCurrentContext();
   }
 
   toggleEmojiPicker() {
@@ -556,6 +565,69 @@ export class ChatComponent {
     this.socket.disconnect();
     this.auth.logout();
     this.router.navigate(['/login']);
+  }
+
+  toggleSearch() {
+    this.searchOpen = !this.searchOpen;
+    if (!this.searchOpen) {
+      this.clearMessageSearch();
+      return;
+    }
+
+    setTimeout(() => this.searchInput?.nativeElement.focus(), 0);
+  }
+
+  onMessageSearchInput() {
+    if (!this.searchOpen) return;
+    if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
+
+    const q = this.messageSearchQuery.trim();
+    if (!q) {
+      this.searchMatchIds = [];
+      this.currentSearchMatchIndex = -1;
+      return;
+    }
+
+    this.searchDebounceTimer = setTimeout(() => {
+      this.searchMessages(q);
+    }, 220);
+  }
+
+  clearMessageSearch() {
+    this.messageSearchQuery = '';
+    this.searchMatchIds = [];
+    this.currentSearchMatchIndex = -1;
+  }
+
+  nextSearchMatch() {
+    if (!this.searchMatchIds.length) return;
+    this.currentSearchMatchIndex = (this.currentSearchMatchIndex + 1) % this.searchMatchIds.length;
+    this.scrollToMessage(this.searchMatchIds[this.currentSearchMatchIndex]);
+  }
+
+  prevSearchMatch() {
+    if (!this.searchMatchIds.length) return;
+    this.currentSearchMatchIndex = (this.currentSearchMatchIndex - 1 + this.searchMatchIds.length) % this.searchMatchIds.length;
+    this.scrollToMessage(this.searchMatchIds[this.currentSearchMatchIndex]);
+  }
+
+  currentSearchPositionLabel(): string {
+    if (!this.searchMatchIds.length || this.currentSearchMatchIndex < 0) return '0/0';
+    return `${this.currentSearchMatchIndex + 1}/${this.searchMatchIds.length}`;
+  }
+
+  isCurrentSearchMatch(message: ChatMessage): boolean {
+    if (!message?.id || this.currentSearchMatchIndex < 0) return false;
+    return this.searchMatchIds[this.currentSearchMatchIndex] === message.id;
+  }
+
+  highlightText(text: string): string {
+    const safe = this.escapeHtml(text || '');
+    const q = this.messageSearchQuery.trim();
+    if (q.length < 2) return safe;
+
+    const re = new RegExp(this.escapeRegex(q), 'gi');
+    return safe.replace(re, (m) => `<mark>${m}</mark>`);
   }
 
   openDmFromSidebar(u: string) {
@@ -697,6 +769,14 @@ export class ChatComponent {
 
     if (!target.closest('.reactionPicker')) {
       this.reactionPicker = null;
+    }
+
+    if (
+      this.searchOpen &&
+      !target.closest('.searchShell')
+    ) {
+      this.searchOpen = false;
+      this.clearMessageSearch();
     }
   }
 
@@ -1012,5 +1092,59 @@ export class ChatComponent {
     if (!token) return null;
 
     return new HttpHeaders({ Authorization: `Bearer ${token}` });
+  }
+
+  private searchMessages(query: string) {
+    const q = query.toLowerCase();
+    this.searchMatchIds = this.currentThread()
+      .filter((m) => !!m.id)
+      .filter((m) => String(m.text ?? '').toLowerCase().includes(q))
+      .map((m) => m.id);
+
+    if (!this.searchMatchIds.length) {
+      this.currentSearchMatchIndex = -1;
+      return;
+    }
+
+    this.currentSearchMatchIndex = 0;
+    this.scrollToMessage(this.searchMatchIds[0]);
+  }
+
+  private refreshSearchForCurrentContext() {
+    if (!this.searchOpen) return;
+    const q = this.messageSearchQuery.trim();
+    if (!q) {
+      this.searchMatchIds = [];
+      this.currentSearchMatchIndex = -1;
+      return;
+    }
+
+    this.searchMessages(q);
+  }
+
+  private scrollToMessage(messageId: string) {
+    const container = document.querySelector('.messages') as HTMLElement | null;
+    if (!container) return;
+
+    const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(messageId) : messageId;
+    const el = container.querySelector(`[data-msg-id="${escaped}"]`) as HTMLElement | null;
+    if (!el) return;
+
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('jumpFlash');
+    setTimeout(() => el.classList.remove('jumpFlash'), 1000);
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 }
