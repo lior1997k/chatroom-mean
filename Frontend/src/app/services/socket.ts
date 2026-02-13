@@ -108,5 +108,10 @@ export class SocketService {
   emitEvent(event: string, data: any): void {
     this.socket.emit(event, data);
   }
+
+  disconnect(): void {
+    if (!this.socket) return;
+    this.socket.disconnect();
+  }
 }
 export { Socket };

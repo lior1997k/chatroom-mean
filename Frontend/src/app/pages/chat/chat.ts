@@ -2,6 +2,7 @@ import { Component, TemplateRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { Router } from '@angular/router';
 
 import { SocketService } from '../../services/socket';
 import { AuthService } from '../../services/auth';
@@ -78,6 +79,7 @@ export class ChatComponent {
     private socket: SocketService,
     private auth: AuthService,
     private http: HttpClient,
+    private router: Router,
     public dialog: MatDialog
   ) {}
 
@@ -391,6 +393,12 @@ export class ChatComponent {
     this.clearTypingIdleTimer();
     this.selectedUser = null;
     this.message = '';
+  }
+
+  signOut() {
+    this.socket.disconnect();
+    this.auth.logout();
+    this.router.navigate(['/login']);
   }
 
   openDmFromSidebar(u: string) {

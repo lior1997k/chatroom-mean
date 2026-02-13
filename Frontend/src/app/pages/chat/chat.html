@@ -31,6 +31,10 @@
         <span>Chat with {{ selectedUser }}</span>
         <span class="typingHint" *ngIf="selectedUser && isTypingMap[selectedUser]">• typing...</span>
       </ng-template>
+      <span class="flex-spacer"></span>
+      <button mat-icon-button matTooltip="Sign out" (click)="signOut()">
+        <mat-icon>logout</mat-icon>
+      </button>
     </mat-toolbar>
 
     <!-- Messages -->
