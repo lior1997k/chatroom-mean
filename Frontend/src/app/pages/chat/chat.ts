@@ -60,6 +60,7 @@ export class ChatComponent {
   private publicTypingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
   private privateTypingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
   private historyLoaded = new Set<string>();
+  private hasSocketConnected = false;
 
   // Filtering
   searchTerm = '';
@@ -90,6 +91,16 @@ export class ChatComponent {
     this.socket.connect();
     this.loadUnreadCounts();
     this.loadPublicMessages();
+
+    this.socket.onEvent('connect').subscribe(() => {
+      if (!this.hasSocketConnected) {
+        this.hasSocketConnected = true;
+        return;
+      }
+
+      this.recoverMissedMessages();
+      this.loadUnreadCounts();
+    });
 
     // === PUBLIC ===
     this.socket.getMessages().subscribe((messages: ChatMessage[]) => {
@@ -622,5 +633,78 @@ export class ChatComponent {
     return Array.from(merged.values()).sort(
       (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
     );
+  }
+
+  private recoverMissedMessages() {
+    this.recoverPublicMessages();
+
+    Array.from(this.historyLoaded).forEach((username) => {
+      this.recoverPrivateMessages(username);
+    });
+  }
+
+  private recoverPublicMessages() {
+    const since = this.publicMessages[this.publicMessages.length - 1]?.timestamp;
+    if (!since) {
+      this.loadPublicMessages();
+      return;
+    }
+
+    const headers = this.getAuthHeaders();
+    if (!headers) return;
+
+    const params = new URLSearchParams();
+    params.set('since', since);
+
+    this.http
+      .get<{ messages: ChatMessage[] }>(`${environment.apiUrl}/api/public?${params.toString()}`, { headers })
+      .subscribe({
+        next: (res) => {
+          const incoming = res?.messages || [];
+          this.publicMessages = this.mergePublicMessages(this.publicMessages, incoming);
+        },
+        error: () => {}
+      });
+  }
+
+  private recoverPrivateMessages(username: string) {
+    const arr = this.privateChats[username] || [];
+    const since = arr[arr.length - 1]?.timestamp;
+
+    const headers = this.getAuthHeaders();
+    if (!headers) return;
+
+    const params = new URLSearchParams();
+    if (since) params.set('since', since);
+    const query = params.toString();
+    const url = query
+      ? `${environment.apiUrl}/api/private/${username}?${query}`
+      : `${environment.apiUrl}/api/private/${username}`;
+
+    this.http
+      .get<ChatMessage[]>(url, { headers })
+      .subscribe({
+        next: (incoming) => {
+          const merged = new Map<string, ChatMessage>();
+          [...arr, ...(incoming || [])].forEach((m) => {
+            const key = m.id || `${m.from}|${m.to}|${m.timestamp}|${m.text}`;
+            merged.set(key, m);
+          });
+
+          this.privateChats[username] = Array.from(merged.values()).sort(
+            (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
+          );
+
+          if (!this.users.includes(username)) this.users.unshift(username);
+        },
+        error: () => {}
+      });
+  }
+
+  private getAuthHeaders(): HttpHeaders | null {
+    const token = this.auth.getToken();
+    if (!token) return null;
+
+    return new HttpHeaders({ Authorization: `Bearer ${token}` });
   }
 }
