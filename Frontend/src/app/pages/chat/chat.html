@@ -60,6 +60,7 @@
           </button>
           <mat-card
             class="bubble"
+            [class.is-editing]="isEditingMessage(m, 'public')"
             [class.is-deleting]="isPendingDelete(m)"
             [class.was-edited]="isRecentlyEdited(m)"
             (mousedown)="startReactionPress(m, 'public', $event)"
@@ -69,12 +70,39 @@
             (touchend)="cancelReactionPress()"
             (touchcancel)="cancelReactionPress()"
           >
-            <div class="text" [class.deletedText]="m.deletedAt">{{ m.deletedAt ? 'Message deleted' : m.text }}</div>
-            <div class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</div>
-            <div class="editedTag" *ngIf="m.editedAt && !m.deletedAt">edited</div>
-            <div class="messageActions" *ngIf="canManageMessage(m)">
-              <button class="actionBtn" type="button" *ngIf="canEditMessage(m)" (click)="editMessage(m, 'public')">Edit</button>
-              <button class="actionBtn danger" type="button" (click)="deleteMessage(m, 'public')">Delete</button>
+            <div class="editInline" *ngIf="isEditingMessage(m, 'public'); else publicTextView">
+              <input
+                class="editInlineInput"
+                [(ngModel)]="editingMessage!.text"
+                maxlength="500"
+                (keydown.enter)="saveMessageEdit(m, 'public')"
+                (keydown.escape)="cancelMessageEdit()"
+              />
+              <div class="editInlineActions">
+                <button class="iconMini" type="button" (click)="cancelMessageEdit()" matTooltip="Cancel">
+                  <mat-icon>close</mat-icon>
+                </button>
+                <button class="iconMini primary" type="button" (click)="saveMessageEdit(m, 'public')" matTooltip="Save">
+                  <mat-icon>check</mat-icon>
+                </button>
+              </div>
+            </div>
+            <ng-template #publicTextView>
+              <div class="text" [class.deletedText]="m.deletedAt">{{ m.deletedAt ? 'Message deleted' : m.text }}</div>
+            </ng-template>
+            <div class="meta">
+              <div class="messageActions" *ngIf="canManageMessage(m) && !isEditingMessage(m, 'public')">
+                <button class="actionBtn" type="button" *ngIf="canEditMessage(m)" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); editMessage(m, 'public')" matTooltip="Edit">
+                  <mat-icon>edit</mat-icon>
+                </button>
+                <button class="actionBtn danger" type="button" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); deleteMessage(m, 'public')" matTooltip="Delete">
+                  <mat-icon>delete</mat-icon>
+                </button>
+              </div>
+              <div class="metaInfo">
+                <span class="editedTag" *ngIf="m.editedAt && !m.deletedAt">edited</span>
+                <span class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</span>
+              </div>
             </div>
             <div class="reactionsSummary" *ngIf="visibleReactions(m).length">
               <span class="reactionPill" *ngFor="let r of visibleReactions(m)">
@@ -101,6 +129,7 @@
         <div class="msg" *ngFor="let m of currentThread()" [class.me]="m.from === myUsername">
           <mat-card
             class="bubble"
+            [class.is-editing]="isEditingMessage(m, 'private')"
             [class.is-deleting]="isPendingDelete(m)"
             [class.was-edited]="isRecentlyEdited(m)"
             (mousedown)="startReactionPress(m, 'private', $event)"
@@ -110,18 +139,43 @@
             (touchend)="cancelReactionPress()"
             (touchcancel)="cancelReactionPress()"
           >
-            <div class="text" [class.deletedText]="m.deletedAt">{{ m.deletedAt ? 'Message deleted' : m.text }}</div>
-            <div class="meta">
-              <span class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</span>
-              <mat-icon *ngIf="m.from === myUsername" class="status-icon"
-                        [ngClass]="m.status">
-                {{ m.status === 'sent' ? 'done' : 'done_all' }}
-              </mat-icon>
+            <div class="editInline" *ngIf="isEditingMessage(m, 'private'); else privateTextView">
+              <input
+                class="editInlineInput"
+                [(ngModel)]="editingMessage!.text"
+                maxlength="500"
+                (keydown.enter)="saveMessageEdit(m, 'private')"
+                (keydown.escape)="cancelMessageEdit()"
+              />
+              <div class="editInlineActions">
+                <button class="iconMini" type="button" (click)="cancelMessageEdit()" matTooltip="Cancel">
+                  <mat-icon>close</mat-icon>
+                </button>
+                <button class="iconMini primary" type="button" (click)="saveMessageEdit(m, 'private')" matTooltip="Save">
+                  <mat-icon>check</mat-icon>
+                </button>
+              </div>
             </div>
-            <div class="editedTag" *ngIf="m.editedAt && !m.deletedAt">edited</div>
-            <div class="messageActions" *ngIf="canManageMessage(m)">
-              <button class="actionBtn" type="button" *ngIf="canEditMessage(m)" (click)="editMessage(m, 'private')">Edit</button>
-              <button class="actionBtn danger" type="button" (click)="deleteMessage(m, 'private')">Delete</button>
+            <ng-template #privateTextView>
+              <div class="text" [class.deletedText]="m.deletedAt">{{ m.deletedAt ? 'Message deleted' : m.text }}</div>
+            </ng-template>
+            <div class="meta">
+              <div class="messageActions" *ngIf="canManageMessage(m) && !isEditingMessage(m, 'private')">
+                <button class="actionBtn" type="button" *ngIf="canEditMessage(m)" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); editMessage(m, 'private')" matTooltip="Edit">
+                  <mat-icon>edit</mat-icon>
+                </button>
+                <button class="actionBtn danger" type="button" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); deleteMessage(m, 'private')" matTooltip="Delete">
+                  <mat-icon>delete</mat-icon>
+                </button>
+              </div>
+              <div class="metaInfo">
+                <span class="editedTag" *ngIf="m.editedAt && !m.deletedAt">edited</span>
+                <span class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</span>
+                <mat-icon *ngIf="m.from === myUsername" class="status-icon"
+                          [ngClass]="m.status">
+                  {{ m.status === 'sent' ? 'done' : 'done_all' }}
+                </mat-icon>
+              </div>
             </div>
             <div class="reactionsSummary" *ngIf="visibleReactions(m).length">
               <span class="reactionPill" *ngFor="let r of visibleReactions(m)">
@@ -231,6 +285,23 @@
     <div class="dialogActions">
       <button mat-stroked-button (click)="dialogRef.close()">Cancel</button>
       <button mat-flat-button color="primary" (click)="startChatConfirm(dialogRef)">Start</button>
+    </div>
+  </div>
+</ng-template>
+
+<ng-template #confirmDeleteTpl let-dialogRef="dialogRef">
+  <div class="confirmDeleteBody">
+    <div class="confirmDeleteIconWrap">
+      <mat-icon>delete_forever</mat-icon>
+    </div>
+    <h3>Delete message?</h3>
+    <p>This action cannot be undone.</p>
+    <div class="confirmDeletePreview" *ngIf="deleteCandidate?.preview">
+      {{ deleteCandidate?.preview }}
+    </div>
+    <div class="confirmDeleteActions">
+      <button mat-stroked-button type="button" (click)="dialogRef.close(false)">Cancel</button>
+      <button mat-flat-button color="warn" type="button" (click)="dialogRef.close(true)">Delete</button>
     </div>
   </div>
 </ng-template>

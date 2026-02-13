@@ -77,6 +77,7 @@ export class ChatComponent {
   menuUser: string | null = null;
   showEmojiPicker = false;
   reactionPicker: { messageId: string; scope: 'public' | 'private' } | null = null;
+  editingMessage: { id: string; scope: 'public' | 'private'; text: string } | null = null;
 
   private reactionPressTimer: ReturnType<typeof setTimeout> | null = null;
   private ignoreNextDocumentClick = false;
@@ -84,6 +85,8 @@ export class ChatComponent {
   // Dialog
   newUser = '';
   @ViewChild('startChatTpl') startChatTpl!: TemplateRef<any>;
+  @ViewChild('confirmDeleteTpl') confirmDeleteTpl!: TemplateRef<any>;
+  deleteCandidate: { id: string; scope: 'public' | 'private'; preview: string } | null = null;
 
   constructor(
     private socket: SocketService,
@@ -446,6 +449,10 @@ export class ChatComponent {
 
   startReactionPress(message: ChatMessage, scope: 'public' | 'private', event: Event) {
     if (!message?.id || message.id.startsWith('temp-') || message.deletedAt) return;
+    if (this.isEditingMessage(message, scope)) return;
+
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('.messageActions') || target?.closest('.editInline')) return;
 
     this.cancelReactionPress();
     this.reactionPressTimer = setTimeout(() => {
@@ -482,27 +489,63 @@ export class ChatComponent {
   editMessage(message: ChatMessage, scope: 'public' | 'private') {
     if (!this.canEditMessage(message)) return;
 
-    const current = message.text || '';
-    const nextText = window.prompt('Edit message', current);
-    if (nextText === null) return;
-
-    const trimmed = nextText.trim();
-    if (!trimmed || trimmed === current.trim()) return;
-
-    this.socket.editMessage(scope, message.id, trimmed);
+    this.editingMessage = {
+      id: message.id,
+      scope,
+      text: message.text || ''
+    };
   }
 
   deleteMessage(message: ChatMessage, scope: 'public' | 'private') {
     if (!this.canManageMessage(message)) return;
 
-    const ok = window.confirm('Delete this message?');
-    if (!ok) return;
+    this.deleteCandidate = {
+      id: message.id,
+      scope,
+      preview: (message.text || '').trim().slice(0, 120)
+    };
 
-    this.socket.deleteMessage(scope, message.id);
+    const ref = this.dialog.open(this.confirmDeleteTpl, {
+      width: '360px',
+      panelClass: 'confirmDeleteDialog'
+    });
+
+    ref.afterClosed().subscribe((confirmed: boolean) => {
+      if (!confirmed || !this.deleteCandidate) {
+        this.deleteCandidate = null;
+        return;
+      }
+
+      this.socket.deleteMessage(this.deleteCandidate.scope, this.deleteCandidate.id);
+      this.deleteCandidate = null;
+    });
   }
 
   isPendingDelete(message: ChatMessage): boolean {
     return !!message?.id && this.pendingDeleteIds.has(message.id);
+  }
+
+  isEditingMessage(message: ChatMessage, scope: 'public' | 'private'): boolean {
+    return this.editingMessage?.id === message.id && this.editingMessage?.scope === scope;
+  }
+
+  saveMessageEdit(message: ChatMessage, scope: 'public' | 'private') {
+    if (!this.editingMessage || this.editingMessage.id !== message.id || this.editingMessage.scope !== scope) {
+      return;
+    }
+
+    const nextText = this.editingMessage.text.trim();
+    if (!nextText || nextText === (message.text || '').trim()) {
+      this.cancelMessageEdit();
+      return;
+    }
+
+    this.socket.editMessage(scope, message.id, nextText);
+    this.editingMessage = null;
+  }
+
+  cancelMessageEdit() {
+    this.editingMessage = null;
   }
 
   isRecentlyEdited(message: ChatMessage): boolean {
@@ -847,12 +890,19 @@ export class ChatComponent {
 
     if (scope === 'public') {
       this.publicMessages = this.publicMessages.map(patch);
+      if (this.editingMessage?.id === messageId && this.editingMessage.scope === 'public') {
+        this.editingMessage = null;
+      }
       return;
     }
 
     Object.keys(this.privateChats).forEach((user) => {
       this.privateChats[user] = (this.privateChats[user] || []).map(patch);
     });
+
+    if (this.editingMessage?.id === messageId && this.editingMessage.scope === 'private') {
+      this.editingMessage = null;
+    }
   }
 
   private applyDeleteUpdate(scope: 'public' | 'private', messageId: string, deletedAt: string) {

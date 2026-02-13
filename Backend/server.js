@@ -50,6 +50,7 @@ const socketsByUserId = new Map();
 const onlineUsernames = new Set();
 const TYPING_TTL_MS = 3000;
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
+const DELETED_TEXT = 'Message deleted';
 const publicTypingActive = new Set();
 const publicTypingTimers = new Map();
 const privateTypingStates = new Map();
@@ -419,7 +420,7 @@ io.on('connection', (socket) => {
         if (String(message.fromId) !== String(userId)) return;
         if (message.deletedAt) return;
 
-        message.text = '';
+        message.text = DELETED_TEXT;
         message.deletedAt = new Date();
         message.reactions = [];
         await message.save();
@@ -439,7 +440,7 @@ io.on('connection', (socket) => {
         if (String(message.fromId) !== String(userId)) return;
         if (message.deletedAt) return;
 
-        message.text = '';
+        message.text = DELETED_TEXT;
         message.deletedAt = new Date();
         message.reactions = [];
         await message.save();
