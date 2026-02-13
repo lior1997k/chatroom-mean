@@ -9,6 +9,7 @@
         <mat-icon matListItemIcon>person</mat-icon>
         <div matListItemTitle (click)="openChat(u)">{{ u }}</div>
         <div matListItemLine>{{ lastText(u) }}</div>
+        <span class="unreadBadge" *ngIf="unreadCount(u) > 0">{{ unreadCount(u) }}</span>
         <button mat-icon-button color="warn" (click)="removePrivateChat(u)" matTooltip="Remove chat">
           <mat-icon>delete</mat-icon>
         </button>

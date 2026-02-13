@@ -9,10 +9,12 @@ const privateMessageSchema = new Schema(
     to:     { type: String, index: true },
     text:   { type: String, required: true },
     ts:     { type: Date, default: Date.now, index: true },
+    readAt: { type: Date, default: null, index: true },
   },
   { timestamps: false }
 );
 
 privateMessageSchema.index({ fromId: 1, toId: 1, ts: 1 });
+privateMessageSchema.index({ toId: 1, readAt: 1, ts: -1 });
 
 module.exports = mongoose.model('PrivateMessage', privateMessageSchema);
