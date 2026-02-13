@@ -81,6 +81,11 @@
   flex-direction: column;
 }
 
+.loadOlderBtn {
+  align-self: center;
+  margin-bottom: 12px;
+}
+
 .msg {
   display: flex;
   align-items: flex-end;
@@ -226,4 +231,3 @@ button[type="submit"] {
   margin-left: 12px;
   opacity: 0.85;
 }
-
