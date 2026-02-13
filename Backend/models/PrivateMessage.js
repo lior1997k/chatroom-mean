@@ -8,6 +8,12 @@ const privateMessageSchema = new Schema(
     from:   { type: String, index: true },
     to:     { type: String, index: true },
     text:   { type: String, required: true },
+    replyTo: {
+      messageId: { type: Schema.Types.ObjectId, default: null },
+      from: { type: String, default: null },
+      text: { type: String, default: null },
+      scope: { type: String, enum: ['public', 'private'], default: null }
+    },
     reactions: {
       type: [
         {

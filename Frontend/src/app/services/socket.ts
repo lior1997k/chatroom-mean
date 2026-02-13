@@ -62,12 +62,20 @@ export class SocketService {
   }
 
   // Send
-  sendPublicMessage(text: string): void {
-    this.socket.emit('publicMessage', { text });
+  sendPublicMessage(
+    text: string,
+    replyTo?: { messageId: string; from: string; text: string; scope?: 'public' | 'private' } | null
+  ): void {
+    this.socket.emit('publicMessage', { text, replyTo: replyTo || null });
   }
 
-  sendPrivateMessage(to: string, text: string, tempId?: string): void {
-    this.socket.emit('privateMessage', { to, text, tempId });
+  sendPrivateMessage(
+    to: string,
+    text: string,
+    tempId?: string,
+    replyTo?: { messageId: string; from: string; text: string; scope?: 'public' | 'private' } | null
+  ): void {
+    this.socket.emit('privateMessage', { to, text, tempId, replyTo: replyTo || null });
   }
 
   reactToMessage(scope: 'public' | 'private', messageId: string, emoji: string): void {

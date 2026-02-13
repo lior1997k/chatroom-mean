@@ -155,6 +155,54 @@ function isEditable(ts) {
   return Date.now() - new Date(ts).getTime() <= EDIT_WINDOW_MS;
 }
 
+function sanitizeReplyText(value) {
+  return String(value || '').trim().slice(0, 160);
+}
+
+function serializeReplyTo(replyTo) {
+  if (!replyTo?.messageId) return null;
+  return {
+    messageId: replyTo.messageId.toString(),
+    from: replyTo.from || '',
+    text: replyTo.text || '',
+    scope: replyTo.scope || 'private'
+  };
+}
+
+async function buildPublicReply(replyTo) {
+  const messageId = replyTo?.messageId;
+  if (!messageId || !mongoose.Types.ObjectId.isValid(messageId)) return null;
+
+  const target = await PublicMessage.findById(messageId).lean();
+  if (!target) return null;
+
+  return {
+    messageId: target._id,
+    from: target.from || '',
+    text: sanitizeReplyText(target.text),
+    scope: 'public'
+  };
+}
+
+async function buildPrivateReply(replyTo, participantIds) {
+  const messageId = replyTo?.messageId;
+  if (!messageId || !mongoose.Types.ObjectId.isValid(messageId)) return null;
+
+  const target = await PrivateMessage.findById(messageId).lean();
+  if (!target) return null;
+
+  const participants = [String(target.fromId), String(target.toId)];
+  const isAllowed = participantIds.every((id) => participants.includes(String(id)));
+  if (!isAllowed) return null;
+
+  return {
+    messageId: target._id,
+    from: target.from || '',
+    text: sanitizeReplyText(target.text),
+    scope: 'private'
+  };
+}
+
 io.use((socket, next) => {
   const token = socket.handshake.query.token || socket.handshake.auth?.token;
   if (!token) return next(new Error('AUTH_REQUIRED'));
@@ -221,16 +269,19 @@ io.on('connection', (socket) => {
     if (!text) return;
 
     try {
+      const replyTo = await buildPublicReply(data?.replyTo);
       const saved = await PublicMessage.create({
         fromId: userId,
         from: username,
-        text
+        text,
+        replyTo
       });
 
       io.emit('publicMessage', {
         id: saved._id.toString(),
         from: saved.from,
         text: saved.text,
+        replyTo: serializeReplyTo(saved.replyTo),
         timestamp: saved.ts.toISOString(),
         reactions: [],
         editedAt: null,
@@ -242,6 +293,7 @@ io.on('connection', (socket) => {
         id: `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
         from: username,
         text,
+        replyTo: null,
         timestamp: new Date().toISOString(),
         reactions: [],
         editedAt: null,
@@ -251,12 +303,20 @@ io.on('connection', (socket) => {
   });
 
   // === PRIVATE CHAT with ACK + DELIVERY ===
-  socket.on('privateMessage', async ({ to, text, tempId }) => {
+  socket.on('privateMessage', async ({ to, text, tempId, replyTo }) => {
     try {
       stopPrivateTyping(username, to, true);
 
       const toUser = await User.findOne({ username: to }).lean();
       const timestamp = new Date().toISOString();
+      let normalizedReply = null;
+      if (toUser) {
+        if (replyTo?.scope === 'public') {
+          normalizedReply = await buildPublicReply(replyTo);
+        } else {
+          normalizedReply = await buildPrivateReply(replyTo, [userId, toUser._id.toString()]);
+        }
+      }
 
       let savedId = tempId || `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
       if (toUser) {
@@ -266,6 +326,7 @@ io.on('connection', (socket) => {
           from: username,
           to,
           text,
+          replyTo: normalizedReply,
           ts: new Date(timestamp),
           readAt: null
         });
@@ -283,6 +344,7 @@ io.on('connection', (socket) => {
           from: username,
           to,
           text,
+          replyTo: serializeReplyTo(normalizedReply),
           timestamp,
           reactions: [],
           editedAt: null,

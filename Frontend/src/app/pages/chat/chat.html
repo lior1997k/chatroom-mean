@@ -86,9 +86,14 @@
         </button>
 
         <div class="msg" *ngFor="let m of publicMessages" [class.me]="m.from === myUsername">
-          <button mat-button class="userBtn"
-                  [matMenuTriggerFor]="userMenu"
-                  (click)="$event.stopPropagation(); menuUser=m.from">
+          <button
+            type="button"
+            class="userBtn"
+            [class.isSelf]="m.from === myUsername"
+            [ngStyle]="userChipStyle(m.from)"
+            [matMenuTriggerFor]="m.from !== myUsername ? userMenu : null"
+            (click)="$event.stopPropagation(); m.from !== myUsername && (menuUser=m.from); m.from !== myUsername && (menuPublicMessage=m)"
+          >
             <mat-icon>account_circle</mat-icon>
             <span>{{ m.from }}</span>
           </button>
@@ -99,6 +104,7 @@
             [class.is-editing]="isEditingMessage(m, 'public')"
             [class.is-deleting]="isPendingDelete(m)"
             [class.was-edited]="isRecentlyEdited(m)"
+            (dblclick)="quickReplyFromMessage(m, 'public', $event)"
             (mousedown)="startReactionPress(m, 'public', $event)"
             (mouseup)="cancelReactionPress()"
             (mouseleave)="cancelReactionPress()"
@@ -124,14 +130,21 @@
               </div>
             </div>
             <ng-template #publicTextView>
+              <button class="replySnippet" type="button" *ngIf="m.replyTo" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToReplyTarget(m)">
+                <span class="replyAuthor">{{ replyAuthorLabel(m.replyTo.from) }}</span>
+                <span class="replyText">{{ replyPreviewText(m.replyTo.text) }}</span>
+              </button>
               <div class="text" [class.deletedText]="m.deletedAt" [innerHTML]="m.deletedAt ? 'Message deleted' : highlightText(m.text)"></div>
             </ng-template>
             <div class="meta">
-              <div class="messageActions" *ngIf="canManageMessage(m) && !isEditingMessage(m, 'public')">
+              <div class="messageActions" *ngIf="!isEditingMessage(m, 'public') && !m.deletedAt">
+                <button class="actionBtn" type="button" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); replyToMessage(m, 'public')" matTooltip="Reply">
+                  <mat-icon>reply</mat-icon>
+                </button>
                 <button class="actionBtn" type="button" *ngIf="canEditMessage(m)" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); editMessage(m, 'public')" matTooltip="Edit">
                   <mat-icon>edit</mat-icon>
                 </button>
-                <button class="actionBtn danger" type="button" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); deleteMessage(m, 'public')" matTooltip="Delete">
+                <button class="actionBtn danger" type="button" *ngIf="canManageMessage(m)" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); deleteMessage(m, 'public')" matTooltip="Delete">
                   <mat-icon>delete</mat-icon>
                 </button>
               </div>
@@ -172,6 +185,7 @@
             [class.was-edited]="isRecentlyEdited(m)"
             (mousedown)="startReactionPress(m, 'private', $event)"
             (mouseup)="cancelReactionPress()"
+            (dblclick)="quickReplyFromMessage(m, 'private', $event)"
             (mouseleave)="cancelReactionPress()"
             (touchstart)="startReactionPress(m, 'private', $event)"
             (touchend)="cancelReactionPress()"
@@ -195,14 +209,21 @@
               </div>
             </div>
             <ng-template #privateTextView>
+              <button class="replySnippet" type="button" *ngIf="m.replyTo" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToReplyTarget(m)">
+                <span class="replyAuthor">{{ replyAuthorLabel(m.replyTo.from) }}</span>
+                <span class="replyText">{{ replyPreviewText(m.replyTo.text) }}</span>
+              </button>
               <div class="text" [class.deletedText]="m.deletedAt" [innerHTML]="m.deletedAt ? 'Message deleted' : highlightText(m.text)"></div>
             </ng-template>
             <div class="meta">
-              <div class="messageActions" *ngIf="canManageMessage(m) && !isEditingMessage(m, 'private')">
+              <div class="messageActions" *ngIf="!isEditingMessage(m, 'private') && !m.deletedAt">
+                <button class="actionBtn" type="button" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); replyToMessage(m, 'private')" matTooltip="Reply">
+                  <mat-icon>reply</mat-icon>
+                </button>
                 <button class="actionBtn" type="button" *ngIf="canEditMessage(m)" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); editMessage(m, 'private')" matTooltip="Edit">
                   <mat-icon>edit</mat-icon>
                 </button>
-                <button class="actionBtn danger" type="button" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); deleteMessage(m, 'private')" matTooltip="Delete">
+                <button class="actionBtn danger" type="button" *ngIf="canManageMessage(m)" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); deleteMessage(m, 'private')" matTooltip="Delete">
                   <mat-icon>delete</mat-icon>
                 </button>
               </div>
@@ -239,15 +260,28 @@
 
     <!-- Menu for public usernames -->
     <mat-menu #userMenu="matMenu">
-      <button mat-menu-item (click)="startChatFromPublic(menuUser)">
+      <button mat-menu-item (click)="startChatFromPublic(menuUser, false)">
         <mat-icon>chat</mat-icon>
-        <span>Message privately</span>
+        <span>Open private chat</span>
+      </button>
+      <button mat-menu-item (click)="startChatFromPublic(menuUser, true)">
+        <mat-icon>reply</mat-icon>
+        <span>Reply message privatly</span>
       </button>
     </mat-menu>
 
     <!-- Composer -->
     <form class="composer" (ngSubmit)="selectedUser ? sendPrivate() : sendPublic()">
       <div class="composerFieldWrap">
+        <div class="composerReply" *ngIf="replyingTo">
+          <div class="composerReplyText">
+            <strong>Replying to {{ replyAuthorLabel(replyingTo.from) }}</strong>
+            <span>{{ replyPreviewText(replyingTo.text) }}</span>
+          </div>
+          <button mat-icon-button type="button" (click)="clearReplyTarget()" matTooltip="Cancel reply">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
         <mat-form-field appearance="outline" class="composerInput">
           <mat-label>{{ selectedUser ? 'Type a private message' : 'Type a public message' }}</mat-label>
           <input

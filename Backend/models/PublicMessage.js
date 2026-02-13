@@ -6,6 +6,12 @@ const publicMessageSchema = new Schema(
     fromId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
     from: { type: String, required: true, index: true },
     text: { type: String, required: true },
+    replyTo: {
+      messageId: { type: Schema.Types.ObjectId, ref: 'PublicMessage', default: null },
+      from: { type: String, default: null },
+      text: { type: String, default: null },
+      scope: { type: String, enum: ['public', 'private'], default: null }
+    },
     reactions: {
       type: [
         {

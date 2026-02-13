@@ -3,6 +3,12 @@ export interface Message {
   from: string;
   to?: string;
   text: string;
+  replyTo?: {
+    messageId: string;
+    from: string;
+    text: string;
+    scope?: 'public' | 'private';
+  } | null;
   timestamp?: string;
   reactions?: Array<{ emoji: string; users: string[] }>;
   editedAt?: string | null;

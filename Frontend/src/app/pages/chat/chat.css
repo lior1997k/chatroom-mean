@@ -1,10 +1,8 @@
-/* ==== Layout ==== */
 .shell {
   height: 100vh;
   background: #fefefe;
 }
 
-/* Side panes */
 .leftPane, .rightPane {
   width: 240px;
   background: #f8f9ff;
@@ -25,7 +23,6 @@
   overflow-x: hidden;
 }
 
-/* Pane headers */
 .paneHeader {
   font-weight: bold;
   letter-spacing: 0.5px;
@@ -81,7 +78,6 @@
   color: #5a6f85;
 }
 
-/* ==== Private List ==== */
 .mat-nav-list a {
   border-radius: 10px;
   margin: 4px 6px;
@@ -98,7 +94,6 @@
   font-weight: 500;
 }
 
-/* Delete button inside chat list */
 .mat-nav-list a button.mat-icon-button {
   margin-left: auto;
   opacity: 0.6;
@@ -124,7 +119,6 @@
   margin-right: 6px;
 }
 
-/* ==== Messages ==== */
 .messages {
   flex: 1;
   padding: 16px;
@@ -141,7 +135,7 @@
 
 .msg {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   margin-bottom: 0;
   padding-top: 0;
 }
@@ -208,15 +202,28 @@
   word-break: break-word;
 }
 
-.text mark,
-.searchText mark {
+.replySnippet {
+  border: 0;
+  background: rgba(58, 78, 106, 0.08);
+  border-left: 3px solid #5d7fa5;
+  border-radius: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  margin: 0 0 7px;
+  color: #30465e;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+}
+
+.text mark {
   background: #fff1a8;
   color: inherit;
   padding: 0 1px;
   border-radius: 2px;
 }
 
-/* Timestamps */
 .time {
   font-size: 0.7rem;
   color: #777;
@@ -276,12 +283,6 @@
   transform: translateY(-1px);
 }
 
-.actionBtn mat-icon {
-  font-size: 14px;
-  width: 14px;
-  height: 14px;
-}
-
 .actionBtn.danger {
   color: #b23d3d;
   border-color: #e8cfcf;
@@ -336,31 +337,31 @@
   padding: 0;
 }
 
-.iconMini mat-icon {
-  font-size: 14px;
-  width: 14px;
-  height: 14px;
-}
-
 .iconMini.primary {
   color: #ffffff;
   background: #3d63b3;
   border-color: #3d63b3;
 }
 
-/* Username button in public */
 .userBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #edf1ff;
+  border: 1px solid #d8def5;
+  cursor: pointer;
   font-size: 0.8rem;
-  color: #3f51b5;
+  color: #405ca8;
+  border-radius: 999px;
+  padding: 1px 8px;
   margin-right: 6px;
-  padding: 0;
 }
 
-.userBtn:hover {
-  text-decoration: underline;
+.msg.me .userBtn {
+  order: 2;
+  margin-left: 6px;
 }
 
-/* ==== Composer ==== */
 .composer {
   padding: 8px;
   display: flex;
@@ -377,6 +378,22 @@
 .composerFieldWrap {
   position: relative;
   flex: 1;
+}
+
+.composerReply {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #eaf0ff;
+  border: 1px solid #cad8f4;
+  border-radius: 10px;
+  padding: 5px 8px;
+  margin-bottom: 6px;
+}
+
+.composerReplyText {
+  display: flex;
+  flex-direction: column;
 }
 
 .composerFieldWrap .composerInput {
@@ -431,7 +448,6 @@ button[type="submit"] {
   height: 42px;
 }
 
-/* ==== Right Pane ==== */
 .rightBody {
   flex: 1;
   overflow-y: auto;
@@ -442,7 +458,6 @@ button[type="submit"] {
   margin-bottom: 8px;
 }
 
-/* Empty state */
 .muted {
   font-size: 0.9rem;
   color: #888;
@@ -450,7 +465,6 @@ button[type="submit"] {
   margin-top: 20px;
 }
 
-/* Scrollbar styling */
 .messages::-webkit-scrollbar,
 .rightBody::-webkit-scrollbar {
   width: 6px;
@@ -467,7 +481,6 @@ button[type="submit"] {
   background: transparent;
 }
 
-/* Dialog */
 .dialogBody {
   padding: 16px;
 }
@@ -545,10 +558,7 @@ button[type="submit"] {
   margin-left: 4px;
 }
 
-.status-icon.sent {
-  color: gray;
-}
-
+.status-icon.sent,
 .status-icon.delivered {
   color: gray;
 }

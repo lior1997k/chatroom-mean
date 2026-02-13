@@ -78,13 +78,23 @@ export class ChatComponent {
   // View state
   selectedUser: string | null = null;
   menuUser: string | null = null;
+  menuPublicMessage: ChatMessage | null = null;
   showEmojiPicker = false;
   reactionPicker: { messageId: string; scope: 'public' | 'private' } | null = null;
   editingMessage: { id: string; scope: 'public' | 'private'; text: string } | null = null;
+  replyingTo: {
+    messageId: string;
+    from: string;
+    text: string;
+    scope: 'public' | 'private';
+    sourceScope: 'public' | 'private';
+    privatePeer: string | null;
+  } | null = null;
 
   private reactionPressTimer: ReturnType<typeof setTimeout> | null = null;
   private ignoreNextDocumentClick = false;
   private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private userChipStyleCache: Record<string, Record<string, string>> = {};
   searchOpen = false;
 
   // Dialog
@@ -264,8 +274,10 @@ export class ChatComponent {
   sendPublic() {
     const text = this.message.trim();
     if (!text) return;
-    this.socket.sendPublicMessage(text);
+    const replyTo = this.activeReplyPayload('public');
+    this.socket.sendPublicMessage(text, replyTo);
     this.message = '';
+    this.replyingTo = null;
     this.showEmojiPicker = false;
     this.reactionPicker = null;
     this._stopPublicTypingIfActive();
@@ -312,6 +324,7 @@ export class ChatComponent {
     }
 
     this.selectedUser = username;
+    if (this.replyingTo?.scope !== 'private' || this.replyingTo?.privatePeer !== username) this.replyingTo = null;
     this.unreadCounts[username] = 0;
     this.markAllAsRead(username);
     this.refreshSearchForCurrentContext();
@@ -402,12 +415,15 @@ export class ChatComponent {
     const text = this.message.trim();
     if (!text || !this.selectedUser) return;
 
+    const replyTo = this.activeReplyPayload('private');
+
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     const msg: ChatMessage = {
       id: tempId,
       from: this.myUsername!,
       to: this.selectedUser,
       text,
+      replyTo,
       timestamp: new Date().toISOString(),
       status: 'sent',
       reactions: []
@@ -416,8 +432,9 @@ export class ChatComponent {
     if (!this.privateChats[this.selectedUser]) this.privateChats[this.selectedUser] = [];
     this.privateChats[this.selectedUser].push(msg);
 
-    this.socket.sendPrivateMessage(this.selectedUser, text, tempId);
+    this.socket.sendPrivateMessage(this.selectedUser, text, tempId, replyTo);
     this.message = '';
+    this.replyingTo = null;
     this.showEmojiPicker = false;
     this.reactionPicker = null;
 
@@ -437,6 +454,7 @@ export class ChatComponent {
 
     this.clearTypingIdleTimer();
     this.selectedUser = null;
+    this.replyingTo = null;
     this.message = '';
     this.showEmojiPicker = false;
     this.reactionPicker = null;
@@ -454,6 +472,83 @@ export class ChatComponent {
     } else {
       this.onPublicInput();
     }
+  }
+
+  replyToMessage(message: ChatMessage, scope: 'public' | 'private') {
+    if (!message?.id || message.id.startsWith('temp-') || message.deletedAt) return;
+
+    this.replyingTo = {
+      messageId: message.id,
+      from: message.from,
+      text: String(message.text || '').trim().slice(0, 160),
+      scope,
+      sourceScope: scope,
+      privatePeer: scope === 'private' ? this.selectedUser : null
+    };
+
+    setTimeout(() => {
+      const input = document.querySelector('.composer input') as HTMLInputElement | null;
+      input?.focus();
+    }, 0);
+  }
+
+  quickReplyFromMessage(message: ChatMessage, scope: 'public' | 'private', event?: Event) {
+    if (!message?.id || message.id.startsWith('temp-') || message.deletedAt) return;
+    if (message.from === this.myUsername) return;
+    if (this.isEditingMessage(message, scope)) return;
+
+    event?.stopPropagation();
+    this.replyToMessage(message, scope);
+  }
+
+  clearReplyTarget() {
+    this.replyingTo = null;
+  }
+
+  async jumpToReplyTarget(message: ChatMessage) {
+    const targetId = message.replyTo?.messageId;
+    if (!targetId) return;
+
+    const targetScope = message.replyTo?.scope || 'private';
+    if (targetScope === 'public') {
+      if (this.selectedUser) this.backToPublic();
+      await this.ensurePublicMessageLoaded(targetId);
+      setTimeout(() => this.scrollToMessage(targetId), 50);
+      return;
+    }
+
+    this.scrollToMessage(targetId);
+  }
+
+  replyAuthorLabel(from: string): string {
+    if (!from) return 'Unknown';
+    return from === this.myUsername ? 'You' : from;
+  }
+
+  replyPreviewText(text: string): string {
+    const trimmed = String(text || '').trim();
+    if (!trimmed) return 'Message unavailable';
+    return trimmed.length > 70 ? `${trimmed.slice(0, 70)}...` : trimmed;
+  }
+
+  userChipStyle(username: string | null | undefined): Record<string, string> {
+    const key = String(username || 'unknown');
+    if (this.userChipStyleCache[key]) return this.userChipStyleCache[key];
+
+    let hash = 0;
+    for (let i = 0; i < key.length; i += 1) {
+      hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+    }
+
+    const hue = hash % 360;
+    const style = {
+      color: `hsl(${hue}, 52%, 30%)`,
+      background: `hsl(${hue}, 72%, 92%)`,
+      border: `1px solid hsl(${hue}, 52%, 80%)`
+    };
+
+    this.userChipStyleCache[key] = style;
+    return style;
   }
 
   startReactionPress(message: ChatMessage, scope: 'public' | 'private', event: Event) {
@@ -655,11 +750,30 @@ export class ChatComponent {
     this.openChat(u);
   }
 
-  startChatFromPublic(username: string | null) {
+  async startChatFromPublic(username: string | null, withReply = false) {
     if (!username || username === this.myUsername) return;
+    const quoted = withReply ? this.menuPublicMessage : null;
+    this.menuPublicMessage = null;
+
     if (!this.users.includes(username)) this.users.unshift(username);
     if (!this.privateChats[username]) this.privateChats[username] = [];
-    this.openChat(username);
+    await this.openChat(username);
+
+    if (quoted?.id && !quoted.deletedAt) {
+      this.replyingTo = {
+        messageId: quoted.id,
+        from: quoted.from,
+        text: String(quoted.text || '').trim().slice(0, 160),
+        scope: 'private',
+        sourceScope: 'public',
+        privatePeer: username
+      };
+
+      setTimeout(() => {
+        const input = document.querySelector('.composer input') as HTMLInputElement | null;
+        input?.focus();
+      }, 0);
+    }
   }
 
   // Helpers
@@ -928,6 +1042,14 @@ export class ChatComponent {
   private normalizeMessage(message: ChatMessage): ChatMessage {
     return {
       ...message,
+      replyTo: message.replyTo?.messageId
+        ? {
+          messageId: message.replyTo.messageId,
+          from: message.replyTo.from || '',
+          text: String(message.replyTo.text || '').trim().slice(0, 160),
+          scope: message.replyTo.scope || 'private'
+        }
+        : null,
       editedAt: message.editedAt || null,
       deletedAt: message.deletedAt || null,
       reactions: (message.reactions || []).map((r) => ({
@@ -988,6 +1110,9 @@ export class ChatComponent {
   private applyDeleteUpdate(scope: 'public' | 'private', messageId: string, deletedAt: string) {
     this.pendingDeleteIds.add(messageId);
     if (this.reactionPicker?.messageId === messageId) this.reactionPicker = null;
+    if (this.replyingTo?.messageId === messageId && this.replyingTo.scope === scope) {
+      this.replyingTo = null;
+    }
 
     setTimeout(() => {
       const patch = (msg: ChatMessage): ChatMessage => {
@@ -1146,5 +1271,34 @@ export class ChatComponent {
 
   private escapeRegex(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private activeReplyPayload(scope: 'public' | 'private') {
+    if (!this.replyingTo || this.replyingTo.scope !== scope) return null;
+    if (scope === 'private' && this.replyingTo.privatePeer !== this.selectedUser) return null;
+    return {
+      messageId: this.replyingTo.messageId,
+      from: this.replyingTo.from,
+      text: String(this.replyingTo.text || '').trim().slice(0, 160),
+      scope: this.replyingTo.sourceScope
+    };
+  }
+
+  private async ensurePublicMessageLoaded(messageId: string) {
+    if (this.publicMessages.some((m) => m.id === messageId)) return;
+
+    const headers = this.getAuthHeaders();
+    if (!headers) return;
+
+    try {
+      const found = await this.http
+        .get<ChatMessage>(`${environment.apiUrl}/api/public/${messageId}`, { headers })
+        .toPromise();
+
+      if (!found) return;
+      this.publicMessages = this.mergePublicMessages(this.publicMessages, [this.normalizeMessage(found)]);
+    } catch {
+      // no-op
+    }
   }
 }
