@@ -67,6 +67,14 @@ router.get('/:username', auth, async (req, res) => {
       from: m.from,
       to: m.to,
       text: m.text,
+      replyTo: m.replyTo?.messageId
+        ? {
+          messageId: m.replyTo.messageId.toString(),
+          from: m.replyTo.from || '',
+          text: m.replyTo.text || '',
+          scope: m.replyTo.scope || 'private'
+        }
+        : null,
       timestamp: m.ts.toISOString(),
       readAt: m.readAt ? m.readAt.toISOString() : null,
       reactions: m.reactions || [],

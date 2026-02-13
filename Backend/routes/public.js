@@ -20,15 +20,23 @@ router.get('/', auth, async (req, res) => {
         .limit(200)
         .lean();
 
-      const messages = docs.map((m) => ({
-        id: m._id.toString(),
-        from: m.from,
-        text: m.text,
-        timestamp: m.ts.toISOString(),
-        reactions: m.reactions || [],
-        editedAt: m.editedAt ? m.editedAt.toISOString() : null,
-        deletedAt: m.deletedAt ? m.deletedAt.toISOString() : null
-      }));
+        const messages = docs.map((m) => ({
+          id: m._id.toString(),
+          from: m.from,
+          text: m.text,
+          replyTo: m.replyTo?.messageId
+            ? {
+              messageId: m.replyTo.messageId.toString(),
+              from: m.replyTo.from || '',
+              text: m.replyTo.text || '',
+              scope: m.replyTo.scope || 'public'
+            }
+            : null,
+          timestamp: m.ts.toISOString(),
+          reactions: m.reactions || [],
+          editedAt: m.editedAt ? m.editedAt.toISOString() : null,
+          deletedAt: m.deletedAt ? m.deletedAt.toISOString() : null
+        }));
 
       return res.json({ messages, hasMore: false });
     }
@@ -50,6 +58,14 @@ router.get('/', auth, async (req, res) => {
       id: m._id.toString(),
       from: m.from,
       text: m.text,
+      replyTo: m.replyTo?.messageId
+        ? {
+          messageId: m.replyTo.messageId.toString(),
+          from: m.replyTo.from || '',
+          text: m.replyTo.text || '',
+          scope: m.replyTo.scope || 'public'
+        }
+        : null,
       timestamp: m.ts.toISOString(),
       reactions: m.reactions || [],
       editedAt: m.editedAt ? m.editedAt.toISOString() : null,
@@ -59,6 +75,34 @@ router.get('/', auth, async (req, res) => {
     res.json({ messages, hasMore });
   } catch (e) {
     console.error('GET /api/public error', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.get('/:id', auth, async (req, res) => {
+  try {
+    const message = await PublicMessage.findById(req.params.id).lean();
+    if (!message) return res.status(404).json({ error: 'Message not found' });
+
+    res.json({
+      id: message._id.toString(),
+      from: message.from,
+      text: message.text,
+      replyTo: message.replyTo?.messageId
+        ? {
+          messageId: message.replyTo.messageId.toString(),
+          from: message.replyTo.from || '',
+          text: message.replyTo.text || '',
+          scope: message.replyTo.scope || 'public'
+        }
+        : null,
+      timestamp: message.ts.toISOString(),
+      reactions: message.reactions || [],
+      editedAt: message.editedAt ? message.editedAt.toISOString() : null,
+      deletedAt: message.deletedAt ? message.deletedAt.toISOString() : null
+    });
+  } catch (e) {
+    console.error('GET /api/public/:id error', e);
     res.status(500).json({ error: 'Server error' });
   }
 });
