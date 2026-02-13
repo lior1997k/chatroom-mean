@@ -65,6 +65,7 @@ Frontend runs on `http://localhost:4200`.
 - `GET /api/public` - public room history (`before`/`since` cursor support, auth required)
 - `GET /api/private/unread-counts` - unread DM counters by sender (auth required)
 - `GET /api/private/:username` - private chat history (`since` support, auth required)
+- `GET /api/search?q=<text>` - search across public and your private messages (auth required)
 
 ## How to keep working on this
 - Keep backend and frontend in separate terminals during development.

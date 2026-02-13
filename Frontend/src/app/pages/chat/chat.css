@@ -29,6 +29,77 @@
   letter-spacing: 0.5px;
 }
 
+.toolbarSearch {
+  margin-left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  padding: 2px 6px 2px 10px;
+  min-width: 280px;
+}
+
+.toolbarSearch input {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  width: 100%;
+  font: inherit;
+}
+
+.toolbarSearch input::placeholder {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.toolbarSearch input:focus {
+  outline: none;
+}
+
+.searchPanel {
+  border-bottom: 1px solid #e2e8f2;
+  background: #f8fbff;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.searchState {
+  padding: 10px 14px;
+  color: #5e7187;
+  font-size: 0.88rem;
+}
+
+.searchResult {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid #ebf0f6;
+  background: #fff;
+  text-align: left;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+
+.searchResult:hover {
+  background: #f1f6ff;
+}
+
+.searchScope {
+  color: #3f5a7b;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.searchText {
+  color: #1f2f42;
+  margin: 3px 0;
+}
+
+.searchMeta {
+  color: #708299;
+  font-size: 0.74rem;
+}
+
 /* ==== Private List ==== */
 .mat-nav-list a {
   border-radius: 10px;
@@ -122,6 +193,16 @@
   animation: editedPulse 0.95s ease;
 }
 
+.jumpFlash {
+  animation: jumpFlash 0.9s ease;
+}
+
+@keyframes jumpFlash {
+  0% { box-shadow: 0 0 0 rgba(58, 126, 193, 0); }
+  40% { box-shadow: 0 0 0 3px rgba(58, 126, 193, 0.36); }
+  100% { box-shadow: 0 0 0 rgba(58, 126, 193, 0); }
+}
+
 @keyframes editedPulse {
   0% { box-shadow: 0 0 0 rgba(41, 128, 185, 0); }
   35% { box-shadow: 0 0 0 3px rgba(41, 128, 185, 0.25); }
@@ -136,6 +217,18 @@
 .msg:not(.me) .bubble {
   background: #fff;
   border-bottom-left-radius: 4px;
+}
+
+.text {
+  word-break: break-word;
+}
+
+.text mark,
+.searchText mark {
+  background: #fff1a8;
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
 }
 
 /* Timestamps */

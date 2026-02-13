@@ -22,6 +22,17 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatCardModule } from '@angular/material/card';
 import { MatTooltipModule } from '@angular/material/tooltip';
 
+type SearchResult = {
+  scope: 'public' | 'private';
+  id: string;
+  from: string;
+  to: string | null;
+  thread: string;
+  text: string;
+  timestamp: string;
+  editedAt?: string | null;
+};
+
 @Component({
   selector: 'app-chat',
   standalone: true,
@@ -43,6 +54,9 @@ export class ChatComponent {
   // Data
   readonly messageReactions = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
   readonly composerEmojis = ['😀', '😁', '😂', '😊', '😍', '🤝', '👍', '🔥', '🎉', '💬'];
+  messageSearchQuery = '';
+  searchResults: SearchResult[] = [];
+  searchingMessages = false;
   publicMessages: ChatMessage[] = [];
   publicHasMore = true;
   publicLoading = false;
@@ -81,6 +95,7 @@ export class ChatComponent {
 
   private reactionPressTimer: ReturnType<typeof setTimeout> | null = null;
   private ignoreNextDocumentClick = false;
+  private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Dialog
   newUser = '';
@@ -239,6 +254,7 @@ export class ChatComponent {
 
   ngOnDestroy() {
     this.cancelReactionPress();
+    if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
     this.clearTypingIdleTimer();
     this._stopPublicTypingIfActive();
 
@@ -556,6 +572,51 @@ export class ChatComponent {
     this.socket.disconnect();
     this.auth.logout();
     this.router.navigate(['/login']);
+  }
+
+  onMessageSearchInput() {
+    if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
+
+    const q = this.messageSearchQuery.trim();
+    if (q.length < 2) {
+      this.searchResults = [];
+      this.searchingMessages = false;
+      return;
+    }
+
+    this.searchDebounceTimer = setTimeout(() => {
+      this.searchMessages(q);
+    }, 220);
+  }
+
+  clearMessageSearch() {
+    this.messageSearchQuery = '';
+    this.searchResults = [];
+    this.searchingMessages = false;
+  }
+
+  async openSearchResult(result: SearchResult) {
+    if (result.scope === 'public') {
+      if (this.selectedUser) this.backToPublic();
+    } else {
+      await this.openChat(result.thread);
+    }
+
+    setTimeout(() => this.scrollToMessage(result.id), 120);
+  }
+
+  resultScopeLabel(result: SearchResult): string {
+    if (result.scope === 'public') return 'Public room';
+    return `DM with ${result.thread}`;
+  }
+
+  highlightText(text: string): string {
+    const safe = this.escapeHtml(text || '');
+    const q = this.messageSearchQuery.trim();
+    if (q.length < 2) return safe;
+
+    const re = new RegExp(this.escapeRegex(q), 'gi');
+    return safe.replace(re, (m) => `<mark>${m}</mark>`);
   }
 
   openDmFromSidebar(u: string) {
@@ -1012,5 +1073,54 @@ export class ChatComponent {
     if (!token) return null;
 
     return new HttpHeaders({ Authorization: `Bearer ${token}` });
+  }
+
+  private searchMessages(query: string) {
+    const headers = this.getAuthHeaders();
+    if (!headers) return;
+
+    this.searchingMessages = true;
+
+    const params = new URLSearchParams();
+    params.set('q', query);
+    params.set('limit', '40');
+
+    this.http
+      .get<{ results: SearchResult[] }>(`${environment.apiUrl}/api/search?${params.toString()}`, { headers })
+      .subscribe({
+        next: (res) => {
+          this.searchResults = res?.results || [];
+          this.searchingMessages = false;
+        },
+        error: () => {
+          this.searchingMessages = false;
+        }
+      });
+  }
+
+  private scrollToMessage(messageId: string) {
+    const container = document.querySelector('.messages') as HTMLElement | null;
+    if (!container) return;
+
+    const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(messageId) : messageId;
+    const el = container.querySelector(`[data-msg-id="${escaped}"]`) as HTMLElement | null;
+    if (!el) return;
+
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('jumpFlash');
+    setTimeout(() => el.classList.remove('jumpFlash'), 1000);
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 }
