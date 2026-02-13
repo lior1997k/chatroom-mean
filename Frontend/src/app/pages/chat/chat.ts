@@ -54,6 +54,11 @@ export class ChatComponent {
   // Typing state WE EMIT (to avoid spamming start/stop)
   private publicTypingActive = false;
   private privateTypingActiveFor: string | null = null;
+  private lastPublicTypingEmitAt = 0;
+  private lastPrivateTypingEmitAt: Record<string, number> = {};
+  private typingIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  private publicTypingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+  private privateTypingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
   private historyLoaded = new Set<string>();
 
   // Filtering
@@ -159,23 +164,48 @@ export class ChatComponent {
 
     // === TYPING: PUBLIC ===
     this.socket.onEvent<{ from: string }>('typing:public')
-      .subscribe((ev) => { if (ev?.from) this.isTypingPublic.add(ev.from); });
+      .subscribe((ev) => {
+        if (!ev?.from) return;
+        this.isTypingPublic.add(ev.from);
+        this.refreshPublicTypingTimeout(ev.from);
+      });
 
     this.socket.onEvent<{ from: string }>('typing:publicStop')
-      .subscribe((ev) => { if (ev?.from) this.isTypingPublic.delete(ev.from); });
+      .subscribe((ev) => {
+        if (!ev?.from) return;
+        this.isTypingPublic.delete(ev.from);
+        this.clearPublicTypingTimeout(ev.from);
+      });
 
     // === TYPING: PRIVATE ===
     this.socket.onEvent<{ from: string; to: string }>('typing:private')
       .subscribe((ev) => {
         if (!ev) return;
         if (this.selectedUser === ev.from) this.isTypingMap[ev.from] = true;
+        this.refreshPrivateTypingTimeout(ev.from);
       });
 
     this.socket.onEvent<{ from: string; to: string }>('typing:privateStop')
       .subscribe((ev) => {
         if (!ev) return;
         if (this.selectedUser === ev.from) this.isTypingMap[ev.from] = false;
+        this.clearPrivateTypingTimeout(ev.from);
       });
+  }
+
+  ngOnDestroy() {
+    this.clearTypingIdleTimer();
+    this._stopPublicTypingIfActive();
+
+    if (this.privateTypingActiveFor) {
+      this.socket.typingPrivateStop(this.privateTypingActiveFor);
+      this.privateTypingActiveFor = null;
+    }
+
+    this.publicTypingTimeouts.forEach((timeout) => clearTimeout(timeout));
+    this.privateTypingTimeouts.forEach((timeout) => clearTimeout(timeout));
+    this.publicTypingTimeouts.clear();
+    this.privateTypingTimeouts.clear();
   }
 
   // ===== Public Chat =====
@@ -197,13 +227,23 @@ export class ChatComponent {
   // Called on <input> for PUBLIC view
   onPublicInput() {
     if (this.selectedUser) return; // only in public
+
     const hasText = this.message.trim().length > 0;
-    if (hasText && !this.publicTypingActive) {
+
+    if (!hasText) {
+      this._stopPublicTypingIfActive();
+      this.clearTypingIdleTimer();
+      return;
+    }
+
+    const now = Date.now();
+    if (!this.publicTypingActive || now - this.lastPublicTypingEmitAt > 900) {
       this.socket.typingPublicStart();
       this.publicTypingActive = true;
-    } else if (!hasText && this.publicTypingActive) {
-      this._stopPublicTypingIfActive();
+      this.lastPublicTypingEmitAt = now;
     }
+
+    this.resetTypingIdleTimer();
   }
 
   // ===== Private Chat =====
@@ -267,18 +307,28 @@ export class ChatComponent {
   // Called on <input> for PRIVATE view
   onPrivateInput() {
     if (!this.selectedUser) return;
+
     const to = this.selectedUser;
     const hasText = this.message.trim().length > 0;
 
-    if (hasText && this.privateTypingActiveFor !== to) {
-      // start typing for this recipient
+    if (!hasText) {
+      if (this.privateTypingActiveFor === to) {
+        this.socket.typingPrivateStop(to);
+        this.privateTypingActiveFor = null;
+      }
+      this.clearTypingIdleTimer();
+      return;
+    }
+
+    const now = Date.now();
+    const last = this.lastPrivateTypingEmitAt[to] || 0;
+    if (this.privateTypingActiveFor !== to || now - last > 900) {
       this.socket.typingPrivateStart(to);
       this.privateTypingActiveFor = to;
-    } else if (!hasText && this.privateTypingActiveFor === to) {
-      // stop typing if cleared
-      this.socket.typingPrivateStop(to);
-      this.privateTypingActiveFor = null;
+      this.lastPrivateTypingEmitAt[to] = now;
     }
+
+    this.resetTypingIdleTimer();
   }
 
   onInputBlur() {
@@ -289,6 +339,8 @@ export class ChatComponent {
       this.socket.typingPrivateStop(this.selectedUser);
       this.privateTypingActiveFor = null;
     }
+
+    this.clearTypingIdleTimer();
   }
 
   sendPrivate() {
@@ -324,6 +376,8 @@ export class ChatComponent {
       this.socket.typingPrivateStop(this.privateTypingActiveFor);
       this.privateTypingActiveFor = null;
     }
+
+    this.clearTypingIdleTimer();
     this.selectedUser = null;
     this.message = '';
   }
@@ -368,6 +422,18 @@ export class ChatComponent {
   // Angular template can’t call Array.from directly; provide a getter
   get typingPublicList(): string[] {
     return Array.from(this.isTypingPublic);
+  }
+
+  get publicTypingText(): string {
+    const users = this.typingPublicList;
+    if (!users.length) return '';
+
+    const shown = users.slice(0, 2);
+    const extra = users.length - shown.length;
+    const subject = extra > 0 ? `${shown.join(', ')} +${extra} others` : shown.join(', ');
+    const verb = users.length === 1 ? 'is' : 'are';
+
+    return `${subject} ${verb} typing...`;
   }
 
   lastText(u: string): string {
@@ -443,6 +509,66 @@ export class ChatComponent {
       this.socket.typingPublicStop();
       this.publicTypingActive = false;
     }
+  }
+
+  private resetTypingIdleTimer() {
+    this.clearTypingIdleTimer();
+    this.typingIdleTimer = setTimeout(() => {
+      if (!this.selectedUser) {
+        this._stopPublicTypingIfActive();
+        return;
+      }
+
+      if (this.privateTypingActiveFor === this.selectedUser) {
+        this.socket.typingPrivateStop(this.selectedUser);
+        this.privateTypingActiveFor = null;
+      }
+    }, 1600);
+  }
+
+  private clearTypingIdleTimer() {
+    if (!this.typingIdleTimer) return;
+
+    clearTimeout(this.typingIdleTimer);
+    this.typingIdleTimer = null;
+  }
+
+  private refreshPublicTypingTimeout(username: string) {
+    this.clearPublicTypingTimeout(username);
+
+    const timeout = setTimeout(() => {
+      this.isTypingPublic.delete(username);
+      this.publicTypingTimeouts.delete(username);
+    }, 3500);
+
+    this.publicTypingTimeouts.set(username, timeout);
+  }
+
+  private clearPublicTypingTimeout(username: string) {
+    const timeout = this.publicTypingTimeouts.get(username);
+    if (!timeout) return;
+
+    clearTimeout(timeout);
+    this.publicTypingTimeouts.delete(username);
+  }
+
+  private refreshPrivateTypingTimeout(username: string) {
+    this.clearPrivateTypingTimeout(username);
+
+    const timeout = setTimeout(() => {
+      this.isTypingMap[username] = false;
+      this.privateTypingTimeouts.delete(username);
+    }, 3500);
+
+    this.privateTypingTimeouts.set(username, timeout);
+  }
+
+  private clearPrivateTypingTimeout(username: string) {
+    const timeout = this.privateTypingTimeouts.get(username);
+    if (!timeout) return;
+
+    clearTimeout(timeout);
+    this.privateTypingTimeouts.delete(username);
   }
 
   private loadPublicMessages(before?: string) {

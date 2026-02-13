@@ -48,6 +48,75 @@ app.get('/api/users/:username/exists', async (req, res) => {
 // userId -> Set<socketId>
 const socketsByUserId = new Map();
 const onlineUsernames = new Set();
+const TYPING_TTL_MS = 3000;
+const publicTypingActive = new Set();
+const publicTypingTimers = new Map();
+const privateTypingStates = new Map();
+
+function privateTypingKey(from, to) {
+  return `${from}::${to}`;
+}
+
+function refreshPublicTyping(username) {
+  const previous = publicTypingTimers.get(username);
+  if (previous) clearTimeout(previous);
+
+  const timer = setTimeout(() => {
+    publicTypingTimers.delete(username);
+    if (publicTypingActive.delete(username)) {
+      io.emit('typing:publicStop', { from: username });
+    }
+  }, TYPING_TTL_MS);
+
+  publicTypingTimers.set(username, timer);
+}
+
+function stopPublicTyping(username, shouldBroadcast = true) {
+  const timer = publicTypingTimers.get(username);
+  if (timer) {
+    clearTimeout(timer);
+    publicTypingTimers.delete(username);
+  }
+
+  const wasActive = publicTypingActive.delete(username);
+  if (wasActive && shouldBroadcast) {
+    io.emit('typing:publicStop', { from: username });
+  }
+}
+
+function refreshPrivateTyping(from, to, toUserId) {
+  const key = privateTypingKey(from, to);
+  const existing = privateTypingStates.get(key);
+
+  if (!existing) {
+    io.to(`user:${toUserId}`).emit('typing:private', { from, to });
+  } else {
+    clearTimeout(existing.timer);
+  }
+
+  const timer = setTimeout(() => {
+    const state = privateTypingStates.get(key);
+    if (!state) return;
+
+    privateTypingStates.delete(key);
+    io.to(`user:${state.toUserId}`).emit('typing:privateStop', { from: state.from, to: state.to });
+  }, TYPING_TTL_MS);
+
+  privateTypingStates.set(key, { timer, from, to, toUserId });
+}
+
+function stopPrivateTyping(from, to, shouldBroadcast = true) {
+  const key = privateTypingKey(from, to);
+  const state = privateTypingStates.get(key);
+  if (!state) return;
+
+  clearTimeout(state.timer);
+  privateTypingStates.delete(key);
+
+  if (shouldBroadcast) {
+    io.to(`user:${state.toUserId}`).emit('typing:privateStop', { from: state.from, to: state.to });
+  }
+}
 
 io.use((socket, next) => {
   const token = socket.handshake.query.token || socket.handshake.auth?.token;
@@ -141,6 +210,8 @@ io.on('connection', (socket) => {
   // === PRIVATE CHAT with ACK + DELIVERY ===
   socket.on('privateMessage', async ({ to, text, tempId }) => {
     try {
+      stopPrivateTyping(username, to, true);
+
       const toUser = await User.findOne({ username: to }).lean();
       const timestamp = new Date().toISOString();
 
@@ -197,20 +268,26 @@ io.on('connection', (socket) => {
   });
 
   // === TYPING INDICATORS ===
-  // Public typing (everyone sees except the typer if you want)
   socket.on('typing:public', () => {
-    socket.broadcast.emit('typing:public', { from: username });
-  });
-  socket.on('typing:publicStop', () => {
-    socket.broadcast.emit('typing:publicStop', { from: username });
+    if (!publicTypingActive.has(username)) {
+      publicTypingActive.add(username);
+      socket.broadcast.emit('typing:public', { from: username });
+    }
+
+    refreshPublicTyping(username);
   });
 
-  // Private typing (only the recipient sees it)
+  socket.on('typing:publicStop', () => {
+    stopPublicTyping(username, true);
+  });
+
   socket.on('typing:private', async ({ to }) => {
     try {
+      if (!to) return;
       const toUser = await User.findOne({ username: to }).lean();
       if (!toUser) return;
-      io.to(`user:${toUser._id}`).emit('typing:private', { from: username, to });
+
+      refreshPrivateTyping(username, to, toUser._id.toString());
     } catch (e) {
       console.error('typing:private error', e);
     }
@@ -218,15 +295,23 @@ io.on('connection', (socket) => {
 
   socket.on('typing:privateStop', async ({ to }) => {
     try {
-      const toUser = await User.findOne({ username: to }).lean();
-      if (!toUser) return;
-      io.to(`user:${toUser._id}`).emit('typing:privateStop', { from: username, to });
+      if (!to) return;
+      stopPrivateTyping(username, to, true);
     } catch (e) {
       console.error('typing:privateStop error', e);
     }
   });
 
   socket.on('disconnect', () => {
+    stopPublicTyping(username, true);
+
+    for (const [key, state] of privateTypingStates.entries()) {
+      if (state.from !== username) continue;
+      clearTimeout(state.timer);
+      privateTypingStates.delete(key);
+      io.to(`user:${state.toUserId}`).emit('typing:privateStop', { from: state.from, to: state.to });
+    }
+
     const set = socketsByUserId.get(userId);
     if (set) {
       set.delete(socket.id);

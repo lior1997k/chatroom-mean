@@ -22,20 +22,14 @@
     <mat-toolbar color="primary" class="paneHeader">
       <ng-container *ngIf="!selectedUser; else privateHeader">
         <span>Public Room</span>
-        <span class="typingHint" *ngIf="typingPublicList.length">
-          •
-          <ng-container *ngFor="let u of typingPublicList; let last = last">
-            {{ u }}<span *ngIf="!last">, </span>
-          </ng-container>
-          is typing…
-        </span>
+        <span class="typingHint" *ngIf="typingPublicList.length">• {{ publicTypingText }}</span>
       </ng-container>
       <ng-template #privateHeader>
         <button mat-icon-button (click)="backToPublic()" matTooltip="Back to public">
           <mat-icon>arrow_back</mat-icon>
         </button>
         <span>Chat with {{ selectedUser }}</span>
-        <span class="typingHint" *ngIf="selectedUser && isTypingMap[selectedUser]">• typing…</span>
+        <span class="typingHint" *ngIf="selectedUser && isTypingMap[selectedUser]">• typing...</span>
       </ng-template>
     </mat-toolbar>
 
