@@ -291,17 +291,15 @@ button[type="submit"] {
 }
 
 .reactionPicker {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 6px;
-  background: #ffffff;
+  margin-top: 8px;
+  background: linear-gradient(180deg, #ffffff, #f7faff);
   border: 1px solid #d9e2f2;
-  border-radius: 999px;
-  padding: 6px;
+  border-radius: 14px;
+  padding: 8px;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  box-shadow: 0 12px 26px rgba(25, 39, 64, 0.2);
-  z-index: 6;
+  box-shadow: 0 8px 18px rgba(25, 39, 64, 0.12);
 }
 
 .reactionOption {

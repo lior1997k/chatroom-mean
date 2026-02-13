@@ -76,6 +76,7 @@ export class ChatComponent {
   reactionPicker: { messageId: string; scope: 'public' | 'private' } | null = null;
 
   private reactionPressTimer: ReturnType<typeof setTimeout> | null = null;
+  private ignoreNextDocumentClick = false;
 
   // Dialog
   newUser = '';
@@ -434,6 +435,7 @@ export class ChatComponent {
     this.cancelReactionPress();
     this.reactionPressTimer = setTimeout(() => {
       this.reactionPicker = { messageId: message.id, scope };
+      this.ignoreNextDocumentClick = true;
       event.preventDefault();
     }, 420);
   }
@@ -583,6 +585,11 @@ export class ChatComponent {
 
   @HostListener('document:click', ['$event'])
   onDocumentClick(event: Event) {
+    if (this.ignoreNextDocumentClick) {
+      this.ignoreNextDocumentClick = false;
+      return;
+    }
+
     const target = event.target as HTMLElement | null;
     if (!target) return;
 
