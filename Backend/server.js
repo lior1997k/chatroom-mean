@@ -169,6 +169,16 @@ function serializeReplyTo(replyTo) {
   };
 }
 
+function serializeForwardedFrom(forwardedFrom) {
+  if (!forwardedFrom?.messageId) return null;
+  return {
+    messageId: forwardedFrom.messageId.toString(),
+    from: forwardedFrom.from || '',
+    text: forwardedFrom.text || '',
+    scope: forwardedFrom.scope || 'private'
+  };
+}
+
 async function buildPublicReply(replyTo) {
   const messageId = replyTo?.messageId;
   if (!messageId || !mongoose.Types.ObjectId.isValid(messageId)) return null;
@@ -194,6 +204,39 @@ async function buildPrivateReply(replyTo, participantIds) {
   const participants = [String(target.fromId), String(target.toId)];
   const isAllowed = participantIds.every((id) => participants.includes(String(id)));
   if (!isAllowed) return null;
+
+  return {
+    messageId: target._id,
+    from: target.from || '',
+    text: sanitizeReplyText(target.text),
+    scope: 'private'
+  };
+}
+
+async function buildPublicForwarded(forwardedFrom) {
+  const messageId = forwardedFrom?.messageId;
+  if (!messageId || !mongoose.Types.ObjectId.isValid(messageId)) return null;
+
+  const target = await PublicMessage.findById(messageId).lean();
+  if (!target) return null;
+
+  return {
+    messageId: target._id,
+    from: target.from || '',
+    text: sanitizeReplyText(target.text),
+    scope: 'public'
+  };
+}
+
+async function buildPrivateForwarded(forwardedFrom, userId) {
+  const messageId = forwardedFrom?.messageId;
+  if (!messageId || !mongoose.Types.ObjectId.isValid(messageId)) return null;
+
+  const target = await PrivateMessage.findById(messageId).lean();
+  if (!target) return null;
+
+  const participants = [String(target.fromId), String(target.toId)];
+  if (!participants.includes(String(userId))) return null;
 
   return {
     messageId: target._id,
@@ -303,7 +346,7 @@ io.on('connection', (socket) => {
   });
 
   // === PRIVATE CHAT with ACK + DELIVERY ===
-  socket.on('privateMessage', async ({ to, text, tempId, replyTo }) => {
+  socket.on('privateMessage', async ({ to, text, tempId, replyTo, forwardedFrom }) => {
     try {
       stopPrivateTyping(username, to, true);
 
@@ -318,6 +361,15 @@ io.on('connection', (socket) => {
         }
       }
 
+      let normalizedForwarded = null;
+      if (toUser) {
+        if (forwardedFrom?.scope === 'public') {
+          normalizedForwarded = await buildPublicForwarded(forwardedFrom);
+        } else if (forwardedFrom?.scope === 'private') {
+          normalizedForwarded = await buildPrivateForwarded(forwardedFrom, userId);
+        }
+      }
+
       let savedId = tempId || `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
       if (toUser) {
         const saved = await PrivateMessage.create({
@@ -327,6 +379,7 @@ io.on('connection', (socket) => {
           to,
           text,
           replyTo: normalizedReply,
+          forwardedFrom: normalizedForwarded,
           ts: new Date(timestamp),
           readAt: null
         });
@@ -345,6 +398,7 @@ io.on('connection', (socket) => {
           to,
           text,
           replyTo: serializeReplyTo(normalizedReply),
+          forwardedFrom: serializeForwardedFrom(normalizedForwarded),
           timestamp,
           reactions: [],
           editedAt: null,

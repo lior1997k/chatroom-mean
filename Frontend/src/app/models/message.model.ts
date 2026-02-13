@@ -9,6 +9,12 @@ export interface Message {
     text: string;
     scope?: 'public' | 'private';
   } | null;
+  forwardedFrom?: {
+    messageId: string;
+    from: string;
+    text: string;
+    scope?: 'public' | 'private';
+  } | null;
   timestamp?: string;
   reactions?: Array<{ emoji: string; users: string[] }>;
   editedAt?: string | null;
