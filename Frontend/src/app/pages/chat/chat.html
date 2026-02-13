@@ -61,6 +61,18 @@
           <mat-card class="bubble">
             <div class="text">{{ m.text }}</div>
             <div class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</div>
+            <div class="reactionsRow">
+              <button
+                class="reactionChip"
+                type="button"
+                *ngFor="let emoji of messageReactions"
+                [class.active]="hasReactionByMe(m, emoji)"
+                (click)="toggleReaction(m, 'public', emoji)"
+              >
+                <span>{{ emoji }}</span>
+                <span class="count" *ngIf="reactionCount(m, emoji) > 0">{{ reactionCount(m, emoji) }}</span>
+              </button>
+            </div>
           </mat-card>
         </div>
       </ng-container>
@@ -75,6 +87,18 @@
                         [ngClass]="m.status">
                 {{ m.status === 'sent' ? 'done' : 'done_all' }}
               </mat-icon>
+            </div>
+            <div class="reactionsRow">
+              <button
+                class="reactionChip"
+                type="button"
+                *ngFor="let emoji of messageReactions"
+                [class.active]="hasReactionByMe(m, emoji)"
+                (click)="toggleReaction(m, 'private', emoji)"
+              >
+                <span>{{ emoji }}</span>
+                <span class="count" *ngIf="reactionCount(m, emoji) > 0">{{ reactionCount(m, emoji) }}</span>
+              </button>
             </div>
           </mat-card>
         </div>

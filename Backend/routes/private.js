@@ -68,7 +68,8 @@ router.get('/:username', auth, async (req, res) => {
       to: m.to,
       text: m.text,
       timestamp: m.ts.toISOString(),
-      readAt: m.readAt ? m.readAt.toISOString() : null
+      readAt: m.readAt ? m.readAt.toISOString() : null,
+      reactions: m.reactions || []
     })));
   } catch (e) {
     console.error('GET /api/private error', e);

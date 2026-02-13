@@ -40,6 +40,7 @@ export class ChatComponent {
   message = '';
 
   // Data
+  readonly messageReactions = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
   publicMessages: ChatMessage[] = [];
   publicHasMore = true;
   publicLoading = false;
@@ -107,7 +108,7 @@ export class ChatComponent {
     // === PUBLIC ===
     this.socket.getMessages().subscribe((messages: ChatMessage[]) => {
       const m = messages[messages.length - 1];
-      if (m) this.appendPublicMessage(m);
+      if (m) this.appendPublicMessage(this.normalizeMessage(m));
     });
 
     // === PRIVATE (incoming only; your own sends use privateAck) ===
@@ -121,7 +122,7 @@ export class ChatComponent {
 
       if (!this.privateChats[other]) this.privateChats[other] = [];
       this.privateChats[other].push({
-        ...m,
+        ...this.normalizeMessage(m),
         status: (m.from === me ? 'sent' : m.status) as ChatMessage['status']
       });
 
@@ -166,6 +167,12 @@ export class ChatComponent {
       .subscribe((d) => {
         if (!d) return;
         Object.keys(this.privateChats).forEach(u => this.updateMessageStatus(u, d.id, 'read'));
+      });
+
+    this.socket.onEvent<{ scope: 'public' | 'private'; messageId: string; reactions: Array<{ emoji: string; users: string[] }> }>('messageReactionUpdated')
+      .subscribe((payload) => {
+        if (!payload?.messageId) return;
+        this.applyReactionUpdate(payload.scope, payload.messageId, payload.reactions || []);
       });
 
     // === ONLINE USERS ===
@@ -286,7 +293,7 @@ export class ChatComponent {
 
       const loaded = (history || [])
         .map((m) => ({
-          ...m,
+          ...this.normalizeMessage(m),
           status: (m.from === this.myUsername ? 'read' : undefined) as ChatMessage['status']
         }))
         .sort(
@@ -367,7 +374,8 @@ export class ChatComponent {
       to: this.selectedUser,
       text,
       timestamp: new Date().toISOString(),
-      status: 'sent'
+      status: 'sent',
+      reactions: []
     };
 
     if (!this.privateChats[this.selectedUser]) this.privateChats[this.selectedUser] = [];
@@ -499,6 +507,31 @@ export class ChatComponent {
     return this.unreadCounts[u] || 0;
   }
 
+  reactToMessage(message: ChatMessage, scope: 'public' | 'private') {
+    if (!message?.id || message.id.startsWith('temp-')) return;
+    if (!this.messageReactions.length) return;
+
+    const emoji = this.messageReactions[0];
+    this.socket.reactToMessage(scope, message.id, emoji);
+  }
+
+  toggleReaction(message: ChatMessage, scope: 'public' | 'private', emoji: string) {
+    if (!message?.id || message.id.startsWith('temp-')) return;
+    this.socket.reactToMessage(scope, message.id, emoji);
+  }
+
+  reactionCount(message: ChatMessage, emoji: string): number {
+    const item = (message.reactions || []).find((r) => r.emoji === emoji);
+    return item?.users?.length || 0;
+  }
+
+  hasReactionByMe(message: ChatMessage, emoji: string): boolean {
+    const me = this.myUsername;
+    if (!me) return false;
+    const item = (message.reactions || []).find((r) => r.emoji === emoji);
+    return !!item?.users?.includes(me);
+  }
+
   private loadUnreadCounts() {
     const token = this.auth.getToken();
     if (!token) return;
@@ -611,11 +644,12 @@ export class ChatComponent {
           const page = (res?.messages || []).sort(
             (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
           );
+          const normalizedPage = page.map((m) => this.normalizeMessage(m));
 
           if (before) {
-            this.publicMessages = this.mergePublicMessages(page, this.publicMessages);
+            this.publicMessages = this.mergePublicMessages(normalizedPage, this.publicMessages);
           } else {
-            this.publicMessages = this.mergePublicMessages(this.publicMessages, page);
+            this.publicMessages = this.mergePublicMessages(this.publicMessages, normalizedPage);
           }
 
           this.publicHasMore = !!res?.hasMore;
@@ -641,6 +675,40 @@ export class ChatComponent {
     return Array.from(merged.values()).sort(
       (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
     );
+  }
+
+  private normalizeMessage(message: ChatMessage): ChatMessage {
+    return {
+      ...message,
+      reactions: (message.reactions || []).map((r) => ({
+        emoji: r.emoji,
+        users: Array.from(new Set(r.users || []))
+      }))
+    };
+  }
+
+  private applyReactionUpdate(
+    scope: 'public' | 'private',
+    messageId: string,
+    reactions: Array<{ emoji: string; users: string[] }>
+  ) {
+    const normalized = (reactions || []).map((r) => ({
+      emoji: r.emoji,
+      users: Array.from(new Set(r.users || []))
+    }));
+
+    if (scope === 'public') {
+      this.publicMessages = this.publicMessages.map((msg) =>
+        msg.id === messageId ? { ...msg, reactions: normalized } : msg
+      );
+      return;
+    }
+
+    Object.keys(this.privateChats).forEach((user) => {
+      this.privateChats[user] = (this.privateChats[user] || []).map((msg) =>
+        msg.id === messageId ? { ...msg, reactions: normalized } : msg
+      );
+    });
   }
 
   private recoverMissedMessages() {
@@ -669,7 +737,10 @@ export class ChatComponent {
       .subscribe({
         next: (res) => {
           const incoming = res?.messages || [];
-          this.publicMessages = this.mergePublicMessages(this.publicMessages, incoming);
+          this.publicMessages = this.mergePublicMessages(
+            this.publicMessages,
+            incoming.map((m) => this.normalizeMessage(m))
+          );
         },
         error: () => {}
       });
@@ -694,7 +765,7 @@ export class ChatComponent {
       .subscribe({
         next: (incoming) => {
           const merged = new Map<string, ChatMessage>();
-          [...arr, ...(incoming || [])].forEach((m) => {
+          [...arr, ...((incoming || []).map((m) => this.normalizeMessage(m)))].forEach((m) => {
             const key = m.id || `${m.from}|${m.to}|${m.timestamp}|${m.text}`;
             merged.set(key, m);
           });
