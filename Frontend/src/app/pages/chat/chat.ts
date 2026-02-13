@@ -19,6 +19,7 @@ import { MatMenuModule } from '@angular/material/menu';
 import { MatDialog, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatCardModule } from '@angular/material/card';
+import { MatTooltipModule } from '@angular/material/tooltip';
 
 @Component({
   selector: 'app-chat',
@@ -28,7 +29,7 @@ import { MatCardModule } from '@angular/material/card';
     MatSidenavModule, MatListModule, MatIconModule,
     MatButtonModule, MatInputModule, MatFormFieldModule,
     MatToolbarModule, MatMenuModule, MatDialogModule,
-    MatDividerModule, MatCardModule
+    MatDividerModule, MatCardModule, MatTooltipModule
   ],
   templateUrl: './chat.html',
   styleUrls: ['./chat.css'],
