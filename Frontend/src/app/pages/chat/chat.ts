@@ -52,6 +52,7 @@ export class ChatComponent {
   // Typing state WE EMIT (to avoid spamming start/stop)
   private publicTypingActive = false;
   private privateTypingActiveFor: string | null = null;
+  private historyLoaded = new Set<string>();
 
   // Filtering
   searchTerm = '';
@@ -210,7 +211,7 @@ export class ChatComponent {
     this.unreadCounts[username] = 0;
     this.markAllAsRead(username);
 
-    if (this.privateChats[username]?.length) return;
+    if (this.historyLoaded.has(username)) return;
 
     try {
       const token = this.auth.getToken()!;
@@ -220,7 +221,7 @@ export class ChatComponent {
         .get<ChatMessage[]>(`${environment.apiUrl}/api/private/${username}`, { headers })
         .toPromise();
 
-      this.privateChats[username] = (history || [])
+      const loaded = (history || [])
         .map((m) => ({
           ...m,
           status: (m.from === this.myUsername ? 'read' : undefined) as ChatMessage['status']
@@ -230,6 +231,21 @@ export class ChatComponent {
             new Date(a.timestamp || 0).getTime() -
             new Date(b.timestamp || 0).getTime()
         );
+
+      const existing = this.privateChats[username] || [];
+      const merged = new Map<string, ChatMessage>();
+
+      [...loaded, ...existing].forEach((m) => {
+        const key = m.id || `${m.from}|${m.to}|${m.timestamp}|${m.text}`;
+        merged.set(key, m);
+      });
+
+      this.privateChats[username] = Array.from(merged.values()).sort(
+        (a, b) =>
+          new Date(a.timestamp || 0).getTime() -
+          new Date(b.timestamp || 0).getTime()
+      );
+      this.historyLoaded.add(username);
 
       if (!this.users.includes(username)) this.users.unshift(username);
     } catch (e) {
@@ -377,6 +393,7 @@ export class ChatComponent {
   removePrivateChat(u: string) {
     delete this.privateChats[u];
     delete this.unreadCounts[u];
+    this.historyLoaded.delete(u);
     this.users = this.users.filter(user => user !== u);
     if (this.selectedUser === u) {
       this.selectedUser = null;
