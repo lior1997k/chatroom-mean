@@ -55,6 +55,7 @@ export class ChatComponent {
   users: string[] = [];
   onlineUsers: string[] = [];
   unreadCounts: Record<string, number> = {};
+  unreadMarkerByUser: Record<string, string> = {};
   pendingDeleteIds = new Set<string>();
   recentlyEditedIds = new Set<string>();
   draftsByContext: Record<string, string> = {};
@@ -177,6 +178,9 @@ export class ChatComponent {
         this.updateMessageStatus(other, m.id, 'read');
       } else if (m.from !== me) {
         this.unreadCounts[other] = (this.unreadCounts[other] || 0) + 1;
+        if (m.id && !this.unreadMarkerByUser[other]) {
+          this.unreadMarkerByUser[other] = m.id;
+        }
       }
     });
 
@@ -332,6 +336,7 @@ export class ChatComponent {
   // ===== Private Chat =====
   async openChat(username: string) {
     this.saveDraftForContext(this.selectedUser, this.message);
+    const hadUnread = this.unreadCount(username) > 0;
 
     // switching views → stop public typing if active
     this._stopPublicTypingIfActive();
@@ -345,50 +350,66 @@ export class ChatComponent {
     this.selectedUser = username;
     this.message = this.draftForContext(username);
     if (this.replyingTo?.scope !== 'private' || this.replyingTo?.privatePeer !== username) this.replyingTo = null;
-    this.unreadCounts[username] = 0;
-    this.markAllAsRead(username);
     this.refreshSearchForCurrentContext();
 
-    if (this.historyLoaded.has(username)) return;
+    if (!this.historyLoaded.has(username)) {
+      try {
+        const token = this.auth.getToken()!;
+        const headers = new HttpHeaders({ Authorization: `Bearer ${token}` });
 
-    try {
-      const token = this.auth.getToken()!;
-      const headers = new HttpHeaders({ Authorization: `Bearer ${token}` });
+        const history = await this.http
+          .get<ChatMessage[]>(`${environment.apiUrl}/api/private/${username}`, { headers })
+          .toPromise();
 
-      const history = await this.http
-        .get<ChatMessage[]>(`${environment.apiUrl}/api/private/${username}`, { headers })
-        .toPromise();
+        const loaded = (history || [])
+          .map((m) => ({
+            ...this.normalizeMessage(m),
+            status: (m.from === this.myUsername ? 'read' : undefined) as ChatMessage['status']
+          }))
+          .sort(
+            (a, b) =>
+              new Date(a.timestamp || 0).getTime() -
+              new Date(b.timestamp || 0).getTime()
+          );
 
-      const loaded = (history || [])
-        .map((m) => ({
-          ...this.normalizeMessage(m),
-          status: (m.from === this.myUsername ? 'read' : undefined) as ChatMessage['status']
-        }))
-        .sort(
+        const existing = this.privateChats[username] || [];
+        const merged = new Map<string, ChatMessage>();
+
+        [...loaded, ...existing].forEach((m) => {
+          const key = m.id || `${m.from}|${m.to}|${m.timestamp}|${m.text}`;
+          merged.set(key, m);
+        });
+
+        this.privateChats[username] = Array.from(merged.values()).sort(
           (a, b) =>
             new Date(a.timestamp || 0).getTime() -
             new Date(b.timestamp || 0).getTime()
         );
+        this.historyLoaded.add(username);
 
-      const existing = this.privateChats[username] || [];
-      const merged = new Map<string, ChatMessage>();
+        if (!this.users.includes(username)) this.users.unshift(username);
+      } catch (e) {
+        console.error('Failed to load chat history:', e);
+        if (!this.privateChats[username]) this.privateChats[username] = [];
+      }
+    }
 
-      [...loaded, ...existing].forEach((m) => {
-        const key = m.id || `${m.from}|${m.to}|${m.timestamp}|${m.text}`;
-        merged.set(key, m);
-      });
+    const markerId = hadUnread
+      ? (this.unreadMarkerByUser[username] || this.firstUnreadMessageId(username))
+      : null;
+    if (markerId) this.unreadMarkerByUser[username] = markerId;
 
-      this.privateChats[username] = Array.from(merged.values()).sort(
-        (a, b) =>
-          new Date(a.timestamp || 0).getTime() -
-          new Date(b.timestamp || 0).getTime()
-      );
-      this.historyLoaded.add(username);
+    this.unreadCounts[username] = 0;
+    this.markAllAsRead(username);
 
-      if (!this.users.includes(username)) this.users.unshift(username);
-    } catch (e) {
-      console.error('Failed to load chat history:', e);
-      if (!this.privateChats[username]) this.privateChats[username] = [];
+    if (markerId) {
+      setTimeout(() => this.scrollToMessage(markerId), 60);
+    }
+
+    if (this.selectedUser === username) {
+      setTimeout(() => {
+        if (this.selectedUser === username) this.clearUnreadMarker(username);
+      }, 8000);
     }
   }
 
@@ -937,10 +958,12 @@ export class ChatComponent {
 
   markAllAsRead(user: string) {
     const arr = this.privateChats[user] || [];
+    const nowIso = new Date().toISOString();
     arr.forEach(m => {
       if (m.from !== this.myUsername && m.status !== 'read' && m.id) {
         this.socket.emitEvent('markAsRead', { id: m.id, from: m.from });
         m.status = 'read' as ChatMessage['status'];
+        m.readAt = nowIso;
       }
     });
   }
@@ -953,6 +976,7 @@ export class ChatComponent {
   removePrivateChat(u: string) {
     delete this.privateChats[u];
     delete this.unreadCounts[u];
+    delete this.unreadMarkerByUser[u];
     this.historyLoaded.delete(u);
     this.users = this.users.filter(user => user !== u);
     if (this.selectedUser === u) {
@@ -962,6 +986,24 @@ export class ChatComponent {
 
   unreadCount(u: string): number {
     return this.unreadCounts[u] || 0;
+  }
+
+  shouldShowUnreadDivider(message: ChatMessage): boolean {
+    if (!this.selectedUser || !message?.id) return false;
+    return this.unreadMarkerByUser[this.selectedUser] === message.id;
+  }
+
+  hasUnreadMarker(): boolean {
+    if (!this.selectedUser) return false;
+    return !!this.unreadMarkerByUser[this.selectedUser];
+  }
+
+  jumpToFirstUnread() {
+    if (!this.selectedUser) return;
+    const marker = this.unreadMarkerByUser[this.selectedUser];
+    if (!marker) return;
+    this.scrollToMessage(marker);
+    setTimeout(() => this.clearUnreadMarker(this.selectedUser), 5000);
   }
 
   reactToMessage(message: ChatMessage, scope: 'public' | 'private') {
@@ -1031,12 +1073,20 @@ export class ChatComponent {
 
   private applyUnreadCounts(counts: Array<{ username: string; count: number }>) {
     this.unreadCounts = {};
+    const hasUnread = new Set<string>();
     counts.forEach((item) => {
       if (!item?.username) return;
       this.unreadCounts[item.username] = item.count || 0;
+      if ((item.count || 0) > 0) hasUnread.add(item.username);
       if (!this.users.includes(item.username)) this.users.unshift(item.username);
     });
     if (this.selectedUser) this.unreadCounts[this.selectedUser] = 0;
+
+    Object.keys(this.unreadMarkerByUser).forEach((user) => {
+      if (!hasUnread.has(user) || (this.selectedUser && user === this.selectedUser)) {
+        delete this.unreadMarkerByUser[user];
+      }
+    });
   }
 
   // Utils
@@ -1180,6 +1230,7 @@ export class ChatComponent {
           scope: message.forwardedFrom.scope || 'private'
         }
         : null,
+      readAt: message.readAt || null,
       editedAt: message.editedAt || null,
       deletedAt: message.deletedAt || null,
       reactions: (message.reactions || []).map((r) => ({
@@ -1405,6 +1456,19 @@ export class ChatComponent {
 
   private contextKey(user: string | null): string {
     return user ? `dm:${user}` : 'public';
+  }
+
+  private firstUnreadMessageId(user: string): string | null {
+    const me = this.myUsername;
+    const arr = this.privateChats[user] || [];
+    const first = arr.find((m) => m.from !== me && !m.readAt && !!m.id);
+    return first?.id || null;
+  }
+
+  private clearUnreadMarker(user: string | null) {
+    if (!user) return;
+    if (!this.unreadMarkerByUser[user]) return;
+    delete this.unreadMarkerByUser[user];
   }
 
   private draftForContext(user: string | null): string {

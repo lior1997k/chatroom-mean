@@ -16,6 +16,7 @@ export interface Message {
     scope?: 'public' | 'private';
   } | null;
   timestamp?: string;
+  readAt?: string | null;
   reactions?: Array<{ emoji: string; users: string[] }>;
   editedAt?: string | null;
   deletedAt?: string | null;

@@ -33,6 +33,15 @@
         </button>
         <span>Chat with {{ selectedUser }}</span>
         <span class="typingHint" *ngIf="selectedUser && isTypingMap[selectedUser]">• typing...</span>
+        <button
+          mat-stroked-button
+          type="button"
+          *ngIf="hasUnreadMarker()"
+          style="margin-left: 10px; height: 28px; line-height: 26px;"
+          (click)="jumpToFirstUnread()"
+        >
+          First unread
+        </button>
       </ng-template>
       <span class="flex-spacer"></span>
       <div class="searchShell">
@@ -185,7 +194,14 @@
       </ng-container>
 
       <ng-template #privateView>
-        <div class="msg" *ngFor="let m of currentThread()" [class.me]="m.from === myUsername">
+        <ng-container *ngFor="let m of currentThread()">
+        <div
+          *ngIf="shouldShowUnreadDivider(m)"
+          style="margin: 10px auto 8px; width: fit-content; background: #fff5d7; border: 1px solid #f1dfa3; color: #7c6322; font-size: 0.74rem; border-radius: 999px; padding: 2px 10px;"
+        >
+          Unread messages
+        </div>
+        <div class="msg" [class.me]="m.from === myUsername">
           <mat-card
             class="bubble"
             [attr.data-msg-id]="m.id"
@@ -272,6 +288,7 @@
             </div>
           </mat-card>
         </div>
+        </ng-container>
       </ng-template>
     </div>
 
