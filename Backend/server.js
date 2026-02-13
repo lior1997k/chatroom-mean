@@ -62,6 +62,36 @@ function broadcastOnlineUsers() {
   io.emit('onlineUsers', Array.from(onlineUsernames));
 }
 
+async function emitUnreadCounts(userId) {
+  try {
+    const counts = await PrivateMessage.aggregate([
+      {
+        $match: {
+          toId: new mongoose.Types.ObjectId(userId),
+          readAt: null
+        }
+      },
+      {
+        $group: {
+          _id: '$from',
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          username: '$_id',
+          count: 1
+        }
+      }
+    ]);
+
+    io.to(`user:${userId}`).emit('unreadCountsUpdated', { counts });
+  } catch (e) {
+    console.error('emitUnreadCounts error', e);
+  }
+}
+
 io.on('connection', (socket) => {
   const { id: userId, username } = socket.user;
   const myRoom = `user:${userId}`;
@@ -72,6 +102,7 @@ io.on('connection', (socket) => {
   socketsByUserId.get(userId).add(socket.id);
   onlineUsernames.add(username);
   broadcastOnlineUsers();
+  emitUnreadCounts(userId);
 
   console.log(`✅ User connected: ${username} (${userId})`);
 
@@ -100,7 +131,8 @@ io.on('connection', (socket) => {
           from: username,
           to,
           text,
-          ts: new Date(timestamp)
+          ts: new Date(timestamp),
+          readAt: null
         });
         savedId = saved._id.toString();
       }
@@ -114,6 +146,7 @@ io.on('connection', (socket) => {
         io.to(recipientRoom).emit('privateMessage', {
           id: savedId, from: username, to, text, timestamp
         });
+        emitUnreadCounts(toUser._id.toString());
         io.to(myRoom).emit('messageDelivered', { id: savedId, to });
       } else {
         // offline: mark sent
@@ -127,9 +160,16 @@ io.on('connection', (socket) => {
   // === READ RECEIPT ===
   socket.on('markAsRead', async ({ id, from }) => {
     try {
+      if (!id) return;
+      await PrivateMessage.updateOne(
+        { _id: id, toId: userId, readAt: null },
+        { $set: { readAt: new Date() } }
+      );
+
       const fromUser = await User.findOne({ username: from }).lean();
       if (!fromUser) return;
       io.to(`user:${fromUser._id}`).emit('messageRead', { id });
+      emitUnreadCounts(userId);
     } catch (e) {
       console.error('markAsRead error', e);
     }

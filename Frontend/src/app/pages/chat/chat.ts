@@ -43,6 +43,7 @@ export class ChatComponent {
   privateChats: Record<string, ChatMessage[]> = {};
   users: string[] = [];
   onlineUsers: string[] = [];
+  unreadCounts: Record<string, number> = {};
 
   // Typing state we SHOW about others
   isTypingPublic = new Set<string>();        // who is typing in public
@@ -51,6 +52,7 @@ export class ChatComponent {
   // Typing state WE EMIT (to avoid spamming start/stop)
   private publicTypingActive = false;
   private privateTypingActiveFor: string | null = null;
+  private historyLoaded = new Set<string>();
 
   // Filtering
   searchTerm = '';
@@ -79,6 +81,7 @@ export class ChatComponent {
     }
 
     this.socket.connect();
+    this.loadUnreadCounts();
 
     // === PUBLIC ===
     this.socket.getMessages().subscribe((messages: ChatMessage[]) => {
@@ -107,8 +110,16 @@ export class ChatComponent {
       if (m.from !== me && this.selectedUser === other && m.id) {
         this.socket.emitEvent('markAsRead', { id: m.id, from: m.from });
         this.updateMessageStatus(other, m.id, 'read');
+      } else if (m.from !== me) {
+        this.unreadCounts[other] = (this.unreadCounts[other] || 0) + 1;
       }
     });
+
+    this.socket.onEvent<{ counts: Array<{ username: string; count: number }> }>('unreadCountsUpdated')
+      .subscribe((payload) => {
+        if (!payload?.counts) return;
+        this.applyUnreadCounts(payload.counts);
+      });
 
     // === ACK: tempId -> real id ===
     this.socket.onEvent<{ tempId: string; id: string; to: string; timestamp: string }>('privateAck')
@@ -197,9 +208,10 @@ export class ChatComponent {
     }
 
     this.selectedUser = username;
+    this.unreadCounts[username] = 0;
     this.markAllAsRead(username);
 
-    if (this.privateChats[username]?.length) return;
+    if (this.historyLoaded.has(username)) return;
 
     try {
       const token = this.auth.getToken()!;
@@ -209,7 +221,7 @@ export class ChatComponent {
         .get<ChatMessage[]>(`${environment.apiUrl}/api/private/${username}`, { headers })
         .toPromise();
 
-      this.privateChats[username] = (history || [])
+      const loaded = (history || [])
         .map((m) => ({
           ...m,
           status: (m.from === this.myUsername ? 'read' : undefined) as ChatMessage['status']
@@ -219,6 +231,21 @@ export class ChatComponent {
             new Date(a.timestamp || 0).getTime() -
             new Date(b.timestamp || 0).getTime()
         );
+
+      const existing = this.privateChats[username] || [];
+      const merged = new Map<string, ChatMessage>();
+
+      [...loaded, ...existing].forEach((m) => {
+        const key = m.id || `${m.from}|${m.to}|${m.timestamp}|${m.text}`;
+        merged.set(key, m);
+      });
+
+      this.privateChats[username] = Array.from(merged.values()).sort(
+        (a, b) =>
+          new Date(a.timestamp || 0).getTime() -
+          new Date(b.timestamp || 0).getTime()
+      );
+      this.historyLoaded.add(username);
 
       if (!this.users.includes(username)) this.users.unshift(username);
     } catch (e) {
@@ -365,10 +392,39 @@ export class ChatComponent {
 
   removePrivateChat(u: string) {
     delete this.privateChats[u];
+    delete this.unreadCounts[u];
+    this.historyLoaded.delete(u);
     this.users = this.users.filter(user => user !== u);
     if (this.selectedUser === u) {
       this.selectedUser = null;
     }
+  }
+
+  unreadCount(u: string): number {
+    return this.unreadCounts[u] || 0;
+  }
+
+  private loadUnreadCounts() {
+    const token = this.auth.getToken();
+    if (!token) return;
+
+    const headers = new HttpHeaders({ Authorization: `Bearer ${token}` });
+    this.http
+      .get<Array<{ username: string; count: number }>>(`${environment.apiUrl}/api/private/unread-counts`, { headers })
+      .subscribe({
+        next: (counts) => this.applyUnreadCounts(counts || []),
+        error: () => {}
+      });
+  }
+
+  private applyUnreadCounts(counts: Array<{ username: string; count: number }>) {
+    this.unreadCounts = {};
+    counts.forEach((item) => {
+      if (!item?.username) return;
+      this.unreadCounts[item.username] = item.count || 0;
+      if (!this.users.includes(item.username)) this.users.unshift(item.username);
+    });
+    if (this.selectedUser) this.unreadCounts[this.selectedUser] = 0;
   }
 
   // Utils
