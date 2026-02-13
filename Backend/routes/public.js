@@ -24,7 +24,8 @@ router.get('/', auth, async (req, res) => {
         id: m._id.toString(),
         from: m.from,
         text: m.text,
-        timestamp: m.ts.toISOString()
+        timestamp: m.ts.toISOString(),
+        reactions: m.reactions || []
       }));
 
       return res.json({ messages, hasMore: false });
@@ -47,7 +48,8 @@ router.get('/', auth, async (req, res) => {
       id: m._id.toString(),
       from: m.from,
       text: m.text,
-      timestamp: m.ts.toISOString()
+      timestamp: m.ts.toISOString(),
+      reactions: m.reactions || []
     }));
 
     res.json({ messages, hasMore });

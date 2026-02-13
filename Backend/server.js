@@ -52,6 +52,7 @@ const TYPING_TTL_MS = 3000;
 const publicTypingActive = new Set();
 const publicTypingTimers = new Map();
 const privateTypingStates = new Map();
+const ALLOWED_REACTIONS = new Set(['👍', '❤️', '😂', '😮', '😢', '🔥']);
 
 function privateTypingKey(from, to) {
   return `${from}::${to}`;
@@ -116,6 +117,33 @@ function stopPrivateTyping(from, to, shouldBroadcast = true) {
   if (shouldBroadcast) {
     io.to(`user:${state.toUserId}`).emit('typing:privateStop', { from: state.from, to: state.to });
   }
+}
+
+function normalizeReactions(reactions) {
+  return (reactions || [])
+    .filter((r) => r?.emoji)
+    .map((r) => ({ emoji: r.emoji, users: Array.from(new Set(r.users || [])) }));
+}
+
+function toggleReactionEntries(reactions, emoji, username) {
+  const next = normalizeReactions(reactions);
+  const sameEntry = next.find((r) => r.emoji === emoji);
+  const hadSameReaction = !!sameEntry?.users.includes(username);
+
+  next.forEach((entry) => {
+    entry.users = (entry.users || []).filter((u) => u !== username);
+  });
+
+  if (!hadSameReaction) {
+    const target = next.find((r) => r.emoji === emoji);
+    if (target) {
+      target.users.push(username);
+    } else {
+      next.push({ emoji, users: [username] });
+    }
+  }
+
+  return next.filter((r) => r.users.length > 0);
 }
 
 io.use((socket, next) => {
@@ -194,7 +222,8 @@ io.on('connection', (socket) => {
         id: saved._id.toString(),
         from: saved.from,
         text: saved.text,
-        timestamp: saved.ts.toISOString()
+        timestamp: saved.ts.toISOString(),
+        reactions: []
       });
     } catch (e) {
       console.error('publicMessage error', e);
@@ -202,7 +231,8 @@ io.on('connection', (socket) => {
         id: `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
         from: username,
         text,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        reactions: []
       });
     }
   });
@@ -236,7 +266,7 @@ io.on('connection', (socket) => {
       if (toUser) {
         const recipientRoom = `user:${toUser._id}`;
         io.to(recipientRoom).emit('privateMessage', {
-          id: savedId, from: username, to, text, timestamp
+          id: savedId, from: username, to, text, timestamp, reactions: []
         });
         emitUnreadCounts(toUser._id.toString());
         io.to(myRoom).emit('messageDelivered', { id: savedId, to });
@@ -264,6 +294,49 @@ io.on('connection', (socket) => {
       emitUnreadCounts(userId);
     } catch (e) {
       console.error('markAsRead error', e);
+    }
+  });
+
+  socket.on('messageReaction', async ({ scope, messageId, emoji }) => {
+    try {
+      if (!messageId || !emoji || !ALLOWED_REACTIONS.has(emoji)) return;
+
+      if (scope === 'public') {
+        const message = await PublicMessage.findById(messageId);
+        if (!message) return;
+
+        message.reactions = toggleReactionEntries(message.reactions, emoji, username);
+        await message.save();
+
+        io.emit('messageReactionUpdated', {
+          scope: 'public',
+          messageId,
+          reactions: normalizeReactions(message.reactions)
+        });
+        return;
+      }
+
+      if (scope === 'private') {
+        const message = await PrivateMessage.findById(messageId);
+        if (!message) return;
+
+        const participants = [String(message.fromId), String(message.toId)];
+        if (!participants.includes(String(userId))) return;
+
+        message.reactions = toggleReactionEntries(message.reactions, emoji, username);
+        await message.save();
+
+        const payload = {
+          scope: 'private',
+          messageId,
+          reactions: normalizeReactions(message.reactions)
+        };
+
+        io.to(`user:${participants[0]}`).emit('messageReactionUpdated', payload);
+        io.to(`user:${participants[1]}`).emit('messageReactionUpdated', payload);
+      }
+    } catch (e) {
+      console.error('messageReaction error', e);
     }
   });
 

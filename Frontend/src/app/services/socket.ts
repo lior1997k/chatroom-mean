@@ -70,6 +70,10 @@ export class SocketService {
     this.socket.emit('privateMessage', { to, text, tempId });
   }
 
+  reactToMessage(scope: 'public' | 'private', messageId: string, emoji: string): void {
+    this.socket.emit('messageReaction', { scope, messageId, emoji });
+  }
+
   // Typing: public
   typingPublicStart(): void {
     this.socket.emit('typing:public');

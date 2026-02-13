@@ -58,16 +58,49 @@
             <mat-icon>account_circle</mat-icon>
             <span>{{ m.from }}</span>
           </button>
-          <mat-card class="bubble">
+          <mat-card
+            class="bubble"
+            (mousedown)="startReactionPress(m, 'public', $event)"
+            (mouseup)="cancelReactionPress()"
+            (mouseleave)="cancelReactionPress()"
+            (touchstart)="startReactionPress(m, 'public', $event)"
+            (touchend)="cancelReactionPress()"
+            (touchcancel)="cancelReactionPress()"
+          >
             <div class="text">{{ m.text }}</div>
             <div class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</div>
+            <div class="reactionsSummary" *ngIf="visibleReactions(m).length">
+              <span class="reactionPill" *ngFor="let r of visibleReactions(m)">
+                {{ r.emoji }} {{ r.users.length }}
+              </span>
+            </div>
+            <div class="reactionPicker" *ngIf="isReactionPickerOpen(m, 'public')" (click)="$event.stopPropagation()">
+              <button
+                class="reactionOption"
+                type="button"
+                *ngFor="let emoji of messageReactions"
+                [class.active]="hasReactionByMe(m, emoji)"
+                (click)="toggleReaction(m, 'public', emoji)"
+              >
+                {{ emoji }}
+                <span *ngIf="reactionCount(m, emoji)">{{ reactionCount(m, emoji) }}</span>
+              </button>
+            </div>
           </mat-card>
         </div>
       </ng-container>
 
       <ng-template #privateView>
         <div class="msg" *ngFor="let m of currentThread()" [class.me]="m.from === myUsername">
-          <mat-card class="bubble">
+          <mat-card
+            class="bubble"
+            (mousedown)="startReactionPress(m, 'private', $event)"
+            (mouseup)="cancelReactionPress()"
+            (mouseleave)="cancelReactionPress()"
+            (touchstart)="startReactionPress(m, 'private', $event)"
+            (touchend)="cancelReactionPress()"
+            (touchcancel)="cancelReactionPress()"
+          >
             <div class="text">{{ m.text }}</div>
             <div class="meta">
               <span class="time" *ngIf="m.timestamp">{{ m.timestamp | date:'shortTime' }}</span>
@@ -75,6 +108,23 @@
                         [ngClass]="m.status">
                 {{ m.status === 'sent' ? 'done' : 'done_all' }}
               </mat-icon>
+            </div>
+            <div class="reactionsSummary" *ngIf="visibleReactions(m).length">
+              <span class="reactionPill" *ngFor="let r of visibleReactions(m)">
+                {{ r.emoji }} {{ r.users.length }}
+              </span>
+            </div>
+            <div class="reactionPicker" *ngIf="isReactionPickerOpen(m, 'private')" (click)="$event.stopPropagation()">
+              <button
+                class="reactionOption"
+                type="button"
+                *ngFor="let emoji of messageReactions"
+                [class.active]="hasReactionByMe(m, emoji)"
+                (click)="toggleReaction(m, 'private', emoji)"
+              >
+                {{ emoji }}
+                <span *ngIf="reactionCount(m, emoji)">{{ reactionCount(m, emoji) }}</span>
+              </button>
             </div>
           </mat-card>
         </div>
@@ -91,17 +141,34 @@
 
     <!-- Composer -->
     <form class="composer" (ngSubmit)="selectedUser ? sendPrivate() : sendPublic()">
-      <mat-form-field appearance="outline" class="composerInput">
-        <mat-label>{{ selectedUser ? 'Type a private message' : 'Type a public message' }}</mat-label>
-        <input
-          matInput
-          [(ngModel)]="message"
-          name="msg"
-          autocomplete="off"
-          (input)="selectedUser ? onPrivateInput() : onPublicInput()"
-          (blur)="onInputBlur()"
-        />
-      </mat-form-field>
+      <div class="composerFieldWrap">
+        <mat-form-field appearance="outline" class="composerInput">
+          <mat-label>{{ selectedUser ? 'Type a private message' : 'Type a public message' }}</mat-label>
+          <input
+            matInput
+            [(ngModel)]="message"
+            name="msg"
+            autocomplete="off"
+            (input)="selectedUser ? onPrivateInput() : onPublicInput()"
+            (blur)="onInputBlur()"
+          />
+          <button
+            mat-icon-button
+            matSuffix
+            type="button"
+            class="emojiTrigger"
+            aria-label="Open emoji picker"
+            (click)="toggleEmojiPicker(); $event.stopPropagation()"
+          >
+            🙂
+          </button>
+        </mat-form-field>
+        <div class="emojiPicker" *ngIf="showEmojiPicker" (click)="$event.stopPropagation()">
+          <button class="emojiBtn" type="button" *ngFor="let emoji of composerEmojis" (click)="addEmoji(emoji)">
+            {{ emoji }}
+          </button>
+        </div>
+      </div>
       <button mat-raised-button color="primary" type="submit">Send</button>
     </form>
   </mat-sidenav-content>

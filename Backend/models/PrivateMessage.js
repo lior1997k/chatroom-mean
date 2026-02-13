@@ -8,6 +8,15 @@ const privateMessageSchema = new Schema(
     from:   { type: String, index: true },
     to:     { type: String, index: true },
     text:   { type: String, required: true },
+    reactions: {
+      type: [
+        {
+          emoji: { type: String, required: true },
+          users: [{ type: String }]
+        }
+      ],
+      default: []
+    },
     ts:     { type: Date, default: Date.now, index: true },
     readAt: { type: Date, default: null, index: true },
   },

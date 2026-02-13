@@ -4,6 +4,7 @@ export interface Message {
   to?: string;
   text: string;
   timestamp?: string;
+  reactions?: Array<{ emoji: string; users: string[] }>;
 }
 
 export interface ChatMessage extends Message {
