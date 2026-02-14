@@ -37,7 +37,15 @@
         <button mat-icon-button (click)="backToPublic()" matTooltip="Back to public">
           <mat-icon>arrow_back</mat-icon>
         </button>
-        <span>Chat with {{ selectedUser }}</span>
+        <button
+          mat-button
+          type="button"
+          (click)="togglePrivateMediaTimeline()"
+          style="padding: 0 8px; min-width: 0; height: 32px; line-height: 32px; border-radius: 8px; font-weight: 600; color: #203a56; background: rgba(255,255,255,0.22);"
+          matTooltip="Toggle private media timeline"
+        >
+          Chat with {{ selectedUser }}
+        </button>
         <span class="typingHint" *ngIf="selectedUser && isTypingMap[selectedUser]">• typing...</span>
         <button
           mat-stroked-button
@@ -55,6 +63,7 @@
           mat-icon-button
           class="searchIconBtn"
           *ngIf="!searchOpen"
+          aria-label="Open search"
           matTooltip="Search in this room"
           (mousedown)="$event.stopPropagation()"
           (click)="$event.stopPropagation(); toggleSearch()"
@@ -62,25 +71,34 @@
           <mat-icon>search</mat-icon>
         </button>
 
-        <div class="toolbarSearch" *ngIf="searchOpen">
-          <mat-icon>search</mat-icon>
+        <div class="toolbarSearch" *ngIf="searchOpen" style="gap: 6px; border-radius: 12px; min-height: 38px; padding: 3px 6px 3px 10px; width: min(460px, 56vw); background: linear-gradient(180deg, #ffffff, #f7faff); border-color: #c9d8eb; box-shadow: 0 1px 0 rgba(255,255,255,0.8), 0 2px 8px rgba(30,56,89,0.08); flex-wrap: nowrap; overflow: hidden;">
+          <mat-icon style="color: #4f6580; font-size: 20px; width: 20px; height: 20px;">search</mat-icon>
           <input
             #searchInput
             type="text"
-            [(ngModel)]="messageSearchQuery"
-            (input)="onMessageSearchInput()"
+            [(ngModel)]="searchInputText"
+            (ngModelChange)="onSearchTextInput($event)"
             (keydown.enter)="nextSearchMatch()"
-            placeholder="Search, has:media, type:image"
+            placeholder="Search messages"
+            spellcheck="false"
+            autocapitalize="off"
+            autocorrect="off"
+            style="flex: 1; min-width: 120px; font-weight: 400;"
           />
-          <span class="searchCount">{{ currentSearchPositionLabel() }}</span>
-          <button mat-icon-button type="button" (click)="prevSearchMatch()" [disabled]="searchMatchIds.length < 2" matTooltip="Previous">
+          <span *ngIf="!searchInputText.trim() && !searchFilterChips().length" style="font-size: 0.72rem; color: #73879f; white-space: nowrap;">Search by text or add filters</span>
+          <span class="searchCount" *ngIf="messageSearchQuery.trim().length >= 2" style="min-width: 38px; font-size: 0.74rem; color: #496787; background: #edf3fb; border: 1px solid #d6e2f1; border-radius: 999px; padding: 2px 6px;">{{ currentSearchPositionLabel() }}</span>
+          <button mat-icon-button type="button" class="toolbarIconBtn" *ngIf="messageSearchQuery.trim().length >= 2" (click)="prevSearchMatch()" [disabled]="searchMatchIds.length < 2" matTooltip="Previous" aria-label="Previous search result" style="width: 34px; height: 34px; line-height: 34px; display: inline-flex; align-items: center; justify-content: center;">
             <mat-icon>keyboard_arrow_up</mat-icon>
           </button>
-          <button mat-icon-button type="button" (click)="nextSearchMatch()" [disabled]="searchMatchIds.length < 2" matTooltip="Next">
+          <button mat-icon-button type="button" class="toolbarIconBtn" *ngIf="messageSearchQuery.trim().length >= 2" (click)="nextSearchMatch()" [disabled]="searchMatchIds.length < 2" matTooltip="Next" aria-label="Next search result" style="width: 34px; height: 34px; line-height: 34px; display: inline-flex; align-items: center; justify-content: center;">
             <mat-icon>keyboard_arrow_down</mat-icon>
           </button>
-          <button mat-icon-button type="button" (click)="toggleSearch()">
-            <mat-icon>close</mat-icon>
+          <button mat-icon-button type="button" class="toolbarIconBtn" [matMenuTriggerFor]="searchPresetMenu" (menuOpened)="onSearchFilterMenuOpened()" (menuClosed)="onSearchFilterMenuClosed()" matTooltip="Search filters" aria-label="Open search filters" style="position: relative; width: 34px; height: 34px; line-height: 34px; display: inline-flex; align-items: center; justify-content: center;">
+            <mat-icon style="width: 18px; height: 18px; font-size: 18px;">{{ searchFilterCount() ? 'filter_alt' : 'tune' }}</mat-icon>
+            <span *ngIf="searchFilterCount()" style="position: absolute; right: -1px; bottom: -1px; min-width: 14px; height: 14px; border-radius: 999px; background: linear-gradient(180deg, #f7fbff, #dce9f8); border: 1px solid #b9cde6; color: #2f4f72; font-size: 0.62rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 12px; text-align: center; padding: 0 3px; box-shadow: 0 1px 2px rgba(29, 52, 81, 0.16);">{{ searchFilterCount() }}</span>
+          </button>
+          <button mat-icon-button type="button" class="toolbarIconBtn" (click)="toggleSearch()" matTooltip="Close search" aria-label="Close search" style="width: 34px; height: 34px; min-width: 34px; line-height: 34px; margin-left: 2px; display: inline-flex; align-items: center; justify-content: center;">
+            <mat-icon style="width: 18px; height: 18px; font-size: 18px;">close</mat-icon>
           </button>
         </div>
       </div>
@@ -152,18 +170,23 @@
                 <span class="replyAuthor">Forwarded from {{ replyAuthorLabel(m.forwardedFrom.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.forwardedFrom.text) }}</span>
                 <img *ngIf="m.forwardedFrom.attachment?.isImage" [src]="attachmentUrl(m.forwardedFrom.attachment)" [alt]="m.forwardedFrom.attachment?.name" loading="lazy" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
-                <video *ngIf="isVideoAttachment(m.forwardedFrom.attachment)" [src]="attachmentUrl(m.forwardedFrom.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, m.forwardedFrom.attachment)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+                <video *ngIf="isVideoAttachment(m.forwardedFrom.attachment)" [src]="attachmentUrl(m.forwardedFrom.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, m.forwardedFrom.attachment)" muted playsinline [attr.autoplay]="autoplayMediaPreviews ? '' : null" loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
                 <span class="replyText" *ngIf="m.forwardedFrom.attachment">{{ attachmentTypeLabel(m.forwardedFrom.attachment) }} • {{ m.forwardedFrom.attachment.name }}</span>
               </button>
               <button class="replySnippet" type="button" *ngIf="m.replyTo" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToReplyTarget(m)">
                 <span class="replyAuthor">{{ replyAuthorLabel(m.replyTo.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.replyTo.text) }}</span>
                 <img *ngIf="m.replyTo.attachment?.isImage" [src]="attachmentUrl(m.replyTo.attachment)" [alt]="m.replyTo.attachment?.name" loading="lazy" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
-                <video *ngIf="isVideoAttachment(m.replyTo.attachment)" [src]="attachmentUrl(m.replyTo.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, m.replyTo.attachment)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+                <video *ngIf="isVideoAttachment(m.replyTo.attachment)" [src]="attachmentUrl(m.replyTo.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, m.replyTo.attachment)" muted playsinline [attr.autoplay]="autoplayMediaPreviews ? '' : null" loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
                 <span class="replyText" *ngIf="m.replyTo.attachment">{{ attachmentTypeLabel(m.replyTo.attachment) }} • {{ m.replyTo.attachment.name }}</span>
               </button>
               <ng-container *ngIf="hasAlbumMedia(m)">
+                <div *ngIf="isAlbumPreviewHidden(m, 'public')" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px dashed #c7d7ea; border-radius: 10px; padding: 6px 8px; margin: 0 0 8px; background: #f6fbff; color: #3f5b79; width: min(240px, 66vw);">
+                  <span style="font-size: 0.76rem;">Album preview hidden</span>
+                  <button mat-stroked-button type="button" (click)="showAlbumPreview(m, 'public', $event)">Show</button>
+                </div>
                 <button
+                  *ngIf="!isAlbumPreviewHidden(m, 'public')"
                   type="button"
                   (mousedown)="$event.stopPropagation()"
                   (touchstart)="$event.stopPropagation()"
@@ -182,10 +205,11 @@
                       <video
                         *ngIf="isVideoAttachment(attachment)"
                         [src]="attachmentUrl(attachment)"
-                        preload="metadata"
+                        [attr.data-preview-key]="attachmentPreviewKey(m, attachment, 'public')"
+                        preload="none"
                         (loadedmetadata)="onVideoPreviewMetadata($event, attachment)"
                         muted
-                        autoplay
+                        [attr.autoplay]="autoplayMediaPreviews ? '' : null"
                         loop
                         playsinline
                         style="width: 100%; height: 100%; object-fit: cover; display: block; background: #000;"
@@ -224,10 +248,10 @@
                         *ngIf="isVideoAttachment(attachment)"
                         [src]="attachmentUrl(attachment)"
                         [attr.data-preview-key]="attachmentPreviewKey(m, attachment, 'public')"
-                        preload="metadata"
+                        preload="none"
                         (loadedmetadata)="onVideoPreviewMetadata($event, attachment)"
                         style="max-width: 220px; max-height: 180px; border-radius: 10px; border: 1px solid #d9e2ef; display: block; background: #000;"
-                        autoplay
+                        [attr.autoplay]="autoplayMediaPreviews ? '' : null"
                         loop
                         muted
                         playsinline
@@ -314,7 +338,10 @@
       </ng-container>
 
       <ng-template #privateView>
-        <ng-container *ngFor="let m of currentThread()">
+        <button class="loadOlderBtn" mat-stroked-button type="button" *ngIf="hiddenThreadMessageCount() > 0" (click)="loadMoreThreadMessages()">
+          Load older in view ({{ hiddenThreadMessageCount() }})
+        </button>
+        <ng-container *ngFor="let m of displayedThreadMessages()">
         <div
           *ngIf="shouldShowUnreadDivider(m)"
           style="margin: 10px auto 8px; width: fit-content; background: #fff5d7; border: 1px solid #f1dfa3; color: #7c6322; font-size: 0.74rem; border-radius: 999px; padding: 2px 10px;"
@@ -359,18 +386,23 @@
                 <span class="replyAuthor">Forwarded from {{ replyAuthorLabel(m.forwardedFrom.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.forwardedFrom.text) }}</span>
                 <img *ngIf="m.forwardedFrom.attachment?.isImage" [src]="attachmentUrl(m.forwardedFrom.attachment)" [alt]="m.forwardedFrom.attachment?.name" loading="lazy" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
-                <video *ngIf="isVideoAttachment(m.forwardedFrom.attachment)" [src]="attachmentUrl(m.forwardedFrom.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, m.forwardedFrom.attachment)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+                <video *ngIf="isVideoAttachment(m.forwardedFrom.attachment)" [src]="attachmentUrl(m.forwardedFrom.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, m.forwardedFrom.attachment)" muted playsinline [attr.autoplay]="autoplayMediaPreviews ? '' : null" loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
                 <span class="replyText" *ngIf="m.forwardedFrom.attachment">{{ attachmentTypeLabel(m.forwardedFrom.attachment) }} • {{ m.forwardedFrom.attachment.name }}</span>
               </button>
               <button class="replySnippet" type="button" *ngIf="m.replyTo" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToReplyTarget(m)">
                 <span class="replyAuthor">{{ replyAuthorLabel(m.replyTo.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.replyTo.text) }}</span>
                 <img *ngIf="m.replyTo.attachment?.isImage" [src]="attachmentUrl(m.replyTo.attachment)" [alt]="m.replyTo.attachment?.name" loading="lazy" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
-                <video *ngIf="isVideoAttachment(m.replyTo.attachment)" [src]="attachmentUrl(m.replyTo.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, m.replyTo.attachment)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+                <video *ngIf="isVideoAttachment(m.replyTo.attachment)" [src]="attachmentUrl(m.replyTo.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, m.replyTo.attachment)" muted playsinline [attr.autoplay]="autoplayMediaPreviews ? '' : null" loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
                 <span class="replyText" *ngIf="m.replyTo.attachment">{{ attachmentTypeLabel(m.replyTo.attachment) }} • {{ m.replyTo.attachment.name }}</span>
               </button>
               <ng-container *ngIf="hasAlbumMedia(m)">
+                <div *ngIf="isAlbumPreviewHidden(m, 'private')" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px dashed #c7d7ea; border-radius: 10px; padding: 6px 8px; margin: 0 0 8px; background: #f6fbff; color: #3f5b79; width: min(240px, 66vw);">
+                  <span style="font-size: 0.76rem;">Album preview hidden</span>
+                  <button mat-stroked-button type="button" (click)="showAlbumPreview(m, 'private', $event)">Show</button>
+                </div>
                 <button
+                  *ngIf="!isAlbumPreviewHidden(m, 'private')"
                   type="button"
                   (mousedown)="$event.stopPropagation()"
                   (touchstart)="$event.stopPropagation()"
@@ -389,10 +421,11 @@
                       <video
                         *ngIf="isVideoAttachment(attachment)"
                         [src]="attachmentUrl(attachment)"
-                        preload="metadata"
+                        [attr.data-preview-key]="attachmentPreviewKey(m, attachment, 'private')"
+                        preload="none"
                         (loadedmetadata)="onVideoPreviewMetadata($event, attachment)"
                         muted
-                        autoplay
+                        [attr.autoplay]="autoplayMediaPreviews ? '' : null"
                         loop
                         playsinline
                         style="width: 100%; height: 100%; object-fit: cover; display: block; background: #000;"
@@ -431,10 +464,10 @@
                         *ngIf="isVideoAttachment(attachment)"
                         [src]="attachmentUrl(attachment)"
                         [attr.data-preview-key]="attachmentPreviewKey(m, attachment, 'private')"
-                        preload="metadata"
+                        preload="none"
                         (loadedmetadata)="onVideoPreviewMetadata($event, attachment)"
                         style="max-width: 220px; max-height: 180px; border-radius: 10px; border: 1px solid #d9e2ef; display: block; background: #000;"
-                        autoplay
+                        [attr.autoplay]="autoplayMediaPreviews ? '' : null"
                         loop
                         muted
                         playsinline
@@ -526,6 +559,82 @@
       </ng-template>
     </div>
 
+    <div *ngIf="privateMediaTimelineOpen && selectedUser" style="position: absolute; left: 12px; right: 12px; top: 66px; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid #d6e2f2; border-radius: 10px; background: rgba(247, 251, 255, 0.97); box-shadow: 0 8px 18px rgba(29, 52, 81, 0.14); backdrop-filter: blur(2px); transition: transform 0.22s ease, opacity 0.22s ease;" [style.opacity]="privateMediaTimelineCollapsed ? '0.88' : '1'" [style.transform]="privateMediaTimelineCollapsed ? 'translateY(-2px)' : 'translateY(0)'">
+      <strong style="font-size: 0.74rem; color: #385672; white-space: nowrap;">Media timeline</strong>
+      <span style="font-size: 0.68rem; color: #5a7492; min-width: 24px; text-align: center;">{{ privateMediaTimelineCount() }}</span>
+      <div style="display: inline-flex; gap: 4px;">
+        <button mat-stroked-button type="button" style="height: 26px; min-width: 44px;" (click)="privateMediaTimelineFilter = 'all'">All</button>
+        <button mat-stroked-button type="button" style="height: 26px; min-width: 56px;" (click)="privateMediaTimelineFilter = 'image'">Images</button>
+        <button mat-stroked-button type="button" style="height: 26px; min-width: 56px;" (click)="privateMediaTimelineFilter = 'video'">Videos</button>
+      </div>
+      <button mat-icon-button type="button" class="timelineIconBtn" *ngIf="privateMediaTimelineFilter !== 'all'" (click)="clearPrivateMediaTimelineFilter()" matTooltip="Clear filter" aria-label="Clear timeline filter" style="width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;">
+        <mat-icon style="width: 18px; height: 18px; font-size: 18px;">filter_alt_off</mat-icon>
+      </button>
+      <button mat-icon-button type="button" class="timelineIconBtn" (click)="togglePrivateMediaTimelineCollapse()" matTooltip="Collapse/expand" aria-label="Collapse or expand timeline" style="width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;">
+        <mat-icon style="width: 18px; height: 18px; font-size: 18px;">{{ privateMediaTimelineCollapsed ? 'expand_more' : 'expand_less' }}</mat-icon>
+      </button>
+      <ng-container *ngIf="privateMediaTimelineItems() as timelineItems">
+        <div *ngIf="!privateMediaTimelineCollapsed && timelineItems.length; else emptyTimelineStateFloating" style="display: flex; gap: 7px; overflow-x: auto; margin-left: auto; max-width: min(62vw, 760px); padding: 2px 0; touch-action: pan-x;">
+          <button
+            type="button"
+            data-timeline-thumb="true"
+            *ngFor="let item of timelineItems.slice(0, 30); trackBy: trackByTimelineItem"
+            (pointerdown)="onTimelineThumbPointerDown(item, $event)"
+            (pointerup)="onTimelineThumbPointerUp(item, $event)"
+            (pointercancel)="clearTimelineThumbPointerState()"
+            (pointerleave)="clearTimelineThumbPointerState()"
+            (click)="onTimelineThumbClick(item, $event)"
+            style="position: relative; border: 1px solid #d3dfef; border-radius: 9px; padding: 0; background: #fff; cursor: pointer; flex: 0 0 auto; overflow: hidden; box-shadow: 0 1px 3px rgba(20, 41, 66, 0.1); min-width: 52px; min-height: 52px; touch-action: pan-x;"
+            tabindex="0"
+            [attr.aria-label]="'Open timeline media ' + (item.attachment.name || 'attachment')"
+          >
+            <img *ngIf="item.attachment.isImage" [src]="attachmentUrl(item.attachment)" [alt]="item.attachment.name" style="width: 52px; height: 52px; object-fit: cover; display: block; pointer-events: none;" />
+            <video *ngIf="isVideoAttachment(item.attachment)" [src]="attachmentUrl(item.attachment)" muted playsinline preload="metadata" (loadedmetadata)="onTimelineThumbVideoMetadata($event)" style="width: 52px; height: 52px; object-fit: cover; display: block; background: #000; pointer-events: none;"></video>
+            <div *ngIf="isVideoAttachment(item.attachment)" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 18px; height: 18px; border-radius: 999px; background: rgba(12, 21, 34, 0.7); color: #fff; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+              <mat-icon style="font-size: 12px; width: 12px; height: 12px;">play_arrow</mat-icon>
+            </div>
+          </button>
+        </div>
+      </ng-container>
+      <ng-template #emptyTimelineStateFloating>
+        <div style="margin-left: auto; font-size: 0.73rem; color: #5f7894; display: inline-flex; align-items: center; gap: 8px;">
+          {{ privateMediaTimelineCollapsed ? 'Timeline collapsed' : 'No media for this filter' }}
+        </div>
+      </ng-template>
+    </div>
+
+    <mat-menu #searchPresetMenu="matMenu" panelClass="searchPresetMenuPanel">
+      <button mat-menu-item type="button" (click)="toggleSearchFilterTokenFromMenu('has:media')">
+        <mat-icon>{{ hasSearchFilterToken('has:media') ? 'check_circle' : 'radio_button_unchecked' }}</mat-icon>
+        <mat-icon>photo_library</mat-icon>
+        <span>Has media</span>
+      </button>
+      <button mat-menu-item type="button" (click)="toggleSearchFilterTokenFromMenu('type:image')">
+        <mat-icon>{{ hasSearchFilterToken('type:image') ? 'check_circle' : 'radio_button_unchecked' }}</mat-icon>
+        <mat-icon>image</mat-icon>
+        <span>Images only</span>
+      </button>
+      <button mat-menu-item type="button" (click)="toggleSearchFilterTokenFromMenu('type:video')">
+        <mat-icon>{{ hasSearchFilterToken('type:video') ? 'check_circle' : 'radio_button_unchecked' }}</mat-icon>
+        <mat-icon>videocam</mat-icon>
+        <span>Videos only</span>
+      </button>
+      <button mat-menu-item type="button" (click)="toggleSearchFilterTokenFromMenu('has:attachment')">
+        <mat-icon>{{ hasSearchFilterToken('has:attachment') ? 'check_circle' : 'radio_button_unchecked' }}</mat-icon>
+        <mat-icon>attach_file</mat-icon>
+        <span>Has attachment</span>
+      </button>
+      <button mat-menu-item type="button" (click)="toggleSearchFilterTokenFromMenu('from:' + selectedUser)" *ngIf="selectedUser">
+        <mat-icon>{{ hasSearchFilterToken('from:' + selectedUser) ? 'check_circle' : 'radio_button_unchecked' }}</mat-icon>
+        <mat-icon>person</mat-icon>
+        <span>From {{ selectedUser }}</span>
+      </button>
+      <button mat-menu-item type="button" (click)="resetSearchFilters()" *ngIf="searchFilterCount()">
+        <mat-icon>filter_alt_off</mat-icon>
+        <span>Reset filters</span>
+      </button>
+    </mat-menu>
+
     <!-- Menu for public usernames -->
     <mat-menu #userMenu="matMenu">
       <button mat-menu-item (click)="startChatFromPublic(menuUser, false)">
@@ -558,7 +667,7 @@
             <strong>Replying to {{ replyAuthorLabel(replyingTo.from) }}</strong>
             <span>{{ replyPreviewText(replyingTo.text) }}</span>
             <img *ngIf="replyingTo.attachment?.isImage" [src]="attachmentUrl(replyingTo.attachment)" [alt]="replyingTo.attachment?.name" loading="lazy" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
-            <video *ngIf="isVideoAttachment(replyingTo.attachment)" [src]="attachmentUrl(replyingTo.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, replyingTo.attachment)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+            <video *ngIf="isVideoAttachment(replyingTo.attachment)" [src]="attachmentUrl(replyingTo.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, replyingTo.attachment)" muted playsinline [attr.autoplay]="autoplayMediaPreviews ? '' : null" loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
             <span *ngIf="replyingTo.attachment">{{ attachmentTypeLabel(replyingTo.attachment) }} • {{ replyingTo.attachment.name }}</span>
           </div>
           <button mat-icon-button type="button" (click)="clearReplyTarget()" matTooltip="Cancel reply">
@@ -577,8 +686,8 @@
               </button>
             </div>
           </div>
-          <div *ngIf="showPendingAttachmentsPanel" style="display: flex; flex-direction: column; gap: 3px; margin-top: 4px; max-height: 88px; overflow: auto;">
-            <div *ngFor="let attachment of pendingAttachments; let i = index" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px;">
+          <div *ngIf="showPendingAttachmentsPanel" style="display: flex; flex-direction: column; gap: 3px; margin-top: 4px; max-height: 88px; overflow-y: auto; overflow-x: hidden;">
+            <div *ngFor="let attachment of pendingAttachments; let i = index" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; width: 100%; min-width: 0; overflow: hidden;">
               <span style="font-size: 0.72rem; color: #3d5a78; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ attachment.name }}</span>
               <button mat-icon-button type="button" (click)="removePendingAttachment(i)" matTooltip="Remove">
                 <mat-icon>close</mat-icon>
@@ -596,11 +705,38 @@
           <div *ngFor="let err of uploadErrors" style="font-size: 0.74rem; line-height: 1.25;">
             • {{ err }}
           </div>
+          <div *ngIf="persistedFailedUploadNames.length" style="font-size: 0.7rem; color: #8c5d39; border-top: 1px dashed #e6c8b0; padding-top: 4px;">
+            Previous failed files: {{ persistedFailedUploadNames.join(', ') }}
+          </div>
           <div style="display: flex; gap: 8px; margin-top: 2px;">
             <button mat-stroked-button type="button" (click)="retryFailedUploads()" [disabled]="uploadingAttachment">Retry failed</button>
           </div>
         </div>
-        <div *ngIf="visibleUploadItems().length" style="display: flex; flex-direction: column; gap: 3px; background: #f4f7fc; border: 1px solid #d8e1ee; border-radius: 10px; padding: 6px 8px; margin-bottom: 6px; color: #385878;">
+        <ng-container *ngIf="resumableUploadsList() as resumables">
+        <div *ngIf="resumables.length" style="display: flex; flex-direction: column; gap: 4px; background: #eef6ff; border: 1px solid #d3e3f6; border-radius: 10px; padding: 6px 8px; margin-bottom: 6px; color: #355377;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <strong style="font-size: 0.76rem;">Resumable uploads</strong>
+            <button mat-icon-button type="button" (click)="clearResumableUploadsList()" matTooltip="Clear list"><mat-icon>clear_all</mat-icon></button>
+          </div>
+          <div *ngFor="let resumable of resumables; let i = index; trackBy: trackByResumableItem" style="display: flex; flex-direction: column; gap: 2px; font-size: 0.72rem; line-height: 1.25; border-top: 1px dashed #d8e6f7; padding-top: 4px;" [style.borderTop]="i === 0 ? '0' : '1px dashed #d8e6f7'">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              <span style="min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                {{ i + 1 }}. {{ resumable.fileName }} - {{ resumable.uploadedChunks.length }}/{{ resumable.totalChunks }} chunks ({{ resumableProgressPercent(resumable.uploadedChunks, resumable.totalChunks) }}%)
+              </span>
+              <button mat-icon-button type="button" (click)="removeResumableUpload(resumable.key)" matTooltip="Dismiss" style="width: 24px; height: 24px; min-width: 24px; display: inline-flex; align-items: center; justify-content: center;">
+                <mat-icon style="font-size: 16px; width: 16px; height: 16px;">close</mat-icon>
+              </button>
+            </div>
+            <div style="height: 4px; background: #d7e7f9; border-radius: 999px; overflow: hidden;">
+              <div [style.width.%]="resumableProgressPercent(resumable.uploadedChunks, resumable.totalChunks)" style="height: 100%; background: #4e79bb;"></div>
+            </div>
+            <span *ngIf="resumable.failedChunks.length" style="color: #6f4866;">Failed chunk(s): {{ formatChunkIndexes(resumable.failedChunks) }}</span>
+          </div>
+          <div style="font-size: 0.7rem; color: #5e7694;">Re-select the same file name to continue from uploaded chunks.</div>
+        </div>
+        </ng-container>
+        <ng-container *ngIf="visibleUploadItems() as queueItems">
+        <div *ngIf="queueItems.length" style="display: flex; flex-direction: column; gap: 3px; background: #f4f7fc; border: 1px solid #d8e1ee; border-radius: 10px; padding: 6px 8px; margin-bottom: 6px; color: #385878;">
           <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
             <strong style="font-size: 0.76rem;">{{ compactQueueTitle() }}</strong>
             <div style="display: flex; align-items: center; gap: 4px;">
@@ -612,14 +748,20 @@
               </button>
             </div>
           </div>
-          <div *ngIf="showUploadQueuePanel" style="max-height: 88px; overflow: auto; display: flex; flex-direction: column; gap: 2px;">
-          <div *ngFor="let item of visibleUploadItems()" style="display: flex; flex-direction: column; gap: 2px;">
-            <div style="display: flex; justify-content: space-between; font-size: 0.74rem; gap: 8px;">
+          <div *ngIf="showUploadQueuePanel" style="max-height: 88px; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 2px;">
+          <div *ngFor="let item of queueItems; trackBy: trackByUploadItem" style="display: flex; flex-direction: column; gap: 2px;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.74rem; gap: 8px; align-items: center;">
               <span style="min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ item.name }}</span>
-              <span *ngIf="item.status === 'uploading'">{{ item.progress }}%</span>
-              <span *ngIf="item.status === 'done'">done</span>
-              <span *ngIf="item.status === 'failed'">failed</span>
-              <span *ngIf="item.status === 'cancelled'">cancelled</span>
+              <div style="display: inline-flex; align-items: center; gap: 6px;">
+                <span *ngIf="item.status === 'uploading'">{{ item.progress }}%</span>
+                <span *ngIf="item.status === 'done'">done</span>
+                <span *ngIf="item.status === 'failed'">failed</span>
+                <span *ngIf="item.status === 'cancelled'">cancelled</span>
+                <button mat-stroked-button type="button" *ngIf="item.status === 'failed'" (click)="retryUploadItem(item.id)" [disabled]="uploadingAttachment" style="height: 22px; min-width: 44px; line-height: 20px; padding: 0 8px;">Retry</button>
+                <button mat-icon-button type="button" *ngIf="item.status !== 'uploading'" (click)="dismissUploadItem(item.id)" matTooltip="Dismiss" aria-label="Dismiss upload item" style="width: 24px; height: 24px; min-width: 24px; display: inline-flex; align-items: center; justify-content: center;">
+                  <mat-icon style="font-size: 16px; width: 16px; height: 16px;">close</mat-icon>
+                </button>
+              </div>
             </div>
             <div *ngIf="item.status === 'uploading'" style="height: 4px; background: #dae6f8; border-radius: 999px; overflow: hidden;">
               <div [style.width.%]="item.progress" style="height: 100%; background: #4a75b8;"></div>
@@ -627,6 +769,7 @@
           </div>
           </div>
         </div>
+        </ng-container>
         <mat-form-field appearance="outline" class="composerInput">
           <mat-label>{{ selectedUser ? 'Type a private message' : 'Type a public message' }}</mat-label>
           <input
@@ -691,6 +834,31 @@
         <mat-label>Search online users</mat-label>
         <input matInput [(ngModel)]="searchTerm" (input)="applyFilter()" />
       </mat-form-field>
+
+      <div style="border: 1px solid #d8e3f2; border-radius: 10px; background: #f8fbff; padding: 8px; margin: 0 0 10px;">
+        <strong style="font-size: 0.78rem; color: #355271;">Media & Upload Settings</strong>
+        <div style="margin-top: 6px; display: flex; flex-direction: column; gap: 7px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <span style="font-size: 0.73rem; color: #516a86;">Upload quality</span>
+            <div style="display: inline-flex; gap: 4px;">
+              <button mat-stroked-button type="button" style="height: 24px; min-width: 58px;" (click)="setUploadQuality('original')" [disabled]="uploadQuality === 'original'">Original</button>
+              <button mat-stroked-button type="button" style="height: 24px; min-width: 66px;" (click)="setUploadQuality('balanced')" [disabled]="uploadQuality === 'balanced'">Balanced</button>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <span style="font-size: 0.73rem; color: #516a86;">Autoplay media previews</span>
+            <button mat-stroked-button type="button" style="height: 24px; min-width: 54px;" (click)="toggleAutoplayMediaPreviews()">{{ autoplayMediaPreviews ? 'On' : 'Off' }}</button>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <span style="font-size: 0.73rem; color: #516a86;">Auto-open private media timeline</span>
+            <button mat-stroked-button type="button" style="height: 24px; min-width: 54px;" (click)="toggleAutoOpenPrivateMediaTimeline()">{{ autoOpenPrivateMediaTimeline ? 'On' : 'Off' }}</button>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <span style="font-size: 0.73rem; color: #516a86;">Hide media previews by default</span>
+            <button mat-stroked-button type="button" style="height: 24px; min-width: 54px;" (click)="toggleHideMediaPreviewsByDefault()">{{ hideMediaPreviewsByDefault ? 'On' : 'Off' }}</button>
+          </div>
+        </div>
+      </div>
 
       <mat-nav-list *ngIf="filteredOnlineUsers.length; else nobody">
         <a mat-list-item *ngFor="let u of filteredOnlineUsers" (click)="openDmFromSidebar(u)">
@@ -782,8 +950,45 @@
         <strong style="font-size: 0.9rem; color: #264363; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ viewerCurrentAttachment()?.name }}</strong>
         <span style="font-size: 0.75rem; color: #4c6580;">Sent by {{ replyAuthorLabel(viewer.message.from) }} • {{ viewer.message.timestamp | date:'short' }}</span>
         <span style="font-size: 0.72rem; color: #5b7390;">{{ attachmentSizeLabel(viewerCurrentAttachment()?.size) }} • {{ viewerCurrentAttachment()?.mimeType }}<ng-container *ngIf="isVideoAttachment(viewerCurrentAttachment())"> • {{ attachmentDurationLabel(viewerCurrentAttachment()) }}</ng-container></span>
+        <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
+          <span *ngFor="let chip of viewerMetadataChips()" style="font-size: 0.66rem; color: #365674; background: #ecf3fd; border: 1px solid #d2e1f4; border-radius: 999px; padding: 1px 7px;">{{ chip }}</span>
+        </div>
       </div>
       <div style="display: flex; align-items: center; gap: 4px;">
+        <button mat-icon-button type="button" (click)="showViewerShortcutHints = !showViewerShortcutHints" matTooltip="Shortcuts">
+          <mat-icon>keyboard</mat-icon>
+        </button>
+        <button
+          *ngIf="viewerCurrentAttachment()?.isImage && !viewerZoomControlOpen"
+          mat-icon-button
+          type="button"
+          (click)="toggleViewerZoomControl()"
+          [matTooltip]="viewerZoom > 1 ? 'Reset zoom' : 'Zoom'"
+          style="background: rgba(42, 60, 86, 0.08);"
+        >
+          <mat-icon>zoom_in</mat-icon>
+        </button>
+        <div *ngIf="viewerCurrentAttachment()?.isImage && viewerZoomControlOpen" style="display: inline-flex; align-items: center; gap: 10px; min-height: 34px; padding: 4px 10px 4px 8px; border-radius: 999px; background: linear-gradient(180deg, #1f3552, #162940); color: #f5fbff; border: 1px solid rgba(193, 214, 241, 0.3); box-shadow: inset 0 1px 0 rgba(255,255,255,0.09), 0 2px 8px rgba(9, 21, 37, 0.24);">
+          <button
+            mat-icon-button
+            type="button"
+            (click)="viewerZoomReset()"
+            matTooltip="Reset zoom"
+            style="width: 22px; height: 22px; min-width: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: #f5fbff; margin-right: -2px;"
+          >
+            <mat-icon style="font-size: 16px; width: 16px; height: 16px; opacity: 0.95;">search</mat-icon>
+          </button>
+          <input
+            type="range"
+            min="1"
+            max="4"
+            step="0.1"
+            [value]="viewerZoom"
+            (input)="onViewerZoomSliderInput($any($event.target).value)"
+            style="width: 108px; accent-color: #e3f0ff;"
+          />
+          <span style="font-size: 0.7rem; font-weight: 600; min-width: 36px; text-align: right; letter-spacing: 0.01em;">{{ viewerZoomPercent() }}</span>
+        </div>
         <button
           mat-icon-button
           type="button"
@@ -791,6 +996,15 @@
           matTooltip="Download"
         >
           <mat-icon>download</mat-icon>
+        </button>
+        <button
+          *ngIf="viewer.media.length > 1"
+          mat-icon-button
+          type="button"
+          (click)="downloadViewerAlbumAsZip()"
+          matTooltip="Download album as ZIP"
+        >
+          <mat-icon>folder_zip</mat-icon>
         </button>
         <a
           *ngIf="canSearchByImage(viewerCurrentAttachment())"
@@ -809,12 +1023,25 @@
     </div>
 
     <div style="padding: 12px; display: flex; justify-content: center; background: rgba(255,255,255,0.75);">
-      <div style="position: relative; max-width: min(860px, 90vw); max-height: 60vh; border-radius: 12px; overflow: hidden; border: 1px solid #d7e2f0; box-shadow: 0 12px 24px rgba(26, 48, 78, 0.15); background: #0d1726;">
+      <div
+        [ngStyle]="viewerImageStageStyle()"
+        data-viewer-stage="true"
+        (wheel)="onViewerImageWheel($event)"
+        (dblclick)="onViewerImageDoubleClick($event)"
+        (mousedown)="onViewerDragStart($event)"
+        (mousemove)="onViewerDragMove($event)"
+        (mouseup)="onViewerDragEnd()"
+        (mouseleave)="onViewerDragEnd()"
+        (touchstart)="onViewerTouchStart($event)"
+        (touchmove)="onViewerTouchMove($event)"
+        (touchend)="onViewerTouchEnd()"
+        (touchcancel)="onViewerTouchEnd()"
+      >
         <img
           *ngIf="viewerCurrentAttachment()?.isImage"
           [src]="attachmentUrl(viewerCurrentAttachment())"
           [alt]="viewerCurrentAttachment()?.name"
-          style="max-width: min(860px, 90vw); max-height: 60vh; display: block;"
+          [ngStyle]="viewerImageStyle()"
         />
         <video
           *ngIf="isVideoAttachment(viewerCurrentAttachment())"
@@ -825,6 +1052,7 @@
           playsinline
           style="max-width: min(860px, 90vw); max-height: 60vh; display: block; background: #000;"
         ></video>
+        <div *ngIf="viewerZoomHudVisible && viewerCurrentAttachment()?.isImage" style="position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); background: rgba(12, 24, 39, 0.72); color: #fff; border-radius: 999px; padding: 2px 10px; font-size: 0.72rem; letter-spacing: 0.01em;">{{ viewerZoomPercent() }}</div>
         <button *ngIf="viewer.media.length > 1" mat-icon-button type="button" (click)="viewerPrev()" [disabled]="!viewerHasPrev()" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); background: rgba(6, 14, 25, 0.48); color: #f7fbff; border: 1px solid rgba(255, 255, 255, 0.28);">
           <mat-icon>chevron_left</mat-icon>
         </button>
@@ -836,33 +1064,42 @@
     <div *ngIf="viewer.media.length > 1" style="padding: 2px 12px 8px; font-size: 0.74rem; color: #4c6580;">
       Item {{ viewer.index + 1 }} of {{ viewer.media.length }} • Use keyboard arrows to navigate
     </div>
-    <div *ngIf="viewer.media.length > 1" style="padding: 0 12px 10px; display: flex; gap: 6px; overflow-x: auto;">
-      <button
-        type="button"
-        *ngFor="let media of viewer.media; let i = index"
-        (click)="viewerJumpTo(i)"
-        style="position: relative; border: 0; padding: 0; background: transparent; cursor: pointer; flex: 0 0 auto;"
-      >
-        <img
-          *ngIf="media.isImage"
-          [src]="attachmentUrl(media)"
-          [alt]="media.name"
-          style="width: 52px; height: 52px; object-fit: cover; border-radius: 8px; border: 2px solid;"
-          [style.border-color]="viewer.index === i ? '#436eb1' : '#d3deee'"
-        />
-        <video
-          *ngIf="isVideoAttachment(media)"
-          [src]="attachmentUrl(media)"
-          preload="metadata"
-          muted
-          playsinline
-          style="width: 52px; height: 52px; object-fit: cover; border-radius: 8px; border: 2px solid; background: #000;"
-          [style.border-color]="viewer.index === i ? '#436eb1' : '#d3deee'"
-        ></video>
-        <div *ngIf="isVideoAttachment(media)" style="position: absolute; right: 3px; bottom: 3px; background: rgba(8, 15, 25, 0.7); color: #fff; border-radius: 999px; padding: 0 4px; font-size: 0.58rem; line-height: 1.4;">
-          {{ attachmentDurationLabel(media) }}
-        </div>
-      </button>
+    <div *ngIf="showViewerShortcutHints" style="padding: 2px 12px 8px; font-size: 0.72rem; color: #4b637f; display: flex; gap: 10px; flex-wrap: wrap;">
+      <span><strong>Keys:</strong></span>
+      <span><code>←/→</code> next/prev</span>
+      <span><code>+</code>/<code>-</code> zoom</span>
+      <span><code>0</code> reset zoom</span>
+      <span><code>?</code> toggle this hint</span>
+    </div>
+    <div *ngIf="viewer.media.length > 1" style="padding: 0 12px 10px; display: flex; justify-content: center;">
+      <div style="display: flex; gap: 6px; overflow-x: auto; max-width: min(860px, 90vw); padding-bottom: 2px;">
+        <button
+          type="button"
+          *ngFor="let media of viewer.media; let i = index"
+          (click)="viewerJumpTo(i)"
+          style="position: relative; border: 0; padding: 0; background: transparent; cursor: pointer; flex: 0 0 auto;"
+        >
+          <img
+            *ngIf="media.isImage"
+            [src]="attachmentUrl(media)"
+            [alt]="media.name"
+            style="width: 52px; height: 52px; object-fit: cover; border-radius: 8px; border: 2px solid;"
+            [style.border-color]="viewer.index === i ? '#436eb1' : '#d3deee'"
+          />
+          <video
+            *ngIf="isVideoAttachment(media)"
+            [src]="attachmentUrl(media)"
+            preload="metadata"
+            muted
+            playsinline
+            style="width: 52px; height: 52px; object-fit: cover; border-radius: 8px; border: 2px solid; background: #000;"
+            [style.border-color]="viewer.index === i ? '#436eb1' : '#d3deee'"
+          ></video>
+          <div *ngIf="isVideoAttachment(media)" style="position: absolute; right: 3px; bottom: 3px; background: rgba(8, 15, 25, 0.7); color: #fff; border-radius: 999px; padding: 0 4px; font-size: 0.58rem; line-height: 1.4;">
+            {{ attachmentDurationLabel(media) }}
+          </div>
+        </button>
+      </div>
     </div>
 
     <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-top: 1px solid #d9e5f5;">
@@ -883,13 +1120,17 @@
         <button mat-stroked-button type="button" [disabled]="!canReplyPrivatelyToAttachment()" (click)="replyPrivatelyToAttachment(dialogRef)">
           Reply privately
         </button>
-        <button mat-stroked-button type="button" (click)="reportAttachmentFromViewer()">
-          Report
-        </button>
+        <button mat-stroked-button type="button" [matMenuTriggerFor]="viewerReportMenu">Report</button>
       </div>
     </div>
     <div *ngIf="viewerNotice" style="padding: 8px 12px; font-size: 0.76rem; color: #35506e; border-top: 1px solid #d9e5f5; background: #f3f8ff;">
       {{ viewerNotice }}
     </div>
   </div>
+  <mat-menu #viewerReportMenu="matMenu">
+    <button mat-menu-item type="button" *ngFor="let reason of reportReasonOptions" (click)="reportAttachmentFromViewer(reason.key)">
+      <mat-icon>flag</mat-icon>
+      <span>{{ reason.label }}</span>
+    </button>
+  </mat-menu>
 </ng-template>

@@ -9,7 +9,15 @@ const attachmentReportSchema = new Schema(
     scope: { type: String, enum: ['public', 'private'], required: true },
     attachmentUrl: { type: String, required: true },
     reason: { type: String, default: 'User report' },
-    status: { type: String, enum: ['pending', 'reviewed'], default: 'pending', index: true }
+    category: {
+      type: String,
+      enum: ['spam', 'harassment', 'violence', 'sexual', 'copyright', 'other'],
+      default: 'other',
+      index: true
+    },
+    severity: { type: String, enum: ['low', 'medium', 'high'], default: 'medium', index: true },
+    note: { type: String, default: '' },
+    status: { type: String, enum: ['pending', 'in_review', 'resolved', 'dismissed'], default: 'pending', index: true }
   },
   { timestamps: true }
 );

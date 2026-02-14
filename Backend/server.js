@@ -7,6 +7,8 @@ const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const archiver = require('archiver');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const User = require('./models/User');
@@ -51,7 +53,17 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }
 });
 
+const chunkUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 }
+});
+
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const CHUNK_SIZE_BYTES = 1024 * 1024;
+const DIRECT_UPLOAD_THRESHOLD_BYTES = 8 * 1024 * 1024;
+const CHUNK_RESUME_TTL_MS = 24 * 60 * 60 * 1000;
+const chunkSessions = new Map();
+const chunkSessionsByResumeKey = new Map();
 const ALLOWED_UPLOAD_MIME = [
   /^image\//,
   /^video\//,
@@ -134,8 +146,297 @@ app.post('/api/upload/presign', auth, (_, res) => {
 app.get('/api/upload/policy', auth, (_, res) => {
   res.json({
     maxBytes: MAX_UPLOAD_BYTES,
-    allowedMimePatterns: ALLOWED_UPLOAD_MIME.map((rx) => rx.source)
+    allowedMimePatterns: ALLOWED_UPLOAD_MIME.map((rx) => rx.source),
+    chunkSize: CHUNK_SIZE_BYTES,
+    directUploadThreshold: DIRECT_UPLOAD_THRESHOLD_BYTES,
+    resumeTtlMs: CHUNK_RESUME_TTL_MS
   });
+});
+
+function safeChunkDir(sessionId) {
+  return path.join(uploadsDir, '_chunk', sessionId);
+}
+
+async function deleteChunkSession(sessionId) {
+  const existing = chunkSessions.get(sessionId);
+  if (!existing) return;
+  chunkSessions.delete(sessionId);
+  if (existing.resumeKey && chunkSessionsByResumeKey.get(existing.resumeKey) === sessionId) {
+    chunkSessionsByResumeKey.delete(existing.resumeKey);
+  }
+  try {
+    await fs.promises.rm(existing.tmpDir, { recursive: true, force: true });
+  } catch {
+    // no-op
+  }
+}
+
+async function clearExpiredChunkSessions() {
+  const now = Date.now();
+  const entries = Array.from(chunkSessions.entries());
+  for (const [id, session] of entries) {
+    if (now - session.updatedAt > CHUNK_RESUME_TTL_MS) {
+      await deleteChunkSession(id);
+    }
+  }
+}
+
+function chunkSessionResponse(session) {
+  return {
+    sessionId: session.id,
+    chunkSize: CHUNK_SIZE_BYTES,
+    uploadedChunks: Array.from(session.uploadedChunks).sort((a, b) => a - b),
+    totalChunks: session.totalChunks,
+    expiresAt: new Date(session.updatedAt + CHUNK_RESUME_TTL_MS).toISOString()
+  };
+}
+
+app.post('/api/upload/chunk/init', auth, async (req, res) => {
+  try {
+    await clearExpiredChunkSessions();
+    const name = String(req.body?.name || 'file').slice(0, 180);
+    const mimeType = String(req.body?.mimeType || 'application/octet-stream').trim();
+    const size = Number(req.body?.size || 0);
+    const totalChunks = Number(req.body?.totalChunks || 0);
+    const resumeKey = String(req.body?.resumeKey || '').trim().slice(0, 180);
+
+    if (!name || !mimeType || !Number.isFinite(size) || size <= 0 || size > MAX_UPLOAD_BYTES) {
+      return res.status(400).json({ error: 'Invalid upload init payload' });
+    }
+
+    const allowed = ALLOWED_UPLOAD_MIME.some((rx) => rx.test(mimeType));
+    if (!allowed) {
+      return res.status(415).json({ error: `Unsupported file type: ${mimeType}` });
+    }
+
+    if (!Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks > 500) {
+      return res.status(400).json({ error: 'Invalid chunk count' });
+    }
+
+    if (resumeKey) {
+      const existingId = chunkSessionsByResumeKey.get(`${req.user.id}:${resumeKey}`);
+      const existing = existingId ? chunkSessions.get(existingId) : null;
+      if (existing && existing.userId === req.user.id && existing.size === size && existing.mimeType === mimeType) {
+        existing.updatedAt = Date.now();
+        return res.json(chunkSessionResponse(existing));
+      }
+    }
+
+    const sessionId = crypto.randomUUID();
+    const tmpDir = safeChunkDir(sessionId);
+    await fs.promises.mkdir(tmpDir, { recursive: true });
+
+    const session = {
+      id: sessionId,
+      userId: req.user.id,
+      name,
+      mimeType,
+      size,
+      totalChunks,
+      uploadedChunks: new Set(),
+      tmpDir,
+      updatedAt: Date.now(),
+      resumeKey: resumeKey ? `${req.user.id}:${resumeKey}` : ''
+    };
+
+    chunkSessions.set(sessionId, session);
+    if (session.resumeKey) chunkSessionsByResumeKey.set(session.resumeKey, sessionId);
+
+    return res.json(chunkSessionResponse(session));
+  } catch (err) {
+    console.error('Chunk init error', err);
+    return res.status(500).json({ error: 'Could not initialize chunk upload' });
+  }
+});
+
+app.post('/api/upload/chunk/:sessionId', auth, (req, res) => {
+  chunkUpload.single('chunk')(req, res, async (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ error: 'Chunk too large' });
+      }
+      return res.status(400).json({ error: 'Chunk upload failed' });
+    }
+
+    try {
+      const session = chunkSessions.get(String(req.params.sessionId || ''));
+      if (!session || session.userId !== req.user.id) {
+        return res.status(404).json({ error: 'Chunk session not found' });
+      }
+      if (!req.file?.buffer?.length) {
+        return res.status(400).json({ error: 'Missing chunk file' });
+      }
+
+      const index = Number(req.body?.index);
+      if (!Number.isInteger(index) || index < 0 || index >= session.totalChunks) {
+        return res.status(400).json({ error: 'Invalid chunk index' });
+      }
+
+      const chunkPath = path.join(session.tmpDir, `${index}.part`);
+      await fs.promises.writeFile(chunkPath, req.file.buffer);
+      session.uploadedChunks.add(index);
+      session.updatedAt = Date.now();
+
+      return res.json({
+        ok: true,
+        uploadedCount: session.uploadedChunks.size,
+        totalChunks: session.totalChunks
+      });
+    } catch (e) {
+      console.error('Chunk upload handler error', e);
+      return res.status(500).json({ error: 'Could not save chunk' });
+    }
+  });
+});
+
+app.post('/api/upload/chunk/:sessionId/finalize', auth, async (req, res) => {
+  try {
+    const session = chunkSessions.get(String(req.params.sessionId || ''));
+    if (!session || session.userId !== req.user.id) {
+      return res.status(404).json({ error: 'Chunk session not found' });
+    }
+
+    if (session.uploadedChunks.size !== session.totalChunks) {
+      return res.status(400).json({ error: 'Upload incomplete' });
+    }
+
+    const safeOriginal = String(session.name || 'file')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .slice(0, 80);
+    const finalName = `${Date.now()}-${Math.round(Math.random() * 1e9)}-${safeOriginal}`;
+    const finalPath = path.join(uploadsDir, finalName);
+
+    const writer = fs.createWriteStream(finalPath);
+    for (let i = 0; i < session.totalChunks; i += 1) {
+      const chunkPath = path.join(session.tmpDir, `${i}.part`);
+      const data = await fs.promises.readFile(chunkPath);
+      writer.write(data);
+    }
+    writer.end();
+    await new Promise((resolve, reject) => {
+      writer.on('finish', resolve);
+      writer.on('error', reject);
+    });
+
+    const stat = await fs.promises.stat(finalPath);
+    const uploadedDuration = Number(req.body?.durationSeconds);
+    const uploadedWidth = Number(req.body?.width);
+    const uploadedHeight = Number(req.body?.height);
+
+    const payload = {
+      url: `/uploads/${finalName}`,
+      name: session.name,
+      mimeType: session.mimeType,
+      size: Number(stat.size || session.size || 0),
+      isImage: session.mimeType.startsWith('image/'),
+      durationSeconds: Number.isFinite(uploadedDuration) && uploadedDuration > 0 ? Math.floor(uploadedDuration) : undefined,
+      width: Number.isFinite(uploadedWidth) && uploadedWidth > 0 ? Math.round(uploadedWidth) : undefined,
+      height: Number.isFinite(uploadedHeight) && uploadedHeight > 0 ? Math.round(uploadedHeight) : undefined,
+      storageProvider: 'local',
+      objectKey: finalName
+    };
+
+    await deleteChunkSession(session.id);
+    return res.json(payload);
+  } catch (err) {
+    console.error('Chunk finalize error', err);
+    return res.status(500).json({ error: 'Could not finalize chunk upload' });
+  }
+});
+
+app.delete('/api/upload/chunk/:sessionId', auth, async (req, res) => {
+  const session = chunkSessions.get(String(req.params.sessionId || ''));
+  if (!session || session.userId !== req.user.id) {
+    return res.json({ ok: true });
+  }
+  await deleteChunkSession(session.id);
+  return res.json({ ok: true });
+});
+
+function sanitizeZipEntryName(value, fallbackIndex) {
+  const safe = String(value || '')
+    .replace(/[\\/:*?"<>|]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 140);
+  return safe || `attachment-${fallbackIndex}`;
+}
+
+function uniqueZipEntryName(name, used) {
+  if (!used.has(name)) {
+    used.add(name);
+    return name;
+  }
+
+  const ext = path.extname(name);
+  const base = ext ? name.slice(0, -ext.length) : name;
+  let i = 2;
+  while (used.has(`${base} (${i})${ext}`)) i += 1;
+  const next = `${base} (${i})${ext}`;
+  used.add(next);
+  return next;
+}
+
+app.post('/api/attachments/zip', auth, async (req, res) => {
+  try {
+    const incoming = Array.isArray(req.body?.attachments) ? req.body.attachments : [];
+    if (!incoming.length) {
+      return res.status(400).json({ error: 'No attachments provided' });
+    }
+
+    const normalized = incoming
+      .map((a) => normalizeAttachment(a))
+      .filter(Boolean)
+      .slice(0, 40);
+
+    const usedNames = new Set();
+    const localFiles = [];
+    for (let i = 0; i < normalized.length; i += 1) {
+      const attachment = normalized[i];
+      const match = String(attachment.url || '').match(/^\/uploads\/([a-zA-Z0-9._-]+)$/);
+      if (!match) continue;
+
+      const absolutePath = path.join(uploadsDir, match[1]);
+      if (!absolutePath.startsWith(uploadsDir)) continue;
+
+      try {
+        await fs.promises.access(absolutePath, fs.constants.R_OK);
+      } catch {
+        continue;
+      }
+
+      const safeName = sanitizeZipEntryName(attachment.name, i + 1);
+      const entryName = uniqueZipEntryName(safeName, usedNames);
+      localFiles.push({ absolutePath, entryName });
+    }
+
+    if (!localFiles.length) {
+      return res.status(400).json({ error: 'No downloadable local attachments found' });
+    }
+
+    const archiveName = `chat-album-${Date.now()}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${archiveName}"`);
+
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    archive.on('error', (err) => {
+      console.error('Zip creation error', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Could not build zip' });
+        return;
+      }
+      res.end();
+    });
+
+    archive.pipe(res);
+    localFiles.forEach((file) => {
+      archive.file(file.absolutePath, { name: file.entryName });
+    });
+    await archive.finalize();
+  } catch (err) {
+    console.error('Attachment zip error', err);
+    res.status(500).json({ error: 'Could not build zip' });
+  }
 });
 
 app.post('/api/attachments/report', auth, async (req, res) => {
@@ -144,6 +445,13 @@ app.post('/api/attachments/report', auth, async (req, res) => {
     const scope = req.body?.scope === 'private' ? 'private' : 'public';
     const attachmentUrl = String(req.body?.attachmentUrl || '').trim();
     const reason = String(req.body?.reason || 'User report').trim().slice(0, 240);
+    const category = ['spam', 'harassment', 'violence', 'sexual', 'copyright', 'other'].includes(String(req.body?.category || ''))
+      ? String(req.body.category)
+      : 'other';
+    const severity = ['low', 'medium', 'high'].includes(String(req.body?.severity || ''))
+      ? String(req.body.severity)
+      : 'medium';
+    const note = String(req.body?.note || '').trim().slice(0, 280);
 
     if (!messageId || !attachmentUrl) {
       return res.status(400).json({ error: 'Missing report fields' });
@@ -155,7 +463,11 @@ app.post('/api/attachments/report', auth, async (req, res) => {
       messageId,
       scope,
       attachmentUrl,
-      reason
+      reason,
+      category,
+      severity,
+      note,
+      status: 'pending'
     });
 
     res.json({ ok: true });

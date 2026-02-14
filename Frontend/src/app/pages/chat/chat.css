@@ -39,6 +39,19 @@
   border-radius: 999px;
 }
 
+.toolbarIconBtn,
+.timelineIconBtn {
+  border-radius: 10px;
+  transition: background-color 0.18s ease, box-shadow 0.18s ease, transform 0.12s ease;
+}
+
+.toolbarIconBtn:hover,
+.timelineIconBtn:hover {
+  background-color: rgba(70, 108, 150, 0.12);
+  box-shadow: 0 1px 2px rgba(20, 41, 66, 0.1);
+}
+
+
 .toolbarSearch {
   display: inline-flex;
   align-items: center;
@@ -148,6 +161,7 @@
   padding: 8px 12px;
   border-radius: 16px;
   max-width: 65%;
+  width: fit-content;
   position: relative;
   overflow: visible;
   box-shadow: 0px 2px 6px rgba(0,0,0,0.05);
@@ -230,7 +244,7 @@
 }
 
 .meta {
-  margin-top: 5px;
+  margin-top: 7px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -262,7 +276,7 @@
 
 .actionBtn {
   border: 1px solid #d7e0ef;
-  background: #ffffff;
+  background: #f7faff;
   font-size: 0.72rem;
   color: #3f5870;
   width: 28px;
@@ -278,7 +292,7 @@
 }
 
 .actionBtn:hover {
-  background: #eef4ff;
+  background: #e8f0ff;
   border-color: #b9c9e2;
   transform: translateY(-1px);
 }
@@ -463,22 +477,6 @@ button[type="submit"] {
   color: #888;
   text-align: center;
   margin-top: 20px;
-}
-
-.messages::-webkit-scrollbar,
-.rightBody::-webkit-scrollbar {
-  width: 6px;
-}
-
-.messages::-webkit-scrollbar-thumb,
-.rightBody::-webkit-scrollbar-thumb {
-  background: rgba(63,81,181,0.3);
-  border-radius: 4px;
-}
-
-.messages::-webkit-scrollbar-track,
-.rightBody::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 .dialogBody {
