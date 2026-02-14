@@ -15,6 +15,9 @@ function serializeAttachment(a) {
     size: a.size || 0,
     isImage: !!a.isImage,
     durationSeconds: Number(a.durationSeconds) > 0 ? Math.round(Number(a.durationSeconds)) : undefined,
+    waveform: Array.isArray(a.waveform)
+      ? a.waveform.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 96)
+      : undefined,
     width: Number(a.width) > 0 ? Math.round(Number(a.width)) : undefined,
     height: Number(a.height) > 0 ? Math.round(Number(a.height)) : undefined,
     storageProvider: a.storageProvider || 'local',

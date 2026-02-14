@@ -49,6 +49,8 @@ export class ChatComponent implements AfterViewChecked {
   hideMediaPreviewsByDefault = false;
   uploadingAttachment = false;
   uploadingAttachmentCount = 0;
+  isRecordingVoice = false;
+  voiceRecordingSeconds = 0;
   uploadErrors: string[] = [];
   persistedFailedUploadNames: string[] = [];
   uploadProgressItems: Array<{
@@ -160,6 +162,7 @@ export class ChatComponent implements AfterViewChecked {
     index: number;
   } | null = null;
   attachmentMenuTarget: ChatMessage['attachment'] | null = null;
+  voiceMenuTarget: ChatMessage['attachment'] | null = null;
   viewerNotice = '';
   viewerZoom = 1;
   viewerZoomControlOpen = false;
@@ -187,6 +190,23 @@ export class ChatComponent implements AfterViewChecked {
   private temporaryExpandedAlbumKeys = new Set<string>();
   private albumCollapseTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private durationRecheckTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private voicePlaybackRateByKey: Record<string, number> = {};
+  private voiceUiStateByKey: Record<string, { currentTime: number; duration: number; playing: boolean; muted: boolean; volume: number }> = {};
+  private voiceWaveformByKey: Record<string, number[]> = {};
+  private voiceWaveformLoading = new Set<string>();
+  private voiceDurationResolveLoading = new Set<string>();
+  private voiceLastNonZeroVolumeByKey: Record<string, number> = {};
+  private readonly defaultVoiceWaveform = [4, 5, 6, 7, 8, 10, 11, 9, 8, 7, 6, 5, 4, 6, 8, 10, 12, 11, 9, 8, 6, 5, 4, 4, 5, 6, 7, 8, 9, 11, 12, 10, 8, 7, 6, 5, 4, 5, 6, 8, 9, 11, 10, 8, 7, 6, 5, 4];
+  private voiceRecorder: MediaRecorder | null = null;
+  private voiceRecorderStream: MediaStream | null = null;
+  private voiceRecorderChunks: BlobPart[] = [];
+  private voiceRecordingTimer: ReturnType<typeof setInterval> | null = null;
+  private voiceRecordingCancelled = false;
+  private voiceRecordingStartedAt = 0;
+  private voiceWaveformScrub: { pointerId: number; key: string } | null = null;
+  private voiceProgressTimers = new Map<string, ReturnType<typeof setInterval>>();
+  private voiceVolumeHoverKey: string | null = null;
+  private voiceAudioElementByKey = new Map<string, HTMLAudioElement>();
   private previewVisibilityObserver: IntersectionObserver | null = null;
   private observedPreviewVideos = new WeakSet<HTMLVideoElement>();
   private chunkRecovery: Record<string, {
@@ -392,6 +412,7 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   ngOnDestroy() {
+    this.stopVoiceRecording(true);
     this.cancelReactionPress();
     if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
     this.clearTypingIdleTimer();
@@ -410,6 +431,8 @@ export class ChatComponent implements AfterViewChecked {
     this.albumCollapseTimers.clear();
     this.durationRecheckTimers.forEach((t) => clearTimeout(t));
     this.durationRecheckTimers.clear();
+    this.voiceProgressTimers.forEach((t) => clearInterval(t));
+    this.voiceProgressTimers.clear();
     this.previewVisibilityObserver?.disconnect();
     this.previewVisibilityObserver = null;
     this.stopViewerMomentum();
@@ -672,6 +695,144 @@ export class ChatComponent implements AfterViewChecked {
     this.attachmentInput?.nativeElement?.click();
   }
 
+  async toggleVoiceRecording() {
+    if (this.isRecordingVoice) {
+      this.stopVoiceRecording(false);
+      return;
+    }
+    await this.startVoiceRecording();
+  }
+
+  private async startVoiceRecording() {
+    if (this.uploadingAttachment || this.isRecordingVoice) return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      this.pushUploadError('Voice recording is not supported in this browser.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = this.preferredVoiceMimeType();
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
+      this.voiceRecorderChunks = [];
+      this.voiceRecorder = recorder;
+      this.voiceRecorderStream = stream;
+      this.voiceRecordingCancelled = false;
+      this.voiceRecordingStartedAt = Date.now();
+      this.isRecordingVoice = true;
+      this.voiceRecordingSeconds = 0;
+
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data && event.data.size > 0) this.voiceRecorderChunks.push(event.data);
+      };
+
+      recorder.onstop = () => {
+        void this.finishVoiceRecording();
+      };
+
+      recorder.start(250);
+      this.voiceRecordingTimer = setInterval(() => {
+        this.voiceRecordingSeconds += 1;
+      }, 1000);
+    } catch {
+      this.pushUploadError('Microphone permission is required to record voice notes.');
+      this.cleanupVoiceRecordingResources();
+    }
+  }
+
+  stopVoiceRecording(cancel = false) {
+    if (!this.voiceRecorder) return;
+
+    this.voiceRecordingCancelled = cancel;
+    this.isRecordingVoice = false;
+    if (this.voiceRecordingTimer) {
+      clearInterval(this.voiceRecordingTimer);
+      this.voiceRecordingTimer = null;
+    }
+
+    if (this.voiceRecorder.state !== 'inactive') {
+      this.voiceRecorder.stop();
+    } else {
+      this.cleanupVoiceRecordingResources();
+    }
+  }
+
+  voiceRecordingLabel(): string {
+    return this.formatDuration(this.voiceRecordingSeconds);
+  }
+
+  private async finishVoiceRecording() {
+    const elapsedSeconds = this.voiceRecordingStartedAt > 0
+      ? Math.max(1, Math.round((Date.now() - this.voiceRecordingStartedAt) / 1000))
+      : Math.max(1, Math.round(this.voiceRecordingSeconds));
+    const recorder = this.voiceRecorder;
+    const chunks = this.voiceRecorderChunks.slice();
+    const cancelled = this.voiceRecordingCancelled;
+    const mimeType = String(recorder?.mimeType || 'audio/webm').trim() || 'audio/webm';
+    this.cleanupVoiceRecordingResources();
+
+    if (cancelled) return;
+    if (!chunks.length) {
+      this.pushUploadError('No audio captured. Please try recording again.');
+      return;
+    }
+
+    const blob = new Blob(chunks, { type: mimeType });
+    if (blob.size < 1200) {
+      this.pushUploadError('Voice note is too short. Hold the button a bit longer.');
+      return;
+    }
+
+    const extension = mimeType.includes('ogg')
+      ? 'ogg'
+      : mimeType.includes('mp4') || mimeType.includes('aac')
+        ? 'm4a'
+        : 'webm';
+
+    const stamp = new Date().toISOString().replace(/[.:]/g, '-');
+    const file = new File([blob], `voice-note-${stamp}.${extension}`, {
+      type: mimeType,
+      lastModified: Date.now()
+    });
+    (file as any).__durationSecondsHint = elapsedSeconds;
+
+    await this.uploadAttachmentFiles([file]);
+  }
+
+  private cleanupVoiceRecordingResources() {
+    if (this.voiceRecordingTimer) {
+      clearInterval(this.voiceRecordingTimer);
+      this.voiceRecordingTimer = null;
+    }
+
+    if (this.voiceRecorderStream) {
+      this.voiceRecorderStream.getTracks().forEach((track) => track.stop());
+      this.voiceRecorderStream = null;
+    }
+
+    this.voiceRecorder = null;
+    this.voiceRecorderChunks = [];
+    this.isRecordingVoice = false;
+    this.voiceRecordingCancelled = false;
+    this.voiceRecordingSeconds = 0;
+    this.voiceRecordingStartedAt = 0;
+  }
+
+  private preferredVoiceMimeType(): string {
+    const candidates = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'];
+    for (const candidate of candidates) {
+      try {
+        if (MediaRecorder.isTypeSupported(candidate)) return candidate;
+      } catch {
+        // no-op
+      }
+    }
+    return '';
+  }
+
   onAttachmentSelected(event: Event) {
     const input = event.target as HTMLInputElement | null;
     const files = Array.from(input?.files || []);
@@ -760,6 +921,11 @@ export class ChatComponent implements AfterViewChecked {
               size: Number(uploaded.size || preparedFile.size || 0),
               isImage: !!uploaded.isImage,
               durationSeconds: Number(uploaded.durationSeconds || mediaMetadata.durationSeconds || 0) || undefined,
+              waveform: Array.isArray(uploaded.waveform) && uploaded.waveform.length
+                ? uploaded.waveform
+                : Array.isArray(mediaMetadata.waveform) && mediaMetadata.waveform.length
+                  ? mediaMetadata.waveform
+                  : undefined,
               width: Number(uploaded.width || mediaMetadata.width || 0) || undefined,
               height: Number(uploaded.height || mediaMetadata.height || 0) || undefined,
               storageProvider: uploaded.storageProvider,
@@ -869,12 +1035,15 @@ export class ChatComponent implements AfterViewChecked {
     file: File,
     headers: HttpHeaders,
     itemId: string,
-    metadata?: { durationSeconds?: number | null; width?: number | null; height?: number | null }
+    metadata?: { durationSeconds?: number | null; waveform?: number[] | null; width?: number | null; height?: number | null }
   ): Promise<Attachment> {
     const formData = new FormData();
     formData.append('file', file);
     if (Number(metadata?.durationSeconds) > 0) {
       formData.append('durationSeconds', String(Math.round(Number(metadata?.durationSeconds))));
+    }
+    if (Array.isArray(metadata?.waveform) && metadata!.waveform!.length) {
+      formData.append('waveform', JSON.stringify(metadata!.waveform));
     }
     if (Number(metadata?.width) > 0) {
       formData.append('width', String(Math.round(Number(metadata?.width))));
@@ -914,7 +1083,7 @@ export class ChatComponent implements AfterViewChecked {
     file: File,
     headers: HttpHeaders,
     itemId: string,
-    metadata?: { durationSeconds?: number | null; width?: number | null; height?: number | null }
+    metadata?: { durationSeconds?: number | null; waveform?: number[] | null; width?: number | null; height?: number | null }
   ): Promise<Attachment> {
     const chunkSize = Math.max(256 * 1024, this.uploadChunkSize || (1024 * 1024));
     const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize));
@@ -986,6 +1155,7 @@ export class ChatComponent implements AfterViewChecked {
 
     const finalizePayload = await this.http.post<Attachment>(`${environment.apiUrl}/api/upload/chunk/${sessionId}/finalize`, {
       durationSeconds: Number(metadata?.durationSeconds || 0) || undefined,
+      waveform: Array.isArray(metadata?.waveform) && metadata!.waveform!.length ? metadata!.waveform : undefined,
       width: Number(metadata?.width || 0) || undefined,
       height: Number(metadata?.height || 0) || undefined
     }, { headers }).toPromise();
@@ -1000,38 +1170,50 @@ export class ChatComponent implements AfterViewChecked {
     return `${file.name}|${file.size}|${file.lastModified}|${file.type || 'application/octet-stream'}`;
   }
 
-  private extractMediaMetadata(file: File): Promise<{ durationSeconds?: number; width?: number; height?: number }> {
-    if (!file.type.startsWith('video/') && !file.type.startsWith('image/')) {
+  private extractMediaMetadata(file: File): Promise<{ durationSeconds?: number; waveform?: number[]; width?: number; height?: number }> {
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    const isAudio = file.type.startsWith('audio/');
+    const durationHint = Number((file as any).__durationSecondsHint || 0);
+    if (!isVideo && !isImage && !isAudio) {
       return Promise.resolve({});
     }
 
     return new Promise((resolve) => {
-      const media = document.createElement(file.type.startsWith('video/') ? 'video' : 'img') as HTMLVideoElement | HTMLImageElement;
+      const media = document.createElement(isVideo ? 'video' : isAudio ? 'audio' : 'img') as HTMLVideoElement | HTMLAudioElement | HTMLImageElement;
       const objectUrl = URL.createObjectURL(file);
       const cleanup = () => {
         URL.revokeObjectURL(objectUrl);
         media.removeAttribute('src');
-        if (media instanceof HTMLVideoElement) media.load();
+        if (media instanceof HTMLVideoElement || media instanceof HTMLAudioElement) media.load();
       };
 
-      const done = (durationOverride?: number) => {
+      const done = (durationOverride?: number, waveformOverride?: number[]) => {
         const width = Number((media as any).videoWidth || (media as any).naturalWidth || 0);
         const height = Number((media as any).videoHeight || (media as any).naturalHeight || 0);
-        const rawDuration = Number(durationOverride || (media instanceof HTMLVideoElement ? media.duration : 0));
+        const rawDuration = Number(durationOverride || (media instanceof HTMLVideoElement || media instanceof HTMLAudioElement ? media.duration : 0));
+        const roundedDuration = Number.isFinite(rawDuration) && rawDuration > 0 ? Math.max(1, Math.round(rawDuration)) : undefined;
+        const finalDuration = roundedDuration || (Number.isFinite(durationHint) && durationHint > 0 ? Math.max(1, Math.round(durationHint)) : undefined);
+        const finalWaveform = Array.isArray(waveformOverride) && waveformOverride.length
+          ? waveformOverride
+          : isAudio
+            ? this.defaultVoiceWaveform
+            : undefined;
         cleanup();
         resolve({
-          durationSeconds: Number.isFinite(rawDuration) && rawDuration > 0 ? Math.floor(rawDuration) : undefined,
+          durationSeconds: finalDuration,
+          waveform: finalWaveform,
           width: Number.isFinite(width) && width > 0 ? Math.round(width) : undefined,
           height: Number.isFinite(height) && height > 0 ? Math.round(height) : undefined
         });
       };
 
-      if (media instanceof HTMLVideoElement) {
+      if (media instanceof HTMLVideoElement || media instanceof HTMLAudioElement) {
         media.preload = 'metadata';
-        media.onloadedmetadata = () => {
+        media.onloadedmetadata = async () => {
           const initialDuration = Number(media.duration);
-          if (!Number.isFinite(initialDuration) || initialDuration <= 0) {
-            done();
+          if (Number.isFinite(initialDuration) && initialDuration > 0) {
+            done(initialDuration);
             return;
           }
 
@@ -1039,15 +1221,26 @@ export class ChatComponent implements AfterViewChecked {
           const fallbackTimer = setTimeout(() => {
             if (settled) return;
             settled = true;
-            done(initialDuration);
+            done();
           }, 850);
 
-          const finalizeFromSeek = () => {
+          const finalizeFromSeek = async () => {
             if (settled) return;
             settled = true;
             clearTimeout(fallbackTimer);
             const corrected = Number(media.duration);
-            done(Number.isFinite(corrected) && corrected > 0 ? corrected : initialDuration);
+            if (Number.isFinite(corrected) && corrected > 0) {
+              done(corrected);
+              return;
+            }
+
+            if (isAudio) {
+              const decoded = await this.decodeAudioAnalysisFromFile(file);
+              done(decoded.duration, decoded.waveform);
+              return;
+            }
+
+            done();
           };
 
           media.addEventListener('seeked', finalizeFromSeek, { once: true });
@@ -1056,7 +1249,11 @@ export class ChatComponent implements AfterViewChecked {
           } catch {
             settled = true;
             clearTimeout(fallbackTimer);
-            done(initialDuration);
+            if (isAudio) {
+              this.decodeAudioAnalysisFromFile(file).then((decoded) => done(decoded.duration, decoded.waveform));
+            } else {
+              done();
+            }
           }
         };
       } else {
@@ -1068,6 +1265,30 @@ export class ChatComponent implements AfterViewChecked {
       };
       media.src = objectUrl;
     });
+  }
+
+  private async decodeAudioAnalysisFromFile(file: File): Promise<{ duration?: number; waveform?: number[] }> {
+    if (!file.type.startsWith('audio/')) return {};
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return {};
+
+    try {
+      const context = new AudioCtx();
+      try {
+        const buffer = await file.arrayBuffer();
+        const decoded = await context.decodeAudioData(buffer.slice(0));
+        const duration = Number(decoded?.duration || 0);
+        const channelData = decoded?.numberOfChannels ? decoded.getChannelData(0) : null;
+        return {
+          duration: Number.isFinite(duration) && duration > 0 ? duration : undefined,
+          waveform: channelData?.length ? this.buildWaveformFromChannelData(channelData, 48) : undefined
+        };
+      } finally {
+        await context.close();
+      }
+    } catch {
+      return {};
+    }
   }
 
   private setUploadItemProgress(itemId: string, progress: number) {
@@ -1490,8 +1711,586 @@ export class ChatComponent implements AfterViewChecked {
     return !!attachment?.mimeType?.startsWith('audio/');
   }
 
+  voiceAttachmentKey(attachment: ChatMessage['attachment']): string {
+    if (!attachment) return 'voice:none';
+    if (attachment.url) return `voice:${attachment.url}`;
+    return `voice:${attachment.name || 'audio'}:${attachment.size || 0}`;
+  }
+
+  voiceWaveformBars(attachment: ChatMessage['attachment']): number[] {
+    const key = this.voiceAttachmentKey(attachment);
+
+    const fromAttachment = Array.isArray(attachment?.waveform)
+      ? attachment!.waveform!
+          .map((x) => Number(x))
+          .filter((x) => Number.isFinite(x) && x > 0)
+          .slice(0, 96)
+      : [];
+    if (fromAttachment.length) {
+      this.voiceWaveformByKey[key] = fromAttachment;
+      return fromAttachment;
+    }
+
+    const cached = this.voiceWaveformByKey[key];
+    if (cached?.length) return cached;
+
+    if (attachment?.url && this.isAudioAttachment(attachment) && !this.voiceWaveformLoading.has(key)) {
+      this.voiceWaveformLoading.add(key);
+      const sourceUrl = this.attachmentUrl(attachment);
+      void this.generateVoiceWaveform(sourceUrl)
+        .then((bars) => {
+          this.voiceWaveformByKey[key] = bars.length ? bars : this.defaultVoiceWaveform;
+        })
+        .catch(() => {
+          this.voiceWaveformByKey[key] = this.defaultVoiceWaveform;
+        })
+        .finally(() => {
+          this.voiceWaveformLoading.delete(key);
+        });
+    }
+
+    return this.defaultVoiceWaveform;
+  }
+
+  voicePlaybackRate(attachment: ChatMessage['attachment']): number {
+    const key = this.voiceAttachmentKey(attachment);
+    const value = Number(this.voicePlaybackRateByKey[key] || 1);
+    return value > 0 ? value : 1;
+  }
+
+  voicePlaybackRateLabel(attachment: ChatMessage['attachment']): string {
+    const value = this.voicePlaybackRate(attachment);
+    return Number.isInteger(value) ? `${value}x` : `${value.toFixed(1)}x`;
+  }
+
+  toggleVoicePlaybackRate(attachment: ChatMessage['attachment'], event?: Event) {
+    event?.stopPropagation();
+    const current = this.voicePlaybackRate(attachment);
+    const next = current < 1.5 ? 1.5 : current < 2 ? 2 : 1;
+    this.setVoicePlaybackRate(attachment, next);
+  }
+
+  setVoicePlaybackRate(attachment: ChatMessage['attachment'], rate: number, event?: Event) {
+    event?.stopPropagation();
+    if (!attachment) return;
+    const key = this.voiceAttachmentKey(attachment);
+    const value = Number(rate || 1);
+    const next = value >= 2 ? 2 : value >= 1.5 ? 1.5 : 1;
+    this.voicePlaybackRateByKey[key] = next;
+    this.applyVoicePlaybackRateToDom(key, next);
+  }
+
+  openVoiceAttachmentMenuFor(attachment: ChatMessage['attachment']) {
+    this.voiceMenuTarget = attachment || null;
+  }
+
+  voiceCurrentTimeLabel(attachment: ChatMessage['attachment']): string {
+    return this.formatDuration(this.voiceUiState(attachment).currentTime);
+  }
+
+  voiceDurationLabel(attachment: ChatMessage['attachment']): string {
+    this.ensureVoiceDurationResolved(attachment);
+    const stateDurationRaw = Number(this.voiceUiState(attachment).duration || 0);
+    const stateDuration = Number.isFinite(stateDurationRaw) && stateDurationRaw > 0 ? stateDurationRaw : 0;
+    if (stateDuration > 0) return this.formatDuration(stateDuration);
+    const currentFallback = Math.ceil(Number(this.voiceUiState(attachment).currentTime || 0));
+    if (currentFallback > 0) return this.formatDuration(currentFallback);
+    return this.attachmentDurationLabel(attachment);
+  }
+
+  voiceProgressRatio(attachment: ChatMessage['attachment']): number {
+    const state = this.voiceUiState(attachment);
+    const key = this.voiceAttachmentKey(attachment);
+    const audio = this.resolveVoiceAudioElement(key, this.voiceAudioElementByKey.get(key) || null);
+    const domDuration = this.resolveVoiceDuration(audio || null, attachment);
+    const current = Math.max(0, Number(audio?.currentTime || state.currentTime || 0));
+    const stateDuration = Number.isFinite(Number(state.duration)) && Number(state.duration) > 0 ? Number(state.duration) : 0;
+    const resolvedDuration = Math.max(0, Number(stateDuration || domDuration || attachment?.durationSeconds || 0));
+    const duration = resolvedDuration > 0 ? resolvedDuration : Math.max(1, current + 0.25);
+    return Math.max(0, Math.min(1, current / duration));
+  }
+
+  isVoiceWaveformBarActive(index: number, barCount: number, attachment: ChatMessage['attachment']): boolean {
+    if (barCount <= 0) return false;
+    const activeBars = Math.max(0, Math.min(barCount, Math.round(this.voiceProgressRatio(attachment) * barCount)));
+    return index < activeBars;
+  }
+
+  voiceIsPlaying(attachment: ChatMessage['attachment']): boolean {
+    return this.voiceUiState(attachment).playing;
+  }
+
+  voiceIsMuted(attachment: ChatMessage['attachment']): boolean {
+    return this.voiceUiState(attachment).muted;
+  }
+
+  voiceVolumePercent(attachment: ChatMessage['attachment']): number {
+    const volume = this.voiceUiState(attachment).volume;
+    return Math.round(Math.max(0, Math.min(1, Number(volume || 0))) * 100);
+  }
+
+  voiceVolumeIcon(attachment: ChatMessage['attachment']): string {
+    return this.voiceIsMuted(attachment) ? 'volume_off' : 'volume_up';
+  }
+
+  showVoiceVolumeSlider(attachment: ChatMessage['attachment']) {
+    this.voiceVolumeHoverKey = this.voiceAttachmentKey(attachment);
+  }
+
+  hideVoiceVolumeSlider(attachment?: ChatMessage['attachment']) {
+    if (!attachment) {
+      this.voiceVolumeHoverKey = null;
+      return;
+    }
+    const key = this.voiceAttachmentKey(attachment);
+    if (this.voiceVolumeHoverKey === key) this.voiceVolumeHoverKey = null;
+  }
+
+  isVoiceVolumeSliderVisible(attachment: ChatMessage['attachment']): boolean {
+    return this.voiceVolumeHoverKey === this.voiceAttachmentKey(attachment);
+  }
+
+  setVoiceVolume(attachment: ChatMessage['attachment'], value: number | string, event?: Event, audioEl?: HTMLAudioElement | null) {
+    event?.stopPropagation();
+    if (!attachment) return;
+
+    const key = this.voiceAttachmentKey(attachment);
+    const next = Math.max(0, Math.min(1, Number(value) / 100));
+    const audio = this.resolveVoiceAudioElement(key, audioEl);
+    if (audio) {
+      audio.volume = next;
+      if (next > 0 && audio.muted) audio.muted = false;
+      if (next === 0) audio.muted = true;
+    }
+    this.applyVoiceMutedToDom(key, next === 0);
+
+    const state = this.voiceUiState(attachment);
+    state.volume = next;
+    state.muted = next === 0 ? true : false;
+    if (next > 0) this.voiceLastNonZeroVolumeByKey[key] = next;
+    this.voiceUiStateByKey[key] = state;
+  }
+
+  toggleVoicePlay(attachment: ChatMessage['attachment'], event?: Event, audioEl?: HTMLAudioElement | null) {
+    event?.stopPropagation();
+    if (!attachment) return;
+    const key = this.voiceAttachmentKey(attachment);
+    const audio = this.resolveVoiceAudioElement(key, audioEl);
+    if (!audio) return;
+
+    if (audio.paused) {
+      this.pauseAllVoicePlayersExcept(key);
+      audio.playbackRate = this.voicePlaybackRate(attachment);
+      audio.defaultPlaybackRate = this.voicePlaybackRate(attachment);
+      const remaining = Number(audio.duration || 0) - Number(audio.currentTime || 0);
+      if (Number.isFinite(remaining) && remaining <= 0.05) {
+        audio.currentTime = 0;
+      }
+      void audio.play();
+    } else {
+      audio.pause();
+    }
+  }
+
+  toggleVoiceMute(attachment: ChatMessage['attachment'], event?: Event, audioEl?: HTMLAudioElement | null) {
+    event?.stopPropagation();
+    if (!attachment) return;
+    const key = this.voiceAttachmentKey(attachment);
+    const state = this.voiceUiState(attachment);
+    const nextMuted = !state.muted;
+    const audio = this.resolveVoiceAudioElement(key, audioEl);
+
+    if (nextMuted) {
+      const currentVolume = Number(audio?.volume ?? state.volume ?? 1);
+      if (currentVolume > 0) this.voiceLastNonZeroVolumeByKey[key] = currentVolume;
+      if (audio) {
+        audio.muted = true;
+        audio.defaultMuted = true;
+        audio.volume = 0;
+      }
+      state.muted = true;
+      state.volume = 0;
+      this.applyVoiceMutedToDom(key, true);
+    } else {
+      const restored = Math.max(0.05, Math.min(1, Number(this.voiceLastNonZeroVolumeByKey[key] || 1)));
+      if (audio) {
+        audio.muted = false;
+        audio.defaultMuted = false;
+        audio.volume = restored;
+      }
+      state.muted = false;
+      state.volume = restored;
+      this.applyVoiceMutedToDom(key, false);
+      this.voiceLastNonZeroVolumeByKey[key] = restored;
+    }
+
+    this.voiceUiStateByKey[key] = state;
+  }
+
+  seekVoiceFromWaveform(attachment: ChatMessage['attachment'], event: PointerEvent, audioEl?: HTMLAudioElement | null) {
+    event.stopPropagation();
+    event.preventDefault();
+    if (!attachment) return;
+    this.voiceWaveformScrub = {
+      pointerId: event.pointerId,
+      key: this.voiceAttachmentKey(attachment)
+    };
+
+    const host = event.currentTarget as HTMLElement | null;
+    if (host?.setPointerCapture) {
+      try {
+        host.setPointerCapture(event.pointerId);
+      } catch {
+        // no-op
+      }
+    }
+
+    this.seekVoiceFromWaveformEvent(attachment, event, audioEl);
+  }
+
+  updateVoiceWaveformSeek(attachment: ChatMessage['attachment'], event: PointerEvent, audioEl?: HTMLAudioElement | null) {
+    if (!attachment || !this.voiceWaveformScrub) return;
+    const key = this.voiceAttachmentKey(attachment);
+    if (this.voiceWaveformScrub.pointerId !== event.pointerId || this.voiceWaveformScrub.key !== key) return;
+    this.seekVoiceFromWaveformEvent(attachment, event, audioEl);
+  }
+
+  finishVoiceWaveformSeek(event?: PointerEvent) {
+    if (event && this.voiceWaveformScrub && event.pointerId !== this.voiceWaveformScrub.pointerId) return;
+    this.voiceWaveformScrub = null;
+  }
+
+  private seekVoiceFromWaveformEvent(attachment: ChatMessage['attachment'], event: PointerEvent, audioEl?: HTMLAudioElement | null) {
+    const host = event.currentTarget as HTMLElement | null;
+    if (!host) return;
+
+    const rect = host.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const ratio = Math.max(0, Math.min(1, rect.width > 0 ? x / rect.width : 0));
+    this.seekVoiceToRatio(attachment, ratio, audioEl);
+  }
+
+  onVoiceAudioMetadata(event: Event, attachment: ChatMessage['attachment']) {
+    const audio = event.target as HTMLAudioElement | null;
+    if (!audio || !attachment) return;
+
+    const duration = this.resolveVoiceDuration(audio, attachment);
+    if (Number.isFinite(duration) && duration > 0) {
+      const current = Number(attachment.durationSeconds || 0);
+      const roundedDuration = Math.max(1, Math.round(duration));
+      if (!current || Math.abs(current - roundedDuration) >= 1) {
+        attachment.durationSeconds = roundedDuration;
+      }
+    }
+
+    const key = this.voiceAttachmentKey(attachment);
+    this.voiceAudioElementByKey.set(key, audio);
+    const nextState = this.voiceUiState(attachment);
+    const currentDuration = Number.isFinite(nextState.duration) ? nextState.duration : 0;
+    nextState.duration = Math.max(currentDuration, duration || 0);
+    nextState.currentTime = Number(audio.currentTime || 0);
+    nextState.playing = !audio.paused;
+    nextState.muted = !!audio.muted;
+    nextState.volume = Number.isFinite(audio.volume) ? audio.volume : nextState.volume;
+    this.voiceUiStateByKey[key] = nextState;
+    if (!nextState.duration || nextState.duration <= 0) this.ensureVoiceDurationResolved(attachment);
+
+    this.applyVoicePlaybackRateToDom(key, this.voicePlaybackRate(attachment));
+  }
+
+  onVoiceAudioTimeUpdate(event: Event, attachment: ChatMessage['attachment']) {
+    const audio = event.target as HTMLAudioElement | null;
+    if (!audio || !attachment) return;
+    const key = this.voiceAttachmentKey(attachment);
+    this.voiceAudioElementByKey.set(key, audio);
+    const state = this.voiceUiState(attachment);
+    state.currentTime = Number(audio.currentTime || 0);
+    const resolvedDuration = this.resolveVoiceDuration(audio, attachment);
+    const safeStateDuration = Number.isFinite(state.duration) ? state.duration : 0;
+    state.duration = Math.max(safeStateDuration, resolvedDuration || (state.currentTime + 0.2));
+    if (resolvedDuration > 0 && (!attachment.durationSeconds || attachment.durationSeconds <= 0)) {
+      attachment.durationSeconds = Math.max(1, Math.round(resolvedDuration));
+    }
+    state.playing = !audio.paused;
+    state.muted = !!audio.muted;
+    state.volume = Number.isFinite(audio.volume) ? audio.volume : state.volume;
+    this.voiceUiStateByKey[key] = state;
+  }
+
+  onVoiceAudioPlay(attachment: ChatMessage['attachment'], event?: Event) {
+    const key = this.voiceAttachmentKey(attachment);
+    const state = this.voiceUiState(attachment);
+    const audio = event?.target as HTMLAudioElement | null;
+    if (audio) this.voiceAudioElementByKey.set(key, audio);
+    state.playing = true;
+    state.volume = Number.isFinite(Number(audio?.volume)) ? Number(audio?.volume) : state.volume;
+    this.voiceUiStateByKey[key] = state;
+    this.startVoiceProgressTracking(key, attachment, audio);
+  }
+
+  onVoiceAudioPause(attachment: ChatMessage['attachment'], event?: Event) {
+    const key = this.voiceAttachmentKey(attachment);
+    const audio = event?.target as HTMLAudioElement | null;
+    if (audio) this.voiceAudioElementByKey.set(key, audio);
+    const state = this.voiceUiState(attachment);
+    state.playing = false;
+    if (audio) {
+      state.currentTime = Number(audio.currentTime || state.currentTime || 0);
+      const resolvedDuration = this.resolveVoiceDuration(audio, attachment);
+      const safeStateDuration = Number.isFinite(state.duration) ? state.duration : 0;
+      state.duration = Math.max(safeStateDuration, resolvedDuration || state.currentTime || 0);
+      state.muted = !!audio.muted;
+      state.volume = Number.isFinite(audio.volume) ? audio.volume : state.volume;
+      if (attachment && state.duration > 0) {
+        attachment.durationSeconds = Math.max(1, Math.round(state.duration));
+      }
+    }
+    this.voiceUiStateByKey[key] = state;
+    this.stopVoiceProgressTracking(key);
+  }
+
+  onVoiceAudioEnded(attachment: ChatMessage['attachment'], event?: Event) {
+    const key = this.voiceAttachmentKey(attachment);
+    const audio = event?.target as HTMLAudioElement | null;
+    if (audio) this.voiceAudioElementByKey.set(key, audio);
+    const state = this.voiceUiState(attachment);
+    state.playing = false;
+    const safeDuration = Number.isFinite(state.duration) ? state.duration : 0;
+    state.currentTime = Math.max(state.currentTime, safeDuration || Number(attachment?.durationSeconds || 0));
+    state.duration = Math.max(safeDuration, state.currentTime);
+    if (attachment && state.duration > 0) {
+      attachment.durationSeconds = Math.max(1, Math.round(state.duration));
+    }
+    this.voiceUiStateByKey[key] = state;
+    this.stopVoiceProgressTracking(key);
+  }
+
+  trackByNumber(index: number, value: number): string {
+    return `${index}:${value}`;
+  }
+
   isVideoAttachment(attachment: ChatMessage['attachment']): boolean {
     return !!attachment?.mimeType?.startsWith('video/');
+  }
+
+  private applyVoicePlaybackRateToDom(key: string, rate: number) {
+    if (!key) return;
+    const elements = document.querySelectorAll(`audio[data-voice-audio-key="${key}"]`);
+    elements.forEach((item) => {
+      const audio = item as HTMLAudioElement;
+      audio.playbackRate = rate;
+      audio.defaultPlaybackRate = rate;
+    });
+  }
+
+  private applyVoiceMutedToDom(key: string, muted: boolean) {
+    if (!key) return;
+    const elements = document.querySelectorAll(`audio[data-voice-audio-key="${key}"]`);
+    elements.forEach((item) => {
+      const audio = item as HTMLAudioElement;
+      audio.muted = muted;
+      audio.defaultMuted = muted;
+    });
+  }
+
+  private pauseAllVoicePlayersExcept(keyToKeep: string) {
+    const audios = document.querySelectorAll('audio[data-voice-audio-key]');
+    audios.forEach((node) => {
+      const audio = node as HTMLAudioElement;
+      const key = String(audio.getAttribute('data-voice-audio-key') || '');
+      if (!key || key === keyToKeep) return;
+      if (!audio.paused) audio.pause();
+    });
+  }
+
+  private firstVoiceAudioElement(key: string): HTMLAudioElement | null {
+    if (!key) return null;
+    return document.querySelector(`audio[data-voice-audio-key="${key}"]`) as HTMLAudioElement | null;
+  }
+
+  private resolveVoiceAudioElement(key: string, preferred?: HTMLAudioElement | null): HTMLAudioElement | null {
+    if (preferred) return preferred;
+    if (!key) return null;
+    const list = Array.from(document.querySelectorAll(`audio[data-voice-audio-key="${key}"]`)) as HTMLAudioElement[];
+    return list.find((x) => !x.paused) || list[0] || null;
+  }
+
+  private seekVoiceToRatio(attachment: ChatMessage['attachment'], ratio: number, audioEl?: HTMLAudioElement | null) {
+    const key = this.voiceAttachmentKey(attachment);
+    const audio = this.resolveVoiceAudioElement(key, audioEl);
+    if (!audio) return;
+
+    const duration = this.resolveVoiceDuration(audio, attachment);
+    if (!Number.isFinite(duration) || duration <= 0) return;
+
+    const clamped = Math.max(0, Math.min(1, Number(ratio || 0)));
+    const time = duration * clamped;
+    audio.currentTime = time;
+
+    const state = this.voiceUiState(attachment);
+    state.currentTime = time;
+    state.duration = Math.max(state.duration, duration);
+    state.playing = !audio.paused;
+    state.muted = !!audio.muted;
+    state.volume = Number.isFinite(audio.volume) ? audio.volume : state.volume;
+    this.voiceUiStateByKey[key] = state;
+  }
+
+  private voiceUiState(attachment: ChatMessage['attachment']): { currentTime: number; duration: number; playing: boolean; muted: boolean; volume: number } {
+    const key = this.voiceAttachmentKey(attachment);
+    const existing = this.voiceUiStateByKey[key];
+    if (existing) {
+      const sanitized = {
+        currentTime: Number.isFinite(existing.currentTime) && existing.currentTime >= 0 ? existing.currentTime : 0,
+        duration: Number.isFinite(existing.duration) && existing.duration >= 0 ? existing.duration : 0,
+        playing: !!existing.playing,
+        muted: !!existing.muted,
+        volume: Number.isFinite(existing.volume) ? Math.max(0, Math.min(1, existing.volume)) : 1
+      };
+      this.voiceUiStateByKey[key] = sanitized;
+      return sanitized;
+    }
+    return { currentTime: 0, duration: Number(attachment?.durationSeconds || 0), playing: false, muted: false, volume: 1 };
+  }
+
+  private resolveVoiceDuration(audio: HTMLAudioElement | null, attachment: ChatMessage['attachment']): number {
+    const direct = Number(audio?.duration || 0);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+
+    try {
+      const buffered = audio?.buffered;
+      if (buffered && buffered.length > 0) {
+        const end = Number(buffered.end(buffered.length - 1));
+        if (Number.isFinite(end) && end > 0) return end;
+      }
+
+      const seekable = audio?.seekable;
+      if (seekable && seekable.length > 0) {
+        const tail = Number(seekable.end(seekable.length - 1));
+        if (Number.isFinite(tail) && tail > 0) return tail;
+      }
+    } catch {
+      // no-op
+    }
+
+    return Number(attachment?.durationSeconds || 0);
+  }
+
+  private ensureVoiceDurationResolved(attachment: ChatMessage['attachment']) {
+    if (!attachment?.url || !this.isAudioAttachment(attachment)) return;
+    const key = this.voiceAttachmentKey(attachment);
+    const state = this.voiceUiState(attachment);
+    if (Number(state.duration || 0) > 0 || Number(attachment.durationSeconds || 0) > 0) return;
+    if (this.voiceDurationResolveLoading.has(key)) return;
+
+    this.voiceDurationResolveLoading.add(key);
+    const sourceUrl = this.attachmentUrl(attachment);
+    void this.decodeAudioDurationFromUrl(sourceUrl)
+      .then((duration) => {
+        if (!duration || duration <= 0) return;
+        attachment.durationSeconds = Math.max(1, Math.round(duration));
+        const nextState = this.voiceUiState(attachment);
+        nextState.duration = Math.max(nextState.duration, duration);
+        this.voiceUiStateByKey[key] = nextState;
+      })
+      .finally(() => {
+        this.voiceDurationResolveLoading.delete(key);
+      });
+  }
+
+  private async decodeAudioDurationFromUrl(sourceUrl: string): Promise<number | undefined> {
+    if (!sourceUrl) return undefined;
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return undefined;
+
+    try {
+      const response = await fetch(sourceUrl);
+      if (!response.ok) return undefined;
+      const buffer = await response.arrayBuffer();
+
+      const context = new AudioCtx();
+      try {
+        const decoded = await context.decodeAudioData(buffer.slice(0));
+        const duration = Number(decoded?.duration || 0);
+        return Number.isFinite(duration) && duration > 0 ? duration : undefined;
+      } finally {
+        await context.close();
+      }
+    } catch {
+      return undefined;
+    }
+  }
+
+  private startVoiceProgressTracking(key: string, attachment: ChatMessage['attachment'], preferredAudio?: HTMLAudioElement | null) {
+    if (!key) return;
+    this.stopVoiceProgressTracking(key);
+    const timer = setInterval(() => {
+      const audio = this.resolveVoiceAudioElement(key, preferredAudio);
+      if (!audio) return;
+      const state = this.voiceUiState(attachment);
+      state.currentTime = Number(audio.currentTime || 0);
+      const resolvedDuration = this.resolveVoiceDuration(audio, attachment);
+      const safeStateDuration = Number.isFinite(state.duration) ? state.duration : 0;
+      state.duration = Math.max(safeStateDuration, resolvedDuration || (state.currentTime + 0.2));
+      state.playing = !audio.paused;
+      state.muted = !!audio.muted;
+      state.volume = Number.isFinite(audio.volume) ? audio.volume : state.volume;
+      if (attachment && state.duration > 0 && (!attachment.durationSeconds || attachment.durationSeconds <= 0)) {
+        attachment.durationSeconds = Math.max(1, Math.round(state.duration));
+      }
+      this.voiceUiStateByKey[key] = state;
+      if (audio.paused || audio.ended) this.stopVoiceProgressTracking(key);
+    }, 40);
+    this.voiceProgressTimers.set(key, timer);
+  }
+
+  private stopVoiceProgressTracking(key: string) {
+    const timer = this.voiceProgressTimers.get(key);
+    if (!timer) return;
+    clearInterval(timer);
+    this.voiceProgressTimers.delete(key);
+  }
+
+  private async generateVoiceWaveform(sourceUrl: string): Promise<number[]> {
+    if (!sourceUrl) return this.defaultVoiceWaveform;
+    const response = await fetch(sourceUrl);
+    if (!response.ok) throw new Error('Waveform fetch failed');
+
+    const buffer = await response.arrayBuffer();
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return this.defaultVoiceWaveform;
+    const context = new AudioCtx();
+    try {
+      const decoded = await context.decodeAudioData(buffer.slice(0));
+      const channelData = decoded.getChannelData(0);
+      if (!channelData?.length) return this.defaultVoiceWaveform;
+      return this.buildWaveformFromChannelData(channelData, 48);
+    } finally {
+      try {
+        await context.close();
+      } catch {
+        // no-op
+      }
+    }
+  }
+
+  private buildWaveformFromChannelData(channelData: Float32Array, bars: number): number[] {
+    const totalBars = Math.max(12, Math.min(96, Math.round(Number(bars || 48))));
+    const blockSize = Math.max(1, Math.floor(channelData.length / totalBars));
+    const peaks: number[] = [];
+    for (let i = 0; i < totalBars; i += 1) {
+      const start = i * blockSize;
+      const end = Math.min(channelData.length, start + blockSize);
+      let peak = 0;
+      for (let j = start; j < end; j += 1) {
+        const value = Math.abs(channelData[j]);
+        if (value > peak) peak = value;
+      }
+      peaks.push(peak);
+    }
+
+    const maxPeak = Math.max(...peaks, 0.0001);
+    return peaks.map((peak) => Math.max(2, Math.round((peak / maxPeak) * 13) + 2));
   }
 
   isTextAttachment(attachment: ChatMessage['attachment']): boolean {
@@ -2640,7 +3439,11 @@ export class ChatComponent implements AfterViewChecked {
     if (this.isEditingMessage(message, scope)) return;
 
     const target = event.target as HTMLElement | null;
-    if (target?.closest('.messageActions') || target?.closest('.editInline')) return;
+    if (
+      target?.closest('.messageActions') ||
+      target?.closest('.editInline') ||
+      target?.closest('.voicePlayerShell')
+    ) return;
 
     this.cancelReactionPress();
     this.reactionPressTimer = setTimeout(() => {
@@ -3200,6 +4003,11 @@ export class ChatComponent implements AfterViewChecked {
     });
   }
 
+  @HostListener('document:pointerup', ['$event'])
+  onDocumentPointerUp(event: PointerEvent) {
+    this.finishVoiceWaveformSeek(event);
+  }
+
   private loadUnreadCounts() {
     const token = this.auth.getToken();
     if (!token) return;
@@ -3370,6 +4178,9 @@ export class ChatComponent implements AfterViewChecked {
               size: Number(message.replyTo.attachment.size || 0),
               isImage: !!message.replyTo.attachment.isImage,
               durationSeconds: Number(message.replyTo.attachment.durationSeconds || 0) || undefined,
+              waveform: Array.isArray(message.replyTo.attachment.waveform)
+                ? message.replyTo.attachment.waveform.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 96)
+                : undefined,
               width: Number(message.replyTo.attachment.width || 0) || undefined,
               height: Number(message.replyTo.attachment.height || 0) || undefined,
               storageProvider: message.replyTo.attachment.storageProvider,
@@ -3392,6 +4203,9 @@ export class ChatComponent implements AfterViewChecked {
               size: Number(message.forwardedFrom.attachment.size || 0),
               isImage: !!message.forwardedFrom.attachment.isImage,
               durationSeconds: Number(message.forwardedFrom.attachment.durationSeconds || 0) || undefined,
+              waveform: Array.isArray(message.forwardedFrom.attachment.waveform)
+                ? message.forwardedFrom.attachment.waveform.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 96)
+                : undefined,
               width: Number(message.forwardedFrom.attachment.width || 0) || undefined,
               height: Number(message.forwardedFrom.attachment.height || 0) || undefined,
               storageProvider: message.forwardedFrom.attachment.storageProvider,
@@ -3408,6 +4222,9 @@ export class ChatComponent implements AfterViewChecked {
           size: Number(message.attachment.size || 0),
           isImage: !!message.attachment.isImage,
           durationSeconds: Number(message.attachment.durationSeconds || 0) || undefined,
+          waveform: Array.isArray(message.attachment.waveform)
+            ? message.attachment.waveform.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 96)
+            : undefined,
           width: Number(message.attachment.width || 0) || undefined,
           height: Number(message.attachment.height || 0) || undefined,
           storageProvider: message.attachment.storageProvider,
@@ -3428,6 +4245,9 @@ export class ChatComponent implements AfterViewChecked {
             size: Number(a.size || 0),
             isImage: !!a.isImage,
             durationSeconds: Number(a.durationSeconds || 0) || undefined,
+            waveform: Array.isArray(a.waveform)
+              ? a.waveform.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 96)
+              : undefined,
             width: Number(a.width || 0) || undefined,
             height: Number(a.height || 0) || undefined,
             storageProvider: a.storageProvider,
@@ -3935,6 +4755,9 @@ export class ChatComponent implements AfterViewChecked {
               size: Number(a.size || 0),
               isImage: !!a.isImage,
               durationSeconds: Number(a.durationSeconds || 0) || undefined,
+              waveform: Array.isArray(a.waveform)
+                ? a.waveform.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 96)
+                : undefined,
               width: Number(a.width || 0) || undefined,
               height: Number(a.height || 0) || undefined,
               storageProvider: a.storageProvider,

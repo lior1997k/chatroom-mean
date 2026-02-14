@@ -13,6 +13,7 @@ const publicMessageSchema = new Schema(
       size: { type: Number, default: null },
       isImage: { type: Boolean, default: false },
       durationSeconds: { type: Number, default: null },
+      waveform: { type: [Number], default: [] },
       width: { type: Number, default: null },
       height: { type: Number, default: null }
     },
@@ -25,6 +26,7 @@ const publicMessageSchema = new Schema(
           size: { type: Number, default: null },
           isImage: { type: Boolean, default: false },
           durationSeconds: { type: Number, default: null },
+          waveform: { type: [Number], default: [] },
           width: { type: Number, default: null },
           height: { type: Number, default: null }
         }
@@ -43,6 +45,7 @@ const publicMessageSchema = new Schema(
         size: { type: Number, default: null },
         isImage: { type: Boolean, default: false },
         durationSeconds: { type: Number, default: null },
+        waveform: { type: [Number], default: [] },
         width: { type: Number, default: null },
         height: { type: Number, default: null }
       }

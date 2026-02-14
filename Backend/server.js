@@ -112,6 +112,7 @@ app.post('/api/upload', auth, (req, res) => {
       const name = req.file.originalname || req.file.filename;
       const isImage = mimeType.startsWith('image/');
       const uploadedDuration = Number(req.body?.durationSeconds);
+      const uploadedWaveformRaw = String(req.body?.waveform || '');
       const uploadedWidth = Number(req.body?.width);
       const uploadedHeight = Number(req.body?.height);
       const durationSeconds = Number.isFinite(uploadedDuration) && uploadedDuration > 0
@@ -119,6 +120,7 @@ app.post('/api/upload', auth, (req, res) => {
         : undefined;
       const width = Number.isFinite(uploadedWidth) && uploadedWidth > 0 ? Math.round(uploadedWidth) : undefined;
       const height = Number.isFinite(uploadedHeight) && uploadedHeight > 0 ? Math.round(uploadedHeight) : undefined;
+      const waveform = parseWaveform(uploadedWaveformRaw);
 
       return res.json({
         url: `/uploads/${req.file.filename}`,
@@ -127,6 +129,7 @@ app.post('/api/upload', auth, (req, res) => {
         size: req.file.size || 0,
         isImage,
         durationSeconds,
+        waveform,
         width,
         height,
         storageProvider: 'local',
@@ -320,6 +323,7 @@ app.post('/api/upload/chunk/:sessionId/finalize', auth, async (req, res) => {
 
     const stat = await fs.promises.stat(finalPath);
     const uploadedDuration = Number(req.body?.durationSeconds);
+    const uploadedWaveform = parseWaveform(req.body?.waveform);
     const uploadedWidth = Number(req.body?.width);
     const uploadedHeight = Number(req.body?.height);
 
@@ -330,6 +334,7 @@ app.post('/api/upload/chunk/:sessionId/finalize', auth, async (req, res) => {
       size: Number(stat.size || session.size || 0),
       isImage: session.mimeType.startsWith('image/'),
       durationSeconds: Number.isFinite(uploadedDuration) && uploadedDuration > 0 ? Math.floor(uploadedDuration) : undefined,
+      waveform: uploadedWaveform,
       width: Number.isFinite(uploadedWidth) && uploadedWidth > 0 ? Math.round(uploadedWidth) : undefined,
       height: Number.isFinite(uploadedHeight) && uploadedHeight > 0 ? Math.round(uploadedHeight) : undefined,
       storageProvider: 'local',
@@ -626,6 +631,7 @@ function normalizeAttachment(attachment) {
   const mimeType = String(attachment.mimeType || 'application/octet-stream').trim().slice(0, 100);
   const size = Number(attachment.size || 0);
   const duration = Number(attachment.durationSeconds);
+  const waveform = parseWaveform(attachment.waveform);
   const width = Number(attachment.width);
   const height = Number(attachment.height);
   const storageProvider = attachment.storageProvider === 's3' ? 's3' : 'local';
@@ -638,11 +644,33 @@ function normalizeAttachment(attachment) {
     size: Number.isFinite(size) && size >= 0 ? size : 0,
     isImage: mimeType.startsWith('image/'),
     durationSeconds: Number.isFinite(duration) && duration > 0 ? Math.round(duration) : undefined,
+    waveform,
     width: Number.isFinite(width) && width > 0 ? Math.round(width) : undefined,
     height: Number.isFinite(height) && height > 0 ? Math.round(height) : undefined,
     storageProvider,
     objectKey: objectKey || undefined
   };
+}
+
+function parseWaveform(input) {
+  let list = input;
+  if (typeof list === 'string') {
+    const trimmed = list.trim();
+    if (!trimmed) return undefined;
+    try {
+      list = JSON.parse(trimmed);
+    } catch {
+      return undefined;
+    }
+  }
+
+  if (!Array.isArray(list)) return undefined;
+  const normalized = list
+    .map((x) => Number(x))
+    .filter((x) => Number.isFinite(x) && x > 0)
+    .slice(0, 96)
+    .map((x) => Math.max(1, Math.min(32, Math.round(x))));
+  return normalized.length ? normalized : undefined;
 }
 
 function normalizeAttachments(attachments, fallbackAttachment) {
