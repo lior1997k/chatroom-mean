@@ -59,6 +59,8 @@ const chunkUpload = multer({
 });
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const MAX_ATTACHMENT_DURATION_SECONDS = 12 * 60 * 60;
+const MAX_ATTACHMENT_DIMENSION = 12000;
 const CHUNK_SIZE_BYTES = 1024 * 1024;
 const DIRECT_UPLOAD_THRESHOLD_BYTES = 8 * 1024 * 1024;
 const CHUNK_RESUME_TTL_MS = 24 * 60 * 60 * 1000;
@@ -641,12 +643,18 @@ function normalizeAttachment(attachment) {
     url,
     name: name || 'Attachment',
     mimeType,
-    size: Number.isFinite(size) && size >= 0 ? size : 0,
+    size: Number.isFinite(size) && size >= 0 ? Math.min(Math.round(size), MAX_UPLOAD_BYTES) : 0,
     isImage: mimeType.startsWith('image/'),
-    durationSeconds: Number.isFinite(duration) && duration > 0 ? Math.round(duration) : undefined,
+    durationSeconds: Number.isFinite(duration) && duration > 0
+      ? Math.min(MAX_ATTACHMENT_DURATION_SECONDS, Math.max(1, Math.round(duration)))
+      : undefined,
     waveform,
-    width: Number.isFinite(width) && width > 0 ? Math.round(width) : undefined,
-    height: Number.isFinite(height) && height > 0 ? Math.round(height) : undefined,
+    width: Number.isFinite(width) && width > 0
+      ? Math.min(MAX_ATTACHMENT_DIMENSION, Math.max(1, Math.round(width)))
+      : undefined,
+    height: Number.isFinite(height) && height > 0
+      ? Math.min(MAX_ATTACHMENT_DIMENSION, Math.max(1, Math.round(height)))
+      : undefined,
     storageProvider,
     objectKey: objectKey || undefined
   };
