@@ -1720,6 +1720,8 @@ export class ChatComponent implements AfterViewChecked {
 
   voiceWaveformBars(attachment: ChatMessage['attachment']): number[] {
     const key = this.voiceAttachmentKey(attachment);
+    const cached = this.voiceWaveformByKey[key];
+    if (cached?.length) return cached;
 
     const fromAttachment = Array.isArray(attachment?.waveform)
       ? attachment!.waveform!
@@ -1731,9 +1733,6 @@ export class ChatComponent implements AfterViewChecked {
       this.voiceWaveformByKey[key] = fromAttachment;
       return fromAttachment;
     }
-
-    const cached = this.voiceWaveformByKey[key];
-    if (cached?.length) return cached;
 
     if (attachment?.url && this.isAudioAttachment(attachment) && !this.voiceWaveformLoading.has(key)) {
       this.voiceWaveformLoading.add(key);
@@ -1801,12 +1800,9 @@ export class ChatComponent implements AfterViewChecked {
 
   voiceProgressRatio(attachment: ChatMessage['attachment']): number {
     const state = this.voiceUiState(attachment);
-    const key = this.voiceAttachmentKey(attachment);
-    const audio = this.resolveVoiceAudioElement(key, this.voiceAudioElementByKey.get(key) || null);
-    const domDuration = this.resolveVoiceDuration(audio || null, attachment);
-    const current = Math.max(0, Number(audio?.currentTime || state.currentTime || 0));
+    const current = Math.max(0, Number(state.currentTime || 0));
     const stateDuration = Number.isFinite(Number(state.duration)) && Number(state.duration) > 0 ? Number(state.duration) : 0;
-    const resolvedDuration = Math.max(0, Number(stateDuration || domDuration || attachment?.durationSeconds || 0));
+    const resolvedDuration = Math.max(0, Number(stateDuration || attachment?.durationSeconds || 0));
     const duration = resolvedDuration > 0 ? resolvedDuration : Math.max(1, current + 0.25);
     return Math.max(0, Math.min(1, current / duration));
   }
