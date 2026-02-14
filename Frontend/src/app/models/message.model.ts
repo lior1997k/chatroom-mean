@@ -5,6 +5,8 @@ export interface Attachment {
   size: number;
   isImage: boolean;
   durationSeconds?: number;
+  width?: number;
+  height?: number;
   storageProvider?: 'local' | 's3';
   objectKey?: string;
 }

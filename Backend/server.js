@@ -100,9 +100,13 @@ app.post('/api/upload', auth, (req, res) => {
       const name = req.file.originalname || req.file.filename;
       const isImage = mimeType.startsWith('image/');
       const uploadedDuration = Number(req.body?.durationSeconds);
+      const uploadedWidth = Number(req.body?.width);
+      const uploadedHeight = Number(req.body?.height);
       const durationSeconds = Number.isFinite(uploadedDuration) && uploadedDuration > 0
         ? Math.round(uploadedDuration)
         : undefined;
+      const width = Number.isFinite(uploadedWidth) && uploadedWidth > 0 ? Math.round(uploadedWidth) : undefined;
+      const height = Number.isFinite(uploadedHeight) && uploadedHeight > 0 ? Math.round(uploadedHeight) : undefined;
 
       return res.json({
         url: `/uploads/${req.file.filename}`,
@@ -111,6 +115,8 @@ app.post('/api/upload', auth, (req, res) => {
         size: req.file.size || 0,
         isImage,
         durationSeconds,
+        width,
+        height,
         storageProvider: 'local',
         objectKey: req.file.filename
       });
@@ -308,6 +314,8 @@ function normalizeAttachment(attachment) {
   const mimeType = String(attachment.mimeType || 'application/octet-stream').trim().slice(0, 100);
   const size = Number(attachment.size || 0);
   const duration = Number(attachment.durationSeconds);
+  const width = Number(attachment.width);
+  const height = Number(attachment.height);
   const storageProvider = attachment.storageProvider === 's3' ? 's3' : 'local';
   const objectKey = String(attachment.objectKey || '').trim().slice(0, 300);
 
@@ -318,6 +326,8 @@ function normalizeAttachment(attachment) {
     size: Number.isFinite(size) && size >= 0 ? size : 0,
     isImage: mimeType.startsWith('image/'),
     durationSeconds: Number.isFinite(duration) && duration > 0 ? Math.round(duration) : undefined,
+    width: Number.isFinite(width) && width > 0 ? Math.round(width) : undefined,
+    height: Number.isFinite(height) && height > 0 ? Math.round(height) : undefined,
     storageProvider,
     objectKey: objectKey || undefined
   };

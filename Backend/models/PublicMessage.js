@@ -12,7 +12,9 @@ const publicMessageSchema = new Schema(
       mimeType: { type: String, default: null },
       size: { type: Number, default: null },
       isImage: { type: Boolean, default: false },
-      durationSeconds: { type: Number, default: null }
+      durationSeconds: { type: Number, default: null },
+      width: { type: Number, default: null },
+      height: { type: Number, default: null }
     },
     attachments: {
       type: [
@@ -22,7 +24,9 @@ const publicMessageSchema = new Schema(
           mimeType: { type: String, default: null },
           size: { type: Number, default: null },
           isImage: { type: Boolean, default: false },
-          durationSeconds: { type: Number, default: null }
+          durationSeconds: { type: Number, default: null },
+          width: { type: Number, default: null },
+          height: { type: Number, default: null }
         }
       ],
       default: []
@@ -38,7 +42,9 @@ const publicMessageSchema = new Schema(
         mimeType: { type: String, default: null },
         size: { type: Number, default: null },
         isImage: { type: Boolean, default: false },
-        durationSeconds: { type: Number, default: null }
+        durationSeconds: { type: Number, default: null },
+        width: { type: Number, default: null },
+        height: { type: Number, default: null }
       }
     },
     reactions: {

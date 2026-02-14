@@ -661,8 +661,8 @@ export class ChatComponent implements AfterViewChecked {
       this.uploadProgressItems.unshift(item);
 
       try {
-        const durationSeconds = await this.extractVideoDurationSeconds(file);
-        const uploaded = await this.uploadSingleAttachment(file, headers, itemId, durationSeconds);
+        const mediaMetadata = await this.extractMediaMetadata(file);
+        const uploaded = await this.uploadSingleAttachment(file, headers, itemId, mediaMetadata);
 
         if (uploaded?.url) {
           this.pendingAttachments.push({
@@ -671,7 +671,9 @@ export class ChatComponent implements AfterViewChecked {
               mimeType: uploaded.mimeType || file.type || 'application/octet-stream',
               size: Number(uploaded.size || file.size || 0),
               isImage: !!uploaded.isImage,
-              durationSeconds: Number(uploaded.durationSeconds || durationSeconds || 0) || undefined,
+              durationSeconds: Number(uploaded.durationSeconds || mediaMetadata.durationSeconds || 0) || undefined,
+              width: Number(uploaded.width || mediaMetadata.width || 0) || undefined,
+              height: Number(uploaded.height || mediaMetadata.height || 0) || undefined,
               storageProvider: uploaded.storageProvider,
               objectKey: uploaded.objectKey
             });
@@ -712,11 +714,22 @@ export class ChatComponent implements AfterViewChecked {
     this.cancelUploadRequested = true;
   }
 
-  private uploadSingleAttachment(file: File, headers: HttpHeaders, itemId: string, durationSeconds?: number | null): Promise<Attachment> {
+  private uploadSingleAttachment(
+    file: File,
+    headers: HttpHeaders,
+    itemId: string,
+    metadata?: { durationSeconds?: number | null; width?: number | null; height?: number | null }
+  ): Promise<Attachment> {
     const formData = new FormData();
     formData.append('file', file);
-    if (Number(durationSeconds) > 0) {
-      formData.append('durationSeconds', String(Math.round(Number(durationSeconds))));
+    if (Number(metadata?.durationSeconds) > 0) {
+      formData.append('durationSeconds', String(Math.round(Number(metadata?.durationSeconds))));
+    }
+    if (Number(metadata?.width) > 0) {
+      formData.append('width', String(Math.round(Number(metadata?.width))));
+    }
+    if (Number(metadata?.height) > 0) {
+      formData.append('height', String(Math.round(Number(metadata?.height))));
     }
 
     return new Promise((resolve, reject) => {
@@ -746,31 +759,41 @@ export class ChatComponent implements AfterViewChecked {
     });
   }
 
-  private extractVideoDurationSeconds(file: File): Promise<number | null> {
-    if (!file.type.startsWith('video/')) return Promise.resolve(null);
+  private extractMediaMetadata(file: File): Promise<{ durationSeconds?: number; width?: number; height?: number }> {
+    if (!file.type.startsWith('video/') && !file.type.startsWith('image/')) {
+      return Promise.resolve({});
+    }
 
     return new Promise((resolve) => {
-      const media = document.createElement('video');
+      const media = document.createElement(file.type.startsWith('video/') ? 'video' : 'img') as HTMLVideoElement | HTMLImageElement;
       const objectUrl = URL.createObjectURL(file);
       const cleanup = () => {
         URL.revokeObjectURL(objectUrl);
         media.removeAttribute('src');
-        media.load();
+        if (media instanceof HTMLVideoElement) media.load();
       };
 
-      media.preload = 'metadata';
-      media.onloadedmetadata = () => {
-        const value = Number(media.duration);
+      const done = () => {
+        const width = Number((media as any).videoWidth || (media as any).naturalWidth || 0);
+        const height = Number((media as any).videoHeight || (media as any).naturalHeight || 0);
+        const duration = media instanceof HTMLVideoElement ? Number(media.duration) : 0;
         cleanup();
-        if (!Number.isFinite(value) || value <= 0) {
-          resolve(null);
-          return;
-        }
-        resolve(Math.round(value));
+        resolve({
+          durationSeconds: Number.isFinite(duration) && duration > 0 ? Math.round(duration) : undefined,
+          width: Number.isFinite(width) && width > 0 ? Math.round(width) : undefined,
+          height: Number.isFinite(height) && height > 0 ? Math.round(height) : undefined
+        });
       };
+
+      if (media instanceof HTMLVideoElement) {
+        media.preload = 'metadata';
+        media.onloadedmetadata = done;
+      } else {
+        media.onload = done;
+      }
       media.onerror = () => {
         cleanup();
-        resolve(null);
+        resolve({});
       };
       media.src = objectUrl;
     });
@@ -2036,6 +2059,8 @@ export class ChatComponent implements AfterViewChecked {
               size: Number(message.replyTo.attachment.size || 0),
               isImage: !!message.replyTo.attachment.isImage,
               durationSeconds: Number(message.replyTo.attachment.durationSeconds || 0) || undefined,
+              width: Number(message.replyTo.attachment.width || 0) || undefined,
+              height: Number(message.replyTo.attachment.height || 0) || undefined,
               storageProvider: message.replyTo.attachment.storageProvider,
               objectKey: message.replyTo.attachment.objectKey
             }
@@ -2056,6 +2081,8 @@ export class ChatComponent implements AfterViewChecked {
               size: Number(message.forwardedFrom.attachment.size || 0),
               isImage: !!message.forwardedFrom.attachment.isImage,
               durationSeconds: Number(message.forwardedFrom.attachment.durationSeconds || 0) || undefined,
+              width: Number(message.forwardedFrom.attachment.width || 0) || undefined,
+              height: Number(message.forwardedFrom.attachment.height || 0) || undefined,
               storageProvider: message.forwardedFrom.attachment.storageProvider,
               objectKey: message.forwardedFrom.attachment.objectKey
             }
@@ -2070,6 +2097,8 @@ export class ChatComponent implements AfterViewChecked {
           size: Number(message.attachment.size || 0),
           isImage: !!message.attachment.isImage,
           durationSeconds: Number(message.attachment.durationSeconds || 0) || undefined,
+          width: Number(message.attachment.width || 0) || undefined,
+          height: Number(message.attachment.height || 0) || undefined,
           storageProvider: message.attachment.storageProvider,
           objectKey: message.attachment.objectKey
         }
@@ -2088,6 +2117,8 @@ export class ChatComponent implements AfterViewChecked {
             size: Number(a.size || 0),
             isImage: !!a.isImage,
             durationSeconds: Number(a.durationSeconds || 0) || undefined,
+            width: Number(a.width || 0) || undefined,
+            height: Number(a.height || 0) || undefined,
             storageProvider: a.storageProvider,
             objectKey: a.objectKey
           });
