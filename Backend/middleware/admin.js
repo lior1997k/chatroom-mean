@@ -3,11 +3,11 @@ const User = require('../models/User');
 module.exports = async function requireAdmin(req, res, next) {
   try {
     const currentUser = await User.findById(req.user?.id).select('_id role').lean();
-    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'support')) {
+    if (!currentUser || !['admin', 'support', 'moderator'].includes(String(currentUser.role || ''))) {
       return res.status(403).json({
         error: {
           code: 'ADMIN_FORBIDDEN',
-          message: 'Admin/support role is required.'
+          message: 'Admin, support, or moderator role is required.'
         }
       });
     }

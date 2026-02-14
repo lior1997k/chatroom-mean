@@ -5007,6 +5007,10 @@ export class ChatComponent implements AfterViewChecked {
     this.router.navigate(['/login']);
   }
 
+  openProfile() {
+    this.router.navigate(['/profile']);
+  }
+
   toggleSearch() {
     this.searchOpen = !this.searchOpen;
     if (!this.searchOpen) {

@@ -74,6 +74,86 @@ export class AuthService {
     });
   }
 
+  getMe() {
+    const token = this.getToken();
+    return this.http.get(`${environment.apiUrl}/api/me`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  updateProfile(username: string, avatarUrl: string) {
+    const token = this.getToken();
+    return this.http.patch(`${environment.apiUrl}/api/me/profile`, { username, avatarUrl }, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  adminListUsers(q = '', limit = 40) {
+    const token = this.getToken();
+    return this.http.get(`${environment.apiUrl}/api/admin/auth/users`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      params: { q, limit }
+    });
+  }
+
+  adminSetUserRole(userId: string, role: string) {
+    const token = this.getToken();
+    return this.http.patch(`${environment.apiUrl}/api/admin/auth/users/${encodeURIComponent(userId)}/role`, { role }, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  adminVerifyEmail(userId: string) {
+    const token = this.getToken();
+    return this.http.post(`${environment.apiUrl}/api/admin/auth/users/${encodeURIComponent(userId)}/verify-email`, {}, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  adminUnlockUser(userId: string) {
+    const token = this.getToken();
+    return this.http.post(`${environment.apiUrl}/api/admin/auth/users/${encodeURIComponent(userId)}/unlock`, {}, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  adminRevokeSessions(userId: string) {
+    const token = this.getToken();
+    return this.http.post(`${environment.apiUrl}/api/admin/auth/users/${encodeURIComponent(userId)}/revoke-sessions`, {}, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  adminListAbuseEvents(limit = 80) {
+    const token = this.getToken();
+    return this.http.get(`${environment.apiUrl}/api/admin/auth/abuse-events`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      params: { limit }
+    });
+  }
+
+  adminListAttachmentReports(status = '', limit = 80) {
+    const token = this.getToken();
+    return this.http.get(`${environment.apiUrl}/api/admin/auth/reports/attachments`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      params: { status, limit }
+    });
+  }
+
+  adminUpdateAttachmentReport(reportId: string, status: string) {
+    const token = this.getToken();
+    return this.http.patch(`${environment.apiUrl}/api/admin/auth/reports/attachments/${encodeURIComponent(reportId)}`, { status }, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  adminRemoveMessage(scope: 'public' | 'private', messageId: string) {
+    const token = this.getToken();
+    return this.http.post(`${environment.apiUrl}/api/admin/auth/messages/${scope}/${encodeURIComponent(messageId)}/remove`, {}, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
   getUsername(): string | null {
     const payload = this.getTokenPayload();
     return payload?.username || null;

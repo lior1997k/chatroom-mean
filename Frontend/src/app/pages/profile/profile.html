@@ -1,0 +1,83 @@
+<section class="profile-page" *ngIf="!loading; else loadingTpl">
+  <header class="topbar">
+    <h1>Profile</h1>
+    <button type="button" class="ghost" (click)="goToChat()">Back to chat</button>
+  </header>
+
+  <p *ngIf="error" class="notice error">{{ error }}</p>
+  <p *ngIf="success" class="notice ok">{{ success }}</p>
+
+  <article class="card">
+    <h2>Account</h2>
+    <p class="meta">Role: <strong>{{ me?.role }}</strong> · Email: {{ me?.email || 'none' }} · Verified: {{ me?.emailVerified ? 'yes' : 'no' }}</p>
+
+    <label>
+      <span>Username</span>
+      <input type="text" [(ngModel)]="username" name="username" />
+    </label>
+
+    <label>
+      <span>Avatar URL</span>
+      <input type="url" [(ngModel)]="avatarUrl" name="avatarUrl" />
+    </label>
+
+    <button type="button" class="primary" [disabled]="savingProfile" (click)="saveProfile()">
+      {{ savingProfile ? 'Saving...' : 'Save profile' }}
+    </button>
+  </article>
+
+  <section *ngIf="isModeratorOrHigher()" class="card">
+    <h2>Moderation</h2>
+    <p *ngIf="adminMessage" class="notice info">{{ adminMessage }}</p>
+
+    <div class="row">
+      <input type="text" [(ngModel)]="adminSearch" placeholder="Search users" />
+      <button type="button" class="ghost" (click)="loadAdminData()">Refresh</button>
+    </div>
+
+    <h3>Users</h3>
+    <div class="table" *ngFor="let user of adminUsers">
+      <div>
+        <strong>{{ user.username }}</strong>
+        <div class="small">{{ user.email || 'no email' }} · role: {{ user.role }}</div>
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost" (click)="verifyEmail(user)">Verify</button>
+        <button type="button" class="ghost" (click)="unlockUser(user)">Unlock</button>
+        <button type="button" class="ghost" (click)="revokeSessions(user)">Revoke sessions</button>
+        <select *ngIf="isAdmin()" [ngModel]="user.role" (ngModelChange)="setRole(user, $event)">
+          <option *ngFor="let role of roleOptionsForCurrentUser()" [ngValue]="role">{{ role }}</option>
+        </select>
+      </div>
+    </div>
+
+    <h3>Attachment reports</h3>
+    <div class="table" *ngFor="let report of adminReports">
+      <div>
+        <strong>{{ report.scope }} · {{ report.category }}</strong>
+        <div class="small">status: {{ report.status }} · messageId: {{ report.messageId }}</div>
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost" (click)="updateReportStatus(report, 'in_review')">Review</button>
+        <button type="button" class="ghost" (click)="updateReportStatus(report, 'resolved')">Resolve</button>
+        <button type="button" class="ghost" (click)="updateReportStatus(report, 'dismissed')">Dismiss</button>
+        <button type="button" class="danger" (click)="removeReportedMessage(report)">Remove message</button>
+      </div>
+    </div>
+
+    <h3>Auth abuse events</h3>
+    <div class="table" *ngFor="let event of abuseEvents">
+      <div>
+        <strong>{{ event.type }}</strong>
+        <div class="small">{{ event.identifier || event.ip || '-' }} · severity {{ event.severity }}</div>
+      </div>
+      <div class="small">{{ event.createdAt | date:'short' }}</div>
+    </div>
+  </section>
+</section>
+
+<ng-template #loadingTpl>
+  <section class="profile-page">
+    <div class="card">Loading profile...</div>
+  </section>
+</ng-template>
