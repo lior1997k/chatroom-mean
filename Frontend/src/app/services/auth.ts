@@ -15,12 +15,24 @@ export class AuthService {
 
   constructor(private http: HttpClient) {}
 
-  register(username: string, password: string) {
-    return this.http.post(`${this.apiUrl}/register`, { username, password });
+  register(username: string, email: string, password: string) {
+    return this.http.post(`${this.apiUrl}/register`, { username, email, password });
   }
 
-  login(username: string, password: string) {
-    return this.http.post(`${this.apiUrl}/login`, { username, password });
+  login(identifier: string, password: string) {
+    return this.http.post(`${this.apiUrl}/login`, { identifier, password });
+  }
+
+  socialGoogle(idToken: string, username?: string) {
+    return this.http.post(`${this.apiUrl}/social/google`, { idToken, username: username || undefined });
+  }
+
+  socialApple(idToken: string, username?: string) {
+    return this.http.post(`${this.apiUrl}/social/apple`, { idToken, username: username || undefined });
+  }
+
+  resendEmailVerification(email: string) {
+    return this.http.post(`${this.apiUrl}/verify-email/resend`, { email });
   }
 
   getUsername(): string | null {

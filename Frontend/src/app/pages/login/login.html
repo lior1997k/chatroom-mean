@@ -13,24 +13,62 @@
 
     <div class="form-card">
       <h2>Sign in</h2>
-      <p class="subtitle">Use your username and password to access chat.</p>
+      <p class="subtitle">Use your username/email and password, or continue with Google/Apple.</p>
 
       <p *ngIf="infoMessage" class="notice info">{{ infoMessage }}</p>
       <p *ngIf="errorMessage" class="notice error">{{ errorMessage }}</p>
+      <div class="notice info" *ngIf="pendingVerificationEmail">
+        <div>Need a new verification email for <b>{{ pendingVerificationEmail }}</b>?</div>
+        <div class="socialSetupActions" style="margin-top: 8px;">
+          <button type="button" class="ghost-btn" (click)="resendVerificationEmail()" [disabled]="resendVerificationBusy">
+            {{ resendVerificationBusy ? 'Sending...' : 'Resend verification' }}
+          </button>
+        </div>
+        <div *ngIf="resendVerificationMessage" style="margin-top: 6px; font-size: 0.82rem; color: #0f5876;">{{ resendVerificationMessage }}</div>
+      </div>
 
       <form (ngSubmit)="login()" class="auth-form">
         <label class="field">
-          <span>Username</span>
-          <input type="text" [(ngModel)]="username" name="username" autocomplete="username" required />
+          <span>Username or Email</span>
+          <input type="text" [(ngModel)]="identifier" name="identifier" autocomplete="username" required />
+          <small class="hint">Username (a-z0-9_) or full email address.</small>
         </label>
 
         <label class="field">
           <span>Password</span>
-          <input type="password" [(ngModel)]="password" name="password" autocomplete="current-password" required />
+          <div class="passwordField">
+            <input [type]="showPassword ? 'text' : 'password'" [(ngModel)]="password" name="password" autocomplete="current-password" required />
+            <button type="button" class="ghost-btn" (click)="toggleShowPassword()">{{ showPassword ? 'Hide' : 'Show' }}</button>
+          </div>
         </label>
 
-        <button type="submit" class="primary-btn">Sign in</button>
+        <button type="submit" class="primary-btn" [disabled]="submitting">{{ submitting ? 'Signing in...' : 'Sign in' }}</button>
       </form>
+
+      <div class="socialDivider" *ngIf="googleSignInEnabled || appleSignInEnabled"><span>or</span></div>
+      <div class="socialRow" *ngIf="googleSignInEnabled || appleSignInEnabled">
+        <button type="button" class="social-btn" *ngIf="googleSignInEnabled" (click)="signInWithGoogle()" [disabled]="submitting || !!socialBusy">
+          Continue with Google
+        </button>
+        <button type="button" class="social-btn" *ngIf="appleSignInEnabled" (click)="signInWithApple()" [disabled]="submitting || !!socialBusy">
+          Continue with Apple
+        </button>
+      </div>
+
+      <div class="socialSetup" *ngIf="socialPendingProvider && (googleSignInEnabled || appleSignInEnabled)">
+        <p class="subtitle" style="margin: 0 0 8px;">{{ socialSetupNotice }}</p>
+        <label class="field">
+          <span>Choose username</span>
+          <input type="text" [(ngModel)]="socialSetupUsername" name="socialSetupUsername" autocomplete="username" required />
+          <small class="hint">Suggested: {{ socialSuggestedUsername || 'chat_user' }}</small>
+        </label>
+        <div class="socialSetupActions">
+          <button type="button" class="ghost-btn" (click)="cancelSocialSetup()" [disabled]="!!socialBusy">Cancel</button>
+          <button type="button" class="primary-btn" (click)="completeSocialSetup()" [disabled]="!!socialBusy">
+            {{ socialBusy ? 'Finishing...' : 'Finish sign in' }}
+          </button>
+        </div>
+      </div>
 
       <p class="footnote">
         New here?
