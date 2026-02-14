@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const http = require('http');
 const socketIo = require('socket.io');
 const mongoose = require('mongoose');
@@ -25,15 +26,40 @@ const { verifyAccessToken } = require('./utils/jwt');
 
 const app = express();
 const server = http.createServer(app);
+const allowedOrigins = String(process.env.CLIENT_URL || 'http://localhost:4200')
+  .split(',')
+  .map((x) => x.trim())
+  .filter(Boolean);
 const io = socketIo(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:4200',
+    origin: allowedOrigins,
     methods: ['GET', 'POST']
   }
 });
 
-app.use(cors());
-app.use(express.json());
+app.disable('x-powered-by');
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
+}));
+app.use((req, res, next) => {
+  const requestId = crypto.randomUUID();
+  req.requestId = requestId;
+  res.setHeader('x-request-id', requestId);
+  next();
+});
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('CORS_NOT_ALLOWED'));
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  credentials: true
+}));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
@@ -1336,6 +1362,29 @@ io.on('connection', (socket) => {
       }
     }
     console.log(`❌ User disconnected: ${username} (${userId})`);
+  });
+});
+
+app.use((err, req, res, next) => {
+  if (!err) return next();
+  const requestId = req.requestId || crypto.randomUUID();
+  if (String(err.message || '').includes('CORS_NOT_ALLOWED')) {
+    return res.status(403).json({
+      error: {
+        code: 'CORS_FORBIDDEN',
+        message: 'Request origin is not allowed.',
+        requestId
+      }
+    });
+  }
+
+  console.error('Unhandled server error', { requestId, message: err.message });
+  return res.status(500).json({
+    error: {
+      code: 'SERVER_ERROR',
+      message: 'Unexpected server error.',
+      requestId
+    }
   });
 });
 
