@@ -6,6 +6,25 @@ const auth = require('../middleware/auth');
 
 const router = express.Router();
 
+function serializeAttachment(a) {
+  if (!a?.url) return null;
+  return {
+    url: a.url,
+    name: a.name || 'Attachment',
+    mimeType: a.mimeType || 'application/octet-stream',
+    size: a.size || 0,
+    isImage: !!a.isImage
+  };
+}
+
+function serializeAttachments(m) {
+  const fromArray = Array.isArray(m?.attachments) ? m.attachments : [];
+  const normalized = fromArray.map(serializeAttachment).filter(Boolean);
+  if (normalized.length) return normalized;
+  const single = serializeAttachment(m?.attachment);
+  return single ? [single] : [];
+}
+
 router.get('/unread-counts', auth, async (req, res) => {
   try {
     const meId = req.user.id;
@@ -67,12 +86,15 @@ router.get('/:username', auth, async (req, res) => {
       from: m.from,
       to: m.to,
       text: m.text,
+      attachment: serializeAttachment(m.attachment),
+      attachments: serializeAttachments(m),
       replyTo: m.replyTo?.messageId
         ? {
           messageId: m.replyTo.messageId.toString(),
           from: m.replyTo.from || '',
           text: m.replyTo.text || '',
-          scope: m.replyTo.scope || 'private'
+          scope: m.replyTo.scope || 'private',
+          attachment: serializeAttachment(m.replyTo.attachment)
         }
         : null,
       forwardedFrom: m.forwardedFrom?.messageId
@@ -80,7 +102,8 @@ router.get('/:username', auth, async (req, res) => {
           messageId: m.forwardedFrom.messageId.toString(),
           from: m.forwardedFrom.from || '',
           text: m.forwardedFrom.text || '',
-          scope: m.forwardedFrom.scope || 'private'
+          scope: m.forwardedFrom.scope || 'private',
+          attachment: serializeAttachment(m.forwardedFrom.attachment)
         }
         : null,
       timestamp: m.ts.toISOString(),
@@ -111,12 +134,15 @@ router.get('/by-id/:id', auth, async (req, res) => {
       from: msg.from,
       to: msg.to,
       text: msg.text,
+      attachment: serializeAttachment(msg.attachment),
+      attachments: serializeAttachments(msg),
       replyTo: msg.replyTo?.messageId
         ? {
           messageId: msg.replyTo.messageId.toString(),
           from: msg.replyTo.from || '',
           text: msg.replyTo.text || '',
-          scope: msg.replyTo.scope || 'private'
+          scope: msg.replyTo.scope || 'private',
+          attachment: serializeAttachment(msg.replyTo.attachment)
         }
         : null,
       forwardedFrom: msg.forwardedFrom?.messageId
@@ -124,7 +150,8 @@ router.get('/by-id/:id', auth, async (req, res) => {
           messageId: msg.forwardedFrom.messageId.toString(),
           from: msg.forwardedFrom.from || '',
           text: msg.forwardedFrom.text || '',
-          scope: msg.forwardedFrom.scope || 'private'
+          scope: msg.forwardedFrom.scope || 'private',
+          attachment: serializeAttachment(msg.forwardedFrom.attachment)
         }
         : null,
       timestamp: msg.ts.toISOString(),

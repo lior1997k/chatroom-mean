@@ -4,6 +4,25 @@ const auth = require('../middleware/auth');
 
 const router = express.Router();
 
+function serializeAttachment(a) {
+  if (!a?.url) return null;
+  return {
+    url: a.url,
+    name: a.name || 'Attachment',
+    mimeType: a.mimeType || 'application/octet-stream',
+    size: a.size || 0,
+    isImage: !!a.isImage
+  };
+}
+
+function serializeAttachments(m) {
+  const fromArray = Array.isArray(m?.attachments) ? m.attachments : [];
+  const normalized = fromArray.map(serializeAttachment).filter(Boolean);
+  if (normalized.length) return normalized;
+  const single = serializeAttachment(m?.attachment);
+  return single ? [single] : [];
+}
+
 router.get('/', auth, async (req, res) => {
   try {
     const limitRaw = Number.parseInt(req.query.limit, 10);
@@ -24,12 +43,15 @@ router.get('/', auth, async (req, res) => {
           id: m._id.toString(),
           from: m.from,
           text: m.text,
+          attachment: serializeAttachment(m.attachment),
+          attachments: serializeAttachments(m),
           replyTo: m.replyTo?.messageId
             ? {
               messageId: m.replyTo.messageId.toString(),
               from: m.replyTo.from || '',
               text: m.replyTo.text || '',
-              scope: m.replyTo.scope || 'public'
+              scope: m.replyTo.scope || 'public',
+              attachment: serializeAttachment(m.replyTo.attachment)
             }
             : null,
           timestamp: m.ts.toISOString(),
@@ -58,12 +80,15 @@ router.get('/', auth, async (req, res) => {
       id: m._id.toString(),
       from: m.from,
       text: m.text,
+      attachment: serializeAttachment(m.attachment),
+      attachments: serializeAttachments(m),
       replyTo: m.replyTo?.messageId
         ? {
           messageId: m.replyTo.messageId.toString(),
           from: m.replyTo.from || '',
           text: m.replyTo.text || '',
-          scope: m.replyTo.scope || 'public'
+          scope: m.replyTo.scope || 'public',
+          attachment: serializeAttachment(m.replyTo.attachment)
         }
         : null,
       timestamp: m.ts.toISOString(),
@@ -88,12 +113,15 @@ router.get('/:id', auth, async (req, res) => {
       id: message._id.toString(),
       from: message.from,
       text: message.text,
+      attachment: serializeAttachment(message.attachment),
+      attachments: serializeAttachments(message),
       replyTo: message.replyTo?.messageId
         ? {
           messageId: message.replyTo.messageId.toString(),
           from: message.replyTo.from || '',
           text: message.replyTo.text || '',
-          scope: message.replyTo.scope || 'public'
+          scope: message.replyTo.scope || 'public',
+          attachment: serializeAttachment(message.replyTo.attachment)
         }
         : null,
       timestamp: message.ts.toISOString(),

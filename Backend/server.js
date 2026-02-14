@@ -4,6 +4,9 @@ const http = require('http');
 const socketIo = require('socket.io');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
 require('dotenv').config();
 
 const User = require('./models/User');
@@ -15,6 +18,7 @@ const meRoutes = require('./routes/me');
 const privateRoutes = require('./routes/private');
 const publicRoutes = require('./routes/public');
 const searchRoutes = require('./routes/search');
+const auth = require('./middleware/auth');
 
 const app = express();
 const server = http.createServer(app);
@@ -27,11 +31,63 @@ const io = socketIo(server, {
 
 app.use(cors());
 app.use(express.json());
+
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_, __, cb) => cb(null, uploadsDir),
+    filename: (_, file, cb) => {
+      const safeOriginal = String(file.originalname || 'file')
+        .replace(/[^a-zA-Z0-9._-]/g, '_')
+        .slice(0, 80);
+      cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}-${safeOriginal}`);
+    }
+  }),
+  limits: { fileSize: 50 * 1024 * 1024 }
+});
+
+app.use('/uploads', express.static(uploadsDir));
+
 app.use('/api/user', userRoutes);
 app.use('/api/me', meRoutes);
 app.use('/api/private', privateRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/search', searchRoutes);
+
+app.post('/api/upload', auth, (req, res) => {
+  upload.single('file')(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ error: 'File too large (max 50MB)' });
+      }
+      console.error('Upload middleware error', err);
+      return res.status(400).json({ error: 'Upload failed' });
+    }
+
+    try {
+      if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+      const mimeType = req.file.mimetype || 'application/octet-stream';
+      const name = req.file.originalname || req.file.filename;
+      const isImage = mimeType.startsWith('image/');
+
+      return res.json({
+        url: `/uploads/${req.file.filename}`,
+        name,
+        mimeType,
+        size: req.file.size || 0,
+        isImage
+      });
+    } catch (e) {
+      console.error('Upload handler error', e);
+      return res.status(500).json({ error: 'Upload failed' });
+    }
+  });
+});
 
 app.get('/', (_, res) => res.send('ChatRoom Server is running'));
 
@@ -159,13 +215,78 @@ function sanitizeReplyText(value) {
   return String(value || '').trim().slice(0, 160);
 }
 
+function messagePreviewText(message) {
+  const text = sanitizeReplyText(message?.text);
+  if (text) return text;
+
+  const firstAttachment = (message?.attachments && message.attachments[0]) || message?.attachment;
+  const attachmentName = String(firstAttachment?.name || '').trim();
+  if (attachmentName) return sanitizeReplyText(`[Attachment] ${attachmentName}`);
+
+  return '';
+}
+
+function normalizeAttachment(attachment) {
+  if (!attachment?.url) return null;
+
+  const url = String(attachment.url || '').trim();
+  const isLocalUpload = /^\/uploads\/[a-zA-Z0-9._-]+$/.test(url);
+  const isRemoteUrl = /^https?:\/\/[^\s]+$/i.test(url);
+  if (!isLocalUpload && !isRemoteUrl) return null;
+
+  const name = String(attachment.name || '').trim().slice(0, 120);
+  const mimeType = String(attachment.mimeType || 'application/octet-stream').trim().slice(0, 100);
+  const size = Number(attachment.size || 0);
+
+  return {
+    url,
+    name: name || 'Attachment',
+    mimeType,
+    size: Number.isFinite(size) && size >= 0 ? size : 0,
+    isImage: mimeType.startsWith('image/')
+  };
+}
+
+function normalizeAttachments(attachments, fallbackAttachment) {
+  const fromArray = Array.isArray(attachments) ? attachments : [];
+  const normalized = fromArray
+    .map((item) => normalizeAttachment(item))
+    .filter(Boolean);
+
+  if (normalized.length) return normalized;
+
+  const single = normalizeAttachment(fallbackAttachment);
+  return single ? [single] : [];
+}
+
+function firstAttachmentFromMessage(message) {
+  const list = normalizeAttachments(message?.attachments, message?.attachment);
+  return list[0] || null;
+}
+
+async function deleteAttachmentFileIfLocal(attachment) {
+  const url = String(attachment?.url || '').trim();
+  const match = url.match(/^\/uploads\/([a-zA-Z0-9._-]+)$/);
+  if (!match) return;
+
+  const filePath = path.join(uploadsDir, match[1]);
+  try {
+    await fs.promises.unlink(filePath);
+  } catch (err) {
+    if (err?.code !== 'ENOENT') {
+      console.error('Attachment cleanup failed', err);
+    }
+  }
+}
+
 function serializeReplyTo(replyTo) {
   if (!replyTo?.messageId) return null;
   return {
     messageId: replyTo.messageId.toString(),
     from: replyTo.from || '',
     text: replyTo.text || '',
-    scope: replyTo.scope || 'private'
+    scope: replyTo.scope || 'private',
+    attachment: normalizeAttachment(replyTo.attachment)
   };
 }
 
@@ -175,7 +296,8 @@ function serializeForwardedFrom(forwardedFrom) {
     messageId: forwardedFrom.messageId.toString(),
     from: forwardedFrom.from || '',
     text: forwardedFrom.text || '',
-    scope: forwardedFrom.scope || 'private'
+    scope: forwardedFrom.scope || 'private',
+    attachment: normalizeAttachment(forwardedFrom.attachment)
   };
 }
 
@@ -189,8 +311,9 @@ async function buildPublicReply(replyTo) {
   return {
     messageId: target._id,
     from: target.from || '',
-    text: sanitizeReplyText(target.text),
-    scope: 'public'
+    text: messagePreviewText(target),
+    scope: 'public',
+    attachment: firstAttachmentFromMessage(target)
   };
 }
 
@@ -208,8 +331,9 @@ async function buildPrivateReply(replyTo, participantIds) {
   return {
     messageId: target._id,
     from: target.from || '',
-    text: sanitizeReplyText(target.text),
-    scope: 'private'
+    text: messagePreviewText(target),
+    scope: 'private',
+    attachment: firstAttachmentFromMessage(target)
   };
 }
 
@@ -223,8 +347,9 @@ async function buildPublicForwarded(forwardedFrom) {
   return {
     messageId: target._id,
     from: target.from || '',
-    text: sanitizeReplyText(target.text),
-    scope: 'public'
+    text: messagePreviewText(target),
+    scope: 'public',
+    attachment: firstAttachmentFromMessage(target)
   };
 }
 
@@ -241,8 +366,9 @@ async function buildPrivateForwarded(forwardedFrom, userId) {
   return {
     messageId: target._id,
     from: target.from || '',
-    text: sanitizeReplyText(target.text),
-    scope: 'private'
+    text: messagePreviewText(target),
+    scope: 'private',
+    attachment: firstAttachmentFromMessage(target)
   };
 }
 
@@ -309,7 +435,8 @@ io.on('connection', (socket) => {
   // === PUBLIC CHAT ===
   socket.on('publicMessage', async (data) => {
     const text = (data?.text || '').trim();
-    if (!text) return;
+    const attachments = normalizeAttachments(data?.attachments, data?.attachment);
+    if (!text && !attachments.length) return;
 
     try {
       const replyTo = await buildPublicReply(data?.replyTo);
@@ -317,6 +444,8 @@ io.on('connection', (socket) => {
         fromId: userId,
         from: username,
         text,
+        attachment: attachments[0] || null,
+        attachments,
         replyTo
       });
 
@@ -324,6 +453,8 @@ io.on('connection', (socket) => {
         id: saved._id.toString(),
         from: saved.from,
         text: saved.text,
+        attachment: normalizeAttachment(saved.attachment),
+        attachments: normalizeAttachments(saved.attachments, saved.attachment),
         replyTo: serializeReplyTo(saved.replyTo),
         timestamp: saved.ts.toISOString(),
         reactions: [],
@@ -336,6 +467,8 @@ io.on('connection', (socket) => {
         id: `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
         from: username,
         text,
+        attachment: attachments[0] || null,
+        attachments,
         replyTo: null,
         timestamp: new Date().toISOString(),
         reactions: [],
@@ -346,9 +479,12 @@ io.on('connection', (socket) => {
   });
 
   // === PRIVATE CHAT with ACK + DELIVERY ===
-  socket.on('privateMessage', async ({ to, text, tempId, replyTo, forwardedFrom }) => {
+  socket.on('privateMessage', async ({ to, text, tempId, replyTo, forwardedFrom, attachment, attachments }) => {
     try {
       stopPrivateTyping(username, to, true);
+      const normalizedText = String(text || '').trim();
+      const normalizedAttachments = normalizeAttachments(attachments, attachment);
+      if (!normalizedText && !normalizedAttachments.length) return;
 
       const toUser = await User.findOne({ username: to }).lean();
       const timestamp = new Date().toISOString();
@@ -377,7 +513,9 @@ io.on('connection', (socket) => {
           toId: toUser._id,
           from: username,
           to,
-          text,
+          text: normalizedText,
+          attachment: normalizedAttachments[0] || null,
+          attachments: normalizedAttachments,
           replyTo: normalizedReply,
           forwardedFrom: normalizedForwarded,
           ts: new Date(timestamp),
@@ -396,7 +534,9 @@ io.on('connection', (socket) => {
           id: savedId,
           from: username,
           to,
-          text,
+          text: normalizedText,
+          attachment: normalizedAttachments[0] || null,
+          attachments: normalizedAttachments,
           replyTo: serializeReplyTo(normalizedReply),
           forwardedFrom: serializeForwardedFrom(normalizedForwarded),
           timestamp,
@@ -538,7 +678,13 @@ io.on('connection', (socket) => {
         if (String(message.fromId) !== String(userId)) return;
         if (message.deletedAt) return;
 
+        const attachmentsToDelete = normalizeAttachments(message.attachments, message.attachment);
+        for (const item of attachmentsToDelete) {
+          await deleteAttachmentFileIfLocal(item);
+        }
         message.text = DELETED_TEXT;
+        message.attachment = null;
+        message.attachments = [];
         message.deletedAt = new Date();
         message.reactions = [];
         await message.save();
@@ -558,7 +704,13 @@ io.on('connection', (socket) => {
         if (String(message.fromId) !== String(userId)) return;
         if (message.deletedAt) return;
 
+        const attachmentsToDelete = normalizeAttachments(message.attachments, message.attachment);
+        for (const item of attachmentsToDelete) {
+          await deleteAttachmentFileIfLocal(item);
+        }
         message.text = DELETED_TEXT;
+        message.attachment = null;
+        message.attachments = [];
         message.deletedAt = new Date();
         message.reactions = [];
         await message.save();

@@ -21,7 +21,13 @@
   </mat-sidenav>
 
   <!-- CENTER: Chat area -->
-  <mat-sidenav-content class="centerPane">
+  <mat-sidenav-content
+    class="centerPane"
+    (dragenter)="onComposerDragEnter($event)"
+    (dragover)="onComposerDragOver($event)"
+    (dragleave)="onComposerDragLeave($event)"
+    (drop)="onComposerDrop($event)"
+  >
     <mat-toolbar color="primary" class="paneHeader">
       <ng-container *ngIf="!selectedUser; else privateHeader">
         <span>Public Room</span>
@@ -145,12 +151,84 @@
               <button class="replySnippet" type="button" *ngIf="m.forwardedFrom" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToForwardTarget(m)">
                 <span class="replyAuthor">Forwarded from {{ replyAuthorLabel(m.forwardedFrom.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.forwardedFrom.text) }}</span>
+                <img *ngIf="m.forwardedFrom.attachment?.isImage" [src]="attachmentUrl(m.forwardedFrom.attachment)" [alt]="m.forwardedFrom.attachment?.name" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
+                <video *ngIf="isVideoAttachment(m.forwardedFrom.attachment)" [src]="attachmentUrl(m.forwardedFrom.attachment)" (loadedmetadata)="enforceMutedPreview($event)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+                <span class="replyText" *ngIf="m.forwardedFrom.attachment">{{ attachmentTypeLabel(m.forwardedFrom.attachment) }} • {{ m.forwardedFrom.attachment.name }}</span>
               </button>
               <button class="replySnippet" type="button" *ngIf="m.replyTo" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToReplyTarget(m)">
                 <span class="replyAuthor">{{ replyAuthorLabel(m.replyTo.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.replyTo.text) }}</span>
+                <img *ngIf="m.replyTo.attachment?.isImage" [src]="attachmentUrl(m.replyTo.attachment)" [alt]="m.replyTo.attachment?.name" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
+                <video *ngIf="isVideoAttachment(m.replyTo.attachment)" [src]="attachmentUrl(m.replyTo.attachment)" (loadedmetadata)="enforceMutedPreview($event)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+                <span class="replyText" *ngIf="m.replyTo.attachment">{{ attachmentTypeLabel(m.replyTo.attachment) }} • {{ m.replyTo.attachment.name }}</span>
               </button>
-              <div class="text" [class.deletedText]="m.deletedAt" [innerHTML]="m.deletedAt ? 'Message deleted' : highlightText(m.text)"></div>
+              <ng-container *ngFor="let attachment of messageAttachments(m)">
+                <ng-container *ngIf="attachment.isImage || isVideoAttachment(attachment)">
+                  <div *ngIf="isAttachmentPreviewHidden(m, attachment, 'public')" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px dashed #c7d7ea; border-radius: 10px; padding: 6px 8px; margin: 0 0 8px; background: #f6fbff; color: #3f5b79;">
+                    <span style="font-size: 0.76rem;">Preview hidden</span>
+                    <button mat-stroked-button type="button" (click)="toggleAttachmentPreview(m, attachment, 'public', $event)">Show</button>
+                  </div>
+                  <div *ngIf="!isAttachmentPreviewHidden(m, attachment, 'public')" style="position: relative; width: fit-content; margin: 0 0 8px;">
+                    <button
+                      type="button"
+                      (mousedown)="$event.stopPropagation()"
+                      (touchstart)="$event.stopPropagation()"
+                      (click)="openAttachmentViewer(m, 'public', attachment)"
+                      style="border: 0; padding: 0; background: transparent; cursor: pointer;"
+                    >
+                      <img
+                        *ngIf="attachment.isImage"
+                        [src]="attachmentUrl(attachment)"
+                        [alt]="attachment.name"
+                        style="max-width: 220px; max-height: 180px; border-radius: 10px; border: 1px solid #d9e2ef; display: block;"
+                      />
+                      <video
+                        *ngIf="isVideoAttachment(attachment)"
+                        [src]="attachmentUrl(attachment)"
+                        [attr.data-preview-key]="attachmentPreviewKey(m, attachment, 'public')"
+                        (loadedmetadata)="enforceMutedPreview($event)"
+                        style="max-width: 220px; max-height: 180px; border-radius: 10px; border: 1px solid #d9e2ef; display: block; background: #000;"
+                        autoplay
+                        loop
+                        muted
+                        playsinline
+                      ></video>
+                    </button>
+                    <button mat-icon-button type="button" (click)="toggleAttachmentPreview(m, attachment, 'public', $event)" style="position: absolute; top: 4px; right: 4px; background: rgba(255,255,255,0.78);">
+                      <mat-icon>visibility_off</mat-icon>
+                    </button>
+                  </div>
+                </ng-container>
+                <div
+                  *ngIf="!attachment.isImage && !isVideoAttachment(attachment)"
+                  style="display: block; margin: 0 0 8px; text-decoration: none;"
+                >
+                  <audio
+                    *ngIf="isAudioAttachment(attachment)"
+                    controls
+                    [src]="attachmentUrl(attachment)"
+                    style="display: block; max-width: 260px;"
+                  ></audio>
+                  <div *ngIf="!isAudioAttachment(attachment)" style="border: 1px solid #d9e2ef; border-radius: 10px; padding: 7px 9px; background: #f8fbff; color: #35506c;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                      <div style="min-width: 0;">
+                        <strong style="display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ attachment.name }}</strong>
+                        <div style="font-size: 0.74rem; opacity: 0.8;">{{ attachmentTypeLabel(attachment) }} • {{ attachmentSizeLabel(attachment.size) }}</div>
+                      </div>
+                      <button mat-icon-button type="button" [matMenuTriggerFor]="attachmentMenu" (menuOpened)="openAttachmentMenuFor(attachment)" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()">
+                        <mat-icon>more_vert</mat-icon>
+                      </button>
+                    </div>
+                    <iframe
+                      *ngIf="isTextAttachment(attachment)"
+                      [src]="attachmentUrl(attachment)"
+                      title="Text preview"
+                      style="width: min(320px, 70vw); height: 140px; border: 1px solid #d9e2ef; border-radius: 10px; background: #fff; margin-top: 6px;"
+                    ></iframe>
+                  </div>
+                </div>
+              </ng-container>
+              <div class="text" *ngIf="m.text || m.deletedAt" [class.deletedText]="m.deletedAt" [innerHTML]="m.deletedAt ? 'Message deleted' : highlightText(m.text)"></div>
             </ng-template>
             <div class="meta">
               <div class="messageActions" *ngIf="!isEditingMessage(m, 'public') && !m.deletedAt">
@@ -238,12 +316,84 @@
               <button class="replySnippet" type="button" *ngIf="m.forwardedFrom" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToForwardTarget(m)">
                 <span class="replyAuthor">Forwarded from {{ replyAuthorLabel(m.forwardedFrom.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.forwardedFrom.text) }}</span>
+                <img *ngIf="m.forwardedFrom.attachment?.isImage" [src]="attachmentUrl(m.forwardedFrom.attachment)" [alt]="m.forwardedFrom.attachment?.name" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
+                <video *ngIf="isVideoAttachment(m.forwardedFrom.attachment)" [src]="attachmentUrl(m.forwardedFrom.attachment)" (loadedmetadata)="enforceMutedPreview($event)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+                <span class="replyText" *ngIf="m.forwardedFrom.attachment">{{ attachmentTypeLabel(m.forwardedFrom.attachment) }} • {{ m.forwardedFrom.attachment.name }}</span>
               </button>
               <button class="replySnippet" type="button" *ngIf="m.replyTo" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToReplyTarget(m)">
                 <span class="replyAuthor">{{ replyAuthorLabel(m.replyTo.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.replyTo.text) }}</span>
+                <img *ngIf="m.replyTo.attachment?.isImage" [src]="attachmentUrl(m.replyTo.attachment)" [alt]="m.replyTo.attachment?.name" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
+                <video *ngIf="isVideoAttachment(m.replyTo.attachment)" [src]="attachmentUrl(m.replyTo.attachment)" (loadedmetadata)="enforceMutedPreview($event)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+                <span class="replyText" *ngIf="m.replyTo.attachment">{{ attachmentTypeLabel(m.replyTo.attachment) }} • {{ m.replyTo.attachment.name }}</span>
               </button>
-              <div class="text" [class.deletedText]="m.deletedAt" [innerHTML]="m.deletedAt ? 'Message deleted' : highlightText(m.text)"></div>
+              <ng-container *ngFor="let attachment of messageAttachments(m)">
+                <ng-container *ngIf="attachment.isImage || isVideoAttachment(attachment)">
+                  <div *ngIf="isAttachmentPreviewHidden(m, attachment, 'private')" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px dashed #c7d7ea; border-radius: 10px; padding: 6px 8px; margin: 0 0 8px; background: #f6fbff; color: #3f5b79;">
+                    <span style="font-size: 0.76rem;">Preview hidden</span>
+                    <button mat-stroked-button type="button" (click)="toggleAttachmentPreview(m, attachment, 'private', $event)">Show</button>
+                  </div>
+                  <div *ngIf="!isAttachmentPreviewHidden(m, attachment, 'private')" style="position: relative; width: fit-content; margin: 0 0 8px;">
+                    <button
+                      type="button"
+                      (mousedown)="$event.stopPropagation()"
+                      (touchstart)="$event.stopPropagation()"
+                      (click)="openAttachmentViewer(m, 'private', attachment)"
+                      style="border: 0; padding: 0; background: transparent; cursor: pointer;"
+                    >
+                      <img
+                        *ngIf="attachment.isImage"
+                        [src]="attachmentUrl(attachment)"
+                        [alt]="attachment.name"
+                        style="max-width: 220px; max-height: 180px; border-radius: 10px; border: 1px solid #d9e2ef; display: block;"
+                      />
+                      <video
+                        *ngIf="isVideoAttachment(attachment)"
+                        [src]="attachmentUrl(attachment)"
+                        [attr.data-preview-key]="attachmentPreviewKey(m, attachment, 'private')"
+                        (loadedmetadata)="enforceMutedPreview($event)"
+                        style="max-width: 220px; max-height: 180px; border-radius: 10px; border: 1px solid #d9e2ef; display: block; background: #000;"
+                        autoplay
+                        loop
+                        muted
+                        playsinline
+                      ></video>
+                    </button>
+                    <button mat-icon-button type="button" (click)="toggleAttachmentPreview(m, attachment, 'private', $event)" style="position: absolute; top: 4px; right: 4px; background: rgba(255,255,255,0.78);">
+                      <mat-icon>visibility_off</mat-icon>
+                    </button>
+                  </div>
+                </ng-container>
+                <div
+                  *ngIf="!attachment.isImage && !isVideoAttachment(attachment)"
+                  style="display: block; margin: 0 0 8px; text-decoration: none;"
+                >
+                  <audio
+                    *ngIf="isAudioAttachment(attachment)"
+                    controls
+                    [src]="attachmentUrl(attachment)"
+                    style="display: block; max-width: 260px;"
+                  ></audio>
+                  <div *ngIf="!isAudioAttachment(attachment)" style="border: 1px solid #d9e2ef; border-radius: 10px; padding: 7px 9px; background: #f8fbff; color: #35506c;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                      <div style="min-width: 0;">
+                        <strong style="display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ attachment.name }}</strong>
+                        <div style="font-size: 0.74rem; opacity: 0.8;">{{ attachmentTypeLabel(attachment) }} • {{ attachmentSizeLabel(attachment.size) }}</div>
+                      </div>
+                      <button mat-icon-button type="button" [matMenuTriggerFor]="attachmentMenu" (menuOpened)="openAttachmentMenuFor(attachment)" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()">
+                        <mat-icon>more_vert</mat-icon>
+                      </button>
+                    </div>
+                    <iframe
+                      *ngIf="isTextAttachment(attachment)"
+                      [src]="attachmentUrl(attachment)"
+                      title="Text preview"
+                      style="width: min(320px, 70vw); height: 140px; border: 1px solid #d9e2ef; border-radius: 10px; background: #fff; margin-top: 6px;"
+                    ></iframe>
+                  </div>
+                </div>
+              </ng-container>
+              <div class="text" *ngIf="m.text || m.deletedAt" [class.deletedText]="m.deletedAt" [innerHTML]="m.deletedAt ? 'Message deleted' : highlightText(m.text)"></div>
             </ng-template>
             <div class="meta">
               <div class="messageActions" *ngIf="!isEditingMessage(m, 'private') && !m.deletedAt">
@@ -304,17 +454,55 @@
       </button>
     </mat-menu>
 
+    <mat-menu #attachmentMenu="matMenu">
+      <button mat-menu-item type="button" (click)="downloadAttachment(attachmentMenuTarget)">
+        <mat-icon>download</mat-icon>
+        <span>Download</span>
+      </button>
+      <button mat-menu-item type="button" *ngIf="canOpenInGoogleDocs(attachmentMenuTarget)" (click)="openAttachmentInGoogleDocs(attachmentMenuTarget)">
+        <mat-icon>description</mat-icon>
+        <span>Open in Google Docs</span>
+      </button>
+    </mat-menu>
+
     <!-- Composer -->
     <form class="composer" (ngSubmit)="selectedUser ? sendPrivate() : sendPublic()">
       <div class="composerFieldWrap">
+        <input #attachmentInput type="file" multiple hidden (change)="onAttachmentSelected($event)" />
         <div class="composerReply" *ngIf="replyingTo">
           <div class="composerReplyText">
             <strong>Replying to {{ replyAuthorLabel(replyingTo.from) }}</strong>
             <span>{{ replyPreviewText(replyingTo.text) }}</span>
+            <img *ngIf="replyingTo.attachment?.isImage" [src]="attachmentUrl(replyingTo.attachment)" [alt]="replyingTo.attachment?.name" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
+            <video *ngIf="isVideoAttachment(replyingTo.attachment)" [src]="attachmentUrl(replyingTo.attachment)" (loadedmetadata)="enforceMutedPreview($event)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+            <span *ngIf="replyingTo.attachment">{{ attachmentTypeLabel(replyingTo.attachment) }} • {{ replyingTo.attachment.name }}</span>
           </div>
           <button mat-icon-button type="button" (click)="clearReplyTarget()" matTooltip="Cancel reply">
             <mat-icon>close</mat-icon>
           </button>
+        </div>
+        <div *ngIf="pendingAttachments.length" style="display: flex; flex-direction: column; gap: 6px; background: #eef6ff; border: 1px solid #cfe0f5; border-radius: 10px; padding: 6px 8px; margin-bottom: 6px;">
+          <div *ngFor="let attachment of pendingAttachments; let i = index" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <a [href]="attachmentUrl(attachment)" target="_blank" rel="noopener" style="min-width: 0; text-decoration: none; color: #2f4e70;">
+              <strong style="font-size: 0.78rem;">{{ attachment.name }}</strong>
+              <div style="font-size: 0.72rem; opacity: 0.8;">{{ attachmentTypeLabel(attachment) }} • {{ attachmentSizeLabel(attachment.size) }}</div>
+            </a>
+            <button mat-icon-button type="button" (click)="removePendingAttachment(i)" matTooltip="Remove attachment">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+          <button mat-stroked-button type="button" (click)="clearPendingAttachments()">Clear all</button>
+        </div>
+        <div *ngIf="uploadErrors.length" style="display: flex; flex-direction: column; gap: 4px; background: #fff4ea; border: 1px solid #f1d2bb; border-radius: 10px; padding: 6px 8px; margin-bottom: 6px; color: #7a4a27;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <strong style="font-size: 0.78rem;">Some files were not uploaded</strong>
+            <button mat-icon-button type="button" (click)="clearUploadErrors()" matTooltip="Dismiss">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+          <div *ngFor="let err of uploadErrors" style="font-size: 0.74rem; line-height: 1.25;">
+            • {{ err }}
+          </div>
         </div>
         <mat-form-field appearance="outline" class="composerInput">
           <mat-label>{{ selectedUser ? 'Type a private message' : 'Type a public message' }}</mat-label>
@@ -326,6 +514,17 @@
             (input)="selectedUser ? onPrivateInput() : onPublicInput()"
             (blur)="onInputBlur()"
           />
+          <button
+            mat-icon-button
+            matSuffix
+            type="button"
+            class="emojiTrigger"
+            aria-label="Attach file"
+            [disabled]="uploadingAttachment"
+            (click)="openAttachmentPicker(); $event.stopPropagation()"
+          >
+            <mat-icon>{{ uploadingAttachment ? (hourglassTop ? 'hourglass_top' : 'hourglass_bottom') : 'attach_file' }}</mat-icon>
+          </button>
           <button
             mat-icon-button
             matSuffix
@@ -345,6 +544,13 @@
       </div>
       <button mat-raised-button color="primary" type="submit">Send</button>
     </form>
+
+    <div
+      *ngIf="isDragAttachActive"
+      style="position: absolute; inset: 76px 16px 88px; border: 2px dashed #83a5cd; border-radius: 14px; background: rgba(236, 244, 255, 0.88); display: flex; align-items: center; justify-content: center; text-align: center; color: #2f4d70; font-weight: 600; z-index: 4; pointer-events: none;"
+    >
+      Drop file to attach
+    </div>
   </mat-sidenav-content>
 
   <!-- RIGHT: Online users -->
@@ -442,6 +648,82 @@
     <div class="dialogActions">
       <button mat-stroked-button type="button" (click)="dialogRef.close()">Cancel</button>
       <button mat-flat-button color="primary" type="button" (click)="confirmForward(dialogRef)">Forward</button>
+    </div>
+  </div>
+</ng-template>
+
+<ng-template #imageViewerTpl let-dialogRef="dialogRef">
+  <div *ngIf="imageViewerTarget as viewer" style="background: linear-gradient(180deg, #f8fbff, #f3f8ff); border-radius: 14px; overflow: hidden;">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #d9e5f5;">
+      <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+        <strong style="font-size: 0.9rem; color: #264363; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ viewer.message.attachment?.name }}</strong>
+        <span style="font-size: 0.75rem; color: #4c6580;">Sent by {{ replyAuthorLabel(viewer.message.from) }} • {{ viewer.message.timestamp | date:'short' }}</span>
+        <span style="font-size: 0.72rem; color: #5b7390;">{{ attachmentSizeLabel(viewer.message.attachment?.size) }} • {{ viewer.message.attachment?.mimeType }}</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 4px;">
+        <button
+          mat-icon-button
+          type="button"
+          (click)="downloadAttachment(viewer.message.attachment)"
+          matTooltip="Download"
+        >
+          <mat-icon>download</mat-icon>
+        </button>
+        <a
+          *ngIf="canSearchByImage(viewer.message.attachment)"
+          mat-icon-button
+          [href]="googleImageSearchUrl(viewer.message.attachment)"
+          target="_blank"
+          rel="noopener"
+          matTooltip="Search Google Images"
+        >
+          <mat-icon>travel_explore</mat-icon>
+        </a>
+        <button mat-icon-button type="button" (click)="dialogRef.close()" matTooltip="Close">
+          <mat-icon>close</mat-icon>
+        </button>
+      </div>
+    </div>
+
+    <div style="padding: 12px; display: flex; justify-content: center; background: rgba(255,255,255,0.75);">
+      <img
+        *ngIf="viewer.message.attachment?.isImage"
+        [src]="attachmentUrl(viewer.message.attachment)"
+        [alt]="viewer.message.attachment?.name"
+        style="max-width: min(860px, 90vw); max-height: 60vh; border-radius: 12px; border: 1px solid #d7e2f0; box-shadow: 0 12px 24px rgba(26, 48, 78, 0.15);"
+      />
+      <video
+        *ngIf="isVideoAttachment(viewer.message.attachment)"
+        [src]="attachmentUrl(viewer.message.attachment)"
+        controls
+        autoplay
+        playsinline
+        style="max-width: min(860px, 90vw); max-height: 60vh; border-radius: 12px; border: 1px solid #d7e2f0; box-shadow: 0 12px 24px rgba(26, 48, 78, 0.15); background: #000;"
+      ></video>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-top: 1px solid #d9e5f5;">
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <button
+          class="reactionOption"
+          type="button"
+          *ngFor="let emoji of messageReactions"
+          [class.active]="hasReactionByMe(viewer.message, emoji)"
+          (click)="reactFromAttachmentViewer(emoji)"
+        >
+          {{ emoji }}
+          <span *ngIf="reactionCount(viewer.message, emoji)">{{ reactionCount(viewer.message, emoji) }}</span>
+        </button>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <button mat-stroked-button type="button" [disabled]="!canReplyPrivatelyToAttachment()" (click)="replyPrivatelyToAttachment(dialogRef)">
+          Reply privately
+        </button>
+        <button mat-stroked-button type="button" disabled matTooltip="Coming soon">
+          Report (soon)
+        </button>
+      </div>
     </div>
   </div>
 </ng-template>

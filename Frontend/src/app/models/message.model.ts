@@ -1,3 +1,11 @@
+export interface Attachment {
+  url: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  isImage: boolean;
+}
+
 export interface Message {
   id?: string;
   from: string;
@@ -8,13 +16,17 @@ export interface Message {
     from: string;
     text: string;
     scope?: 'public' | 'private';
+    attachment?: Attachment | null;
   } | null;
   forwardedFrom?: {
     messageId: string;
     from: string;
     text: string;
     scope?: 'public' | 'private';
+    attachment?: Attachment | null;
   } | null;
+  attachment?: Attachment | null;
+  attachments?: Attachment[];
   timestamp?: string;
   readAt?: string | null;
   reactions?: Array<{ emoji: string; users: string[] }>;

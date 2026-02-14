@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { BehaviorSubject, Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { AuthService } from './auth';
-import { ChatMessage } from '../models/message.model';
+import { Attachment, ChatMessage } from '../models/message.model';
 import { Router } from '@angular/router';
 
 @Injectable({ providedIn: 'root' })
@@ -64,24 +64,31 @@ export class SocketService {
   // Send
   sendPublicMessage(
     text: string,
-    replyTo?: { messageId: string; from: string; text: string; scope?: 'public' | 'private' } | null
+    replyTo?: { messageId: string; from: string; text: string; scope?: 'public' | 'private'; attachment?: Attachment | null } | null,
+    attachments?: Attachment[]
   ): void {
-    this.socket.emit('publicMessage', { text, replyTo: replyTo || null });
+    this.socket.emit('publicMessage', {
+      text,
+      replyTo: replyTo || null,
+      attachments: attachments || []
+    });
   }
 
   sendPrivateMessage(
     to: string,
     text: string,
     tempId?: string,
-    replyTo?: { messageId: string; from: string; text: string; scope?: 'public' | 'private' } | null,
-    forwardedFrom?: { messageId: string; from: string; text: string; scope?: 'public' | 'private' } | null
+    replyTo?: { messageId: string; from: string; text: string; scope?: 'public' | 'private'; attachment?: Attachment | null } | null,
+    forwardedFrom?: { messageId: string; from: string; text: string; scope?: 'public' | 'private'; attachment?: Attachment | null } | null,
+    attachments?: Attachment[]
   ): void {
     this.socket.emit('privateMessage', {
       to,
       text,
       tempId,
       replyTo: replyTo || null,
-      forwardedFrom: forwardedFrom || null
+      forwardedFrom: forwardedFrom || null,
+      attachments: attachments || []
     });
   }
 

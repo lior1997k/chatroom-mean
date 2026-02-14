@@ -7,12 +7,38 @@ const privateMessageSchema = new Schema(
     toId:   { type: Schema.Types.ObjectId, ref: 'User', index: true },
     from:   { type: String, index: true },
     to:     { type: String, index: true },
-    text:   { type: String, required: true },
+    text:   { type: String, default: '' },
+    attachment: {
+      url: { type: String, default: null },
+      name: { type: String, default: null },
+      mimeType: { type: String, default: null },
+      size: { type: Number, default: null },
+      isImage: { type: Boolean, default: false }
+    },
+    attachments: {
+      type: [
+        {
+          url: { type: String, default: null },
+          name: { type: String, default: null },
+          mimeType: { type: String, default: null },
+          size: { type: Number, default: null },
+          isImage: { type: Boolean, default: false }
+        }
+      ],
+      default: []
+    },
     replyTo: {
       messageId: { type: Schema.Types.ObjectId, default: null },
       from: { type: String, default: null },
       text: { type: String, default: null },
-      scope: { type: String, enum: ['public', 'private'], default: null }
+      scope: { type: String, enum: ['public', 'private'], default: null },
+      attachment: {
+        url: { type: String, default: null },
+        name: { type: String, default: null },
+        mimeType: { type: String, default: null },
+        size: { type: Number, default: null },
+        isImage: { type: Boolean, default: false }
+      }
     },
     forwardedFrom: {
       messageId: { type: Schema.Types.ObjectId, default: null },

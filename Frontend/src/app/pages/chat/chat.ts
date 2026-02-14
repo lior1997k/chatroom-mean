@@ -1,13 +1,14 @@
-import { Component, ElementRef, HostListener, TemplateRef, ViewChild } from '@angular/core';
+import { AfterViewChecked, Component, ElementRef, HostListener, TemplateRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Router } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 
 import { SocketService } from '../../services/socket';
 import { AuthService } from '../../services/auth';
 import { environment } from '../../../environments/environment';
-import { ChatMessage } from '../../models/message.model';
+import { Attachment, ChatMessage } from '../../models/message.model';
 
 import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatListModule } from '@angular/material/list';
@@ -37,9 +38,17 @@ const DRAFTS_STORAGE_KEY = 'chatroom:composerDrafts';
   templateUrl: './chat.html',
   styleUrls: ['./chat.css'],
 })
-export class ChatComponent {
+export class ChatComponent implements AfterViewChecked {
   // Composer
   message = '';
+  pendingAttachments: Attachment[] = [];
+  uploadingAttachment = false;
+  uploadingAttachmentCount = 0;
+  uploadErrors: string[] = [];
+  hourglassTop = true;
+  private hourglassTimer: ReturnType<typeof setInterval> | null = null;
+  isDragAttachActive = false;
+  private dragAttachDepth = 0;
   readonly editWindowMs = 15 * 60 * 1000;
 
   // Data
@@ -90,6 +99,7 @@ export class ChatComponent {
     messageId: string;
     from: string;
     text: string;
+    attachment: Attachment | null;
     scope: 'public' | 'private';
     sourceScope: 'public' | 'private';
     privatePeer: string | null;
@@ -99,6 +109,7 @@ export class ChatComponent {
     from: string;
     text: string;
     scope: 'public' | 'private';
+    attachment: Attachment | null;
   } | null = null;
   forwardSelectedUsers: string[] = [];
   forwardSearchTerm = '';
@@ -115,8 +126,15 @@ export class ChatComponent {
   @ViewChild('startChatTpl') startChatTpl!: TemplateRef<any>;
   @ViewChild('confirmDeleteTpl') confirmDeleteTpl!: TemplateRef<any>;
   @ViewChild('forwardTpl') forwardTpl!: TemplateRef<any>;
+  @ViewChild('imageViewerTpl') imageViewerTpl!: TemplateRef<any>;
   @ViewChild('searchInput') searchInput?: ElementRef<HTMLInputElement>;
+  @ViewChild('attachmentInput') attachmentInput?: ElementRef<HTMLInputElement>;
   deleteCandidate: { id: string; scope: 'public' | 'private'; preview: string } | null = null;
+  imageViewerTarget: { message: ChatMessage; scope: 'public' | 'private' } | null = null;
+  attachmentMenuTarget: ChatMessage['attachment'] | null = null;
+  private pausedPreviewVideoKey: string | null = null;
+  private lastPreviewKickAt = 0;
+  private hiddenAttachmentPreviewKeys = new Set<string>();
 
   constructor(
     private socket: SocketService,
@@ -287,15 +305,25 @@ export class ChatComponent {
     this.privateTypingTimeouts.forEach((timeout) => clearTimeout(timeout));
     this.publicTypingTimeouts.clear();
     this.privateTypingTimeouts.clear();
+    this.stopHourglassAnimation();
+  }
+
+  ngAfterViewChecked() {
+    const now = Date.now();
+    if (now - this.lastPreviewKickAt < 1200) return;
+    this.lastPreviewKickAt = now;
+    this.ensurePreviewVideosPlaying();
   }
 
   // ===== Public Chat =====
   sendPublic() {
     const text = this.message.trim();
-    if (!text) return;
+    const attachments = this.pendingAttachments.slice();
+    if (!text && !attachments.length) return;
     const replyTo = this.activeReplyPayload('public');
-    this.socket.sendPublicMessage(text, replyTo);
+    this.socket.sendPublicMessage(text, replyTo, attachments);
     this.message = '';
+    this.clearPendingAttachments();
     this.clearDraftForContext(null);
     this.replyingTo = null;
     this.showEmojiPicker = false;
@@ -336,6 +364,7 @@ export class ChatComponent {
   // ===== Private Chat =====
   async openChat(username: string) {
     this.saveDraftForContext(this.selectedUser, this.message);
+    this.clearPendingAttachments();
     const hadUnread = this.unreadCount(username) > 0;
 
     // switching views → stop public typing if active
@@ -455,7 +484,8 @@ export class ChatComponent {
 
   sendPrivate() {
     const text = this.message.trim();
-    if (!text || !this.selectedUser) return;
+    const attachments = this.pendingAttachments.slice();
+    if ((!text && !attachments.length) || !this.selectedUser) return;
 
     const replyTo = this.activeReplyPayload('private');
     const forwardedFrom = null;
@@ -468,6 +498,8 @@ export class ChatComponent {
       text,
       replyTo,
       forwardedFrom,
+      attachment: attachments[0] || null,
+      attachments,
       timestamp: new Date().toISOString(),
       status: 'sent',
       reactions: []
@@ -476,8 +508,9 @@ export class ChatComponent {
     if (!this.privateChats[this.selectedUser]) this.privateChats[this.selectedUser] = [];
     this.privateChats[this.selectedUser].push(msg);
 
-    this.socket.sendPrivateMessage(this.selectedUser, text, tempId, replyTo, forwardedFrom);
+    this.socket.sendPrivateMessage(this.selectedUser, text, tempId, replyTo, forwardedFrom, attachments);
     this.message = '';
+    this.clearPendingAttachments();
     this.clearDraftForContext(this.selectedUser);
     this.replyingTo = null;
     this.showEmojiPicker = false;
@@ -501,6 +534,7 @@ export class ChatComponent {
     this.clearTypingIdleTimer();
     this.selectedUser = null;
     this.replyingTo = null;
+    this.clearPendingAttachments();
     this.message = this.draftForContext(null);
     this.showEmojiPicker = false;
     this.reactionPicker = null;
@@ -520,13 +554,151 @@ export class ChatComponent {
     }
   }
 
+  openAttachmentPicker() {
+    if (this.uploadingAttachment) return;
+    this.attachmentInput?.nativeElement?.click();
+  }
+
+  onAttachmentSelected(event: Event) {
+    const input = event.target as HTMLInputElement | null;
+    const files = Array.from(input?.files || []);
+    if (!files.length) return;
+    this.uploadAttachmentFiles(files, input);
+  }
+
+  onComposerDragEnter(event: DragEvent) {
+    if (!this.hasDraggedFiles(event)) return;
+    event.preventDefault();
+    this.dragAttachDepth += 1;
+    this.isDragAttachActive = true;
+  }
+
+  onComposerDragOver(event: DragEvent) {
+    if (!this.hasDraggedFiles(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  }
+
+  onComposerDragLeave(event: DragEvent) {
+    if (!this.hasDraggedFiles(event)) return;
+    event.preventDefault();
+    this.dragAttachDepth = Math.max(0, this.dragAttachDepth - 1);
+    if (this.dragAttachDepth === 0) this.isDragAttachActive = false;
+  }
+
+  onComposerDrop(event: DragEvent) {
+    if (!this.hasDraggedFiles(event)) return;
+    event.preventDefault();
+
+    this.dragAttachDepth = 0;
+    this.isDragAttachActive = false;
+
+    const files = Array.from(event.dataTransfer?.files || []);
+    if (!files.length) return;
+    this.uploadAttachmentFiles(files);
+  }
+
+  private async uploadAttachmentFiles(files: File[], inputToClear?: HTMLInputElement | null) {
+    const headers = this.getAuthHeaders();
+    if (!headers) {
+      this.pushUploadError('You are not authenticated. Please sign in again and retry.');
+      if (inputToClear) inputToClear.value = '';
+      return;
+    }
+
+    this.uploadingAttachment = true;
+    this.uploadingAttachmentCount = files.length;
+    this.startHourglassAnimation();
+
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const uploaded = await firstValueFrom(
+          this.http.post<Attachment>(`${environment.apiUrl}/api/upload`, formData, { headers })
+        );
+
+        if (uploaded?.url) {
+          this.pendingAttachments.push({
+            url: uploaded.url,
+            name: uploaded.name || file.name,
+            mimeType: uploaded.mimeType || file.type || 'application/octet-stream',
+            size: Number(uploaded.size || file.size || 0),
+            isImage: !!uploaded.isImage
+          });
+        }
+      } catch (error) {
+        this.pushUploadError(this.uploadFailureReason(error, file));
+      } finally {
+        this.uploadingAttachmentCount = Math.max(0, this.uploadingAttachmentCount - 1);
+      }
+    }
+
+    this.uploadingAttachment = false;
+    this.stopHourglassAnimation();
+    if (inputToClear) inputToClear.value = '';
+  }
+
+  private hasDraggedFiles(event: DragEvent): boolean {
+    const types = event.dataTransfer?.types;
+    if (!types) return false;
+    return Array.from(types).includes('Files');
+  }
+
+  clearPendingAttachments() {
+    this.pendingAttachments = [];
+    const input = this.attachmentInput?.nativeElement;
+    if (input) input.value = '';
+  }
+
+  removePendingAttachment(index: number) {
+    if (index < 0 || index >= this.pendingAttachments.length) return;
+    this.pendingAttachments.splice(index, 1);
+  }
+
+  clearUploadErrors() {
+    this.uploadErrors = [];
+  }
+
+  private pushUploadError(message: string) {
+    this.uploadErrors = [message, ...this.uploadErrors].slice(0, 4);
+  }
+
+  private uploadFailureReason(error: any, file: File): string {
+    const serverMessage = String(error?.error?.error || '').trim();
+    if (serverMessage) return `${file.name}: ${serverMessage}`;
+
+    if (Number(error?.status) === 413) {
+      return `${file.name}: file is too large.`;
+    }
+
+    return `${file.name}: upload failed. Please retry.`;
+  }
+
+  private startHourglassAnimation() {
+    if (this.hourglassTimer) return;
+    this.hourglassTimer = setInterval(() => {
+      this.hourglassTop = !this.hourglassTop;
+    }, 450);
+  }
+
+  private stopHourglassAnimation() {
+    if (this.hourglassTimer) {
+      clearInterval(this.hourglassTimer);
+      this.hourglassTimer = null;
+    }
+    this.hourglassTop = true;
+  }
+
   replyToMessage(message: ChatMessage, scope: 'public' | 'private') {
     if (!message?.id || message.id.startsWith('temp-') || message.deletedAt) return;
 
     this.replyingTo = {
       messageId: message.id,
       from: message.from,
-      text: String(message.text || '').trim().slice(0, 160),
+      text: this.messageReplySeedText(message),
+      attachment: this.messageAttachments(message)[0] || null,
       scope,
       sourceScope: scope,
       privatePeer: scope === 'private' ? this.selectedUser : null
@@ -558,7 +730,8 @@ export class ChatComponent {
       messageId: message.id,
       from: message.from,
       text: String(message.text || '').trim().slice(0, 160),
-      scope
+      scope,
+      attachment: this.messageAttachments(message)[0] || null
     };
     this.forwardSelectedUsers = this.selectedUser ? [this.selectedUser] : [];
     this.forwardSearchTerm = '';
@@ -601,7 +774,8 @@ export class ChatComponent {
           messageId: candidate.messageId,
           from: candidate.from,
           text: candidate.text,
-          scope: candidate.scope
+          scope: candidate.scope,
+          attachment: candidate.attachment
         }
       };
 
@@ -611,7 +785,8 @@ export class ChatComponent {
         messageId: candidate.messageId,
         from: candidate.from,
         text: candidate.text,
-        scope: candidate.scope
+        scope: candidate.scope,
+        attachment: candidate.attachment
       });
     });
 
@@ -666,6 +841,250 @@ export class ChatComponent {
     const trimmed = String(text || '').trim();
     if (!trimmed) return 'Message unavailable';
     return trimmed.length > 70 ? `${trimmed.slice(0, 70)}...` : trimmed;
+  }
+
+  attachmentUrl(attachment: ChatMessage['attachment']): string {
+    if (!attachment?.url) return '';
+    if (/^https?:\/\//i.test(attachment.url)) return attachment.url;
+    return `${environment.apiUrl}${attachment.url}`;
+  }
+
+  messageAttachments(message: ChatMessage): Attachment[] {
+    const fromArray = Array.isArray(message.attachments) ? message.attachments : [];
+    if (fromArray.length) return fromArray;
+    return message.attachment ? [message.attachment] : [];
+  }
+
+  attachmentSizeLabel(size: number | null | undefined): string {
+    const value = Number(size || 0);
+    if (!Number.isFinite(value) || value <= 0) return '0 B';
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  googleImageSearchUrl(attachment: ChatMessage['attachment']): string {
+    const imageUrl = this.attachmentUrl(attachment);
+    if (!imageUrl) return 'https://images.google.com/';
+    return `https://www.google.com/searchbyimage?image_url=${encodeURIComponent(imageUrl)}`;
+  }
+
+  isAudioAttachment(attachment: ChatMessage['attachment']): boolean {
+    return !!attachment?.mimeType?.startsWith('audio/');
+  }
+
+  isVideoAttachment(attachment: ChatMessage['attachment']): boolean {
+    return !!attachment?.mimeType?.startsWith('video/');
+  }
+
+  isTextAttachment(attachment: ChatMessage['attachment']): boolean {
+    return !!attachment?.mimeType?.startsWith('text/');
+  }
+
+  isDocAttachment(attachment: ChatMessage['attachment']): boolean {
+    const mime = String(attachment?.mimeType || '').toLowerCase();
+    return mime.includes('msword') || mime.includes('officedocument') || mime.includes('application/pdf');
+  }
+
+  attachmentTypeLabel(attachment: ChatMessage['attachment']): string {
+    const mime = String(attachment?.mimeType || '').toLowerCase();
+    if (!mime) return 'File';
+    if (mime.startsWith('audio/')) return mime.replace('audio/', '').toUpperCase();
+    if (mime.startsWith('image/')) return mime.replace('image/', '').toUpperCase();
+    if (mime === 'application/pdf') return 'PDF';
+    if (mime.includes('msword')) return 'DOC';
+    if (mime.includes('officedocument.wordprocessingml.document')) return 'DOCX';
+    if (mime === 'text/plain') return 'TXT';
+    if (mime === 'text/csv') return 'CSV';
+    if (mime === 'application/vnd.ms-excel') return 'XLS';
+    if (mime.includes('spreadsheetml')) return 'XLSX';
+    if (mime.includes('presentationml')) return 'PPTX';
+    if (mime.startsWith('text/')) return mime.replace('text/', '').toUpperCase();
+    return mime.split('/').pop()?.toUpperCase() || 'File';
+  }
+
+  canOpenInGoogleDocs(attachment: ChatMessage['attachment']): boolean {
+    const mime = String(attachment?.mimeType || '').toLowerCase();
+    return (
+      mime === 'application/pdf' ||
+      mime === 'text/plain' ||
+      mime === 'text/csv' ||
+      mime.includes('msword') ||
+      mime.includes('officedocument.wordprocessingml.document') ||
+      mime === 'application/vnd.ms-excel' ||
+      mime.includes('spreadsheetml') ||
+      mime.includes('presentationml')
+    );
+  }
+
+  googleDocsViewerUrl(attachment: ChatMessage['attachment']): string {
+    const url = this.attachmentUrl(attachment);
+    if (!url) return 'https://docs.google.com/';
+    return `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
+  }
+
+  openAttachmentMenuFor(attachment: ChatMessage['attachment']) {
+    this.attachmentMenuTarget = attachment || null;
+  }
+
+  canSearchByImage(attachment: ChatMessage['attachment']): boolean {
+    return !!attachment?.isImage;
+  }
+
+  canPreviewMediaAttachment(attachment: ChatMessage['attachment']): boolean {
+    return !!attachment && (attachment.isImage || this.isVideoAttachment(attachment));
+  }
+
+  enforceMutedPreview(event: Event) {
+    const video = event.target as HTMLVideoElement | null;
+    if (!video) return;
+    video.muted = true;
+    video.defaultMuted = true;
+    video.volume = 0;
+    try {
+      void video.play();
+    } catch {
+      // no-op
+    }
+  }
+
+  openAttachmentInGoogleDocs(attachment: ChatMessage['attachment']) {
+    const url = this.googleDocsViewerUrl(attachment);
+    window.open(url, '_blank', 'noopener');
+  }
+
+  async downloadAttachment(attachment: ChatMessage['attachment']) {
+    const url = this.attachmentUrl(attachment);
+    if (!url) return;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Download failed');
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = attachment?.name || 'download';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      window.open(url, '_blank', 'noopener');
+    }
+  }
+
+  openAttachmentViewer(message: ChatMessage, scope: 'public' | 'private', attachmentOverride?: Attachment | null) {
+    const attachment = attachmentOverride || message?.attachment || this.messageAttachments(message)[0] || null;
+    if (!attachment) return;
+    if (!attachment.isImage && !this.isVideoAttachment(attachment)) return;
+
+    this.pauseAttachmentPreviewVideo(this.attachmentPreviewKey(message, attachment, scope));
+
+    this.imageViewerTarget = { message: { ...message, attachment }, scope };
+    const ref = this.dialog.open(this.imageViewerTpl, {
+      width: 'min(920px, 96vw)',
+      maxWidth: '96vw'
+    });
+
+    ref.afterClosed().subscribe(() => {
+      this.imageViewerTarget = null;
+      this.resumeAttachmentPreviewVideo();
+    });
+  }
+
+  attachmentPreviewKey(message: ChatMessage, attachment: Attachment, scope: 'public' | 'private'): string {
+    return `${scope}|${message.id}|${attachment.url}`;
+  }
+
+  isAttachmentPreviewHidden(message: ChatMessage, attachment: Attachment, scope: 'public' | 'private'): boolean {
+    return this.hiddenAttachmentPreviewKeys.has(this.attachmentPreviewKey(message, attachment, scope));
+  }
+
+  toggleAttachmentPreview(message: ChatMessage, attachment: Attachment, scope: 'public' | 'private', event?: Event) {
+    event?.stopPropagation();
+    const key = this.attachmentPreviewKey(message, attachment, scope);
+    if (this.hiddenAttachmentPreviewKeys.has(key)) {
+      this.hiddenAttachmentPreviewKeys.delete(key);
+      this.resumeAttachmentPreviewVideo();
+      return;
+    }
+
+    this.hiddenAttachmentPreviewKeys.add(key);
+    this.pauseAttachmentPreviewVideo(key);
+  }
+
+  private pauseAttachmentPreviewVideo(previewKey: string) {
+    const el = document.querySelector(`video[data-preview-key="${previewKey}"]`) as HTMLVideoElement | null;
+    if (!el) return;
+    try {
+      el.pause();
+      this.pausedPreviewVideoKey = previewKey;
+    } catch {
+      this.pausedPreviewVideoKey = null;
+    }
+  }
+
+  private resumeAttachmentPreviewVideo() {
+    if (!this.pausedPreviewVideoKey) return;
+    const el = document.querySelector(`video[data-preview-key="${this.pausedPreviewVideoKey}"]`) as HTMLVideoElement | null;
+    this.pausedPreviewVideoKey = null;
+    if (!el) return;
+    try {
+      el.muted = true;
+      void el.play();
+    } catch {
+      // no-op
+    }
+  }
+
+  private ensurePreviewVideosPlaying() {
+    const videos = Array.from(document.querySelectorAll('video[data-preview-key]')) as HTMLVideoElement[];
+    videos.forEach((video) => {
+      if (!video.paused) return;
+      try {
+        video.muted = true;
+        video.defaultMuted = true;
+        void video.play();
+      } catch {
+        // no-op
+      }
+    });
+  }
+
+  async replyPrivatelyToAttachment(dialogRef: MatDialogRef<any>) {
+    const target = this.imageViewerTarget;
+    if (!target) return;
+
+    const message = target.message;
+    if (target.scope === 'public') {
+      if (!message.from || message.from === this.myUsername) return;
+      this.menuPublicMessage = message;
+      await this.startChatFromPublic(message.from, true);
+      dialogRef.close();
+      return;
+    }
+
+    const other = message.from === this.myUsername ? message.to : message.from;
+    if (!other) return;
+    await this.openChat(other);
+    this.replyToMessage(message, 'private');
+    dialogRef.close();
+  }
+
+  canReplyPrivatelyToAttachment(): boolean {
+    const target = this.imageViewerTarget;
+    if (!target) return false;
+    if (target.scope === 'public') return target.message.from !== this.myUsername;
+    return true;
+  }
+
+  reactFromAttachmentViewer(emoji: string) {
+    const target = this.imageViewerTarget;
+    if (!target?.message?.id) return;
+    this.toggleReaction(target.message, target.scope, emoji);
   }
 
   userChipStyle(username: string | null | undefined): Record<string, string> {
@@ -900,7 +1319,8 @@ export class ChatComponent {
       this.replyingTo = {
         messageId: quoted.id,
         from: quoted.from,
-        text: String(quoted.text || '').trim().slice(0, 160),
+        text: this.messageReplySeedText(quoted),
+        attachment: this.messageAttachments(quoted)[0] || null,
         scope: 'private',
         sourceScope: 'public',
         privatePeer: username
@@ -1219,7 +1639,16 @@ export class ChatComponent {
           messageId: message.replyTo.messageId,
           from: message.replyTo.from || '',
           text: String(message.replyTo.text || '').trim().slice(0, 160),
-          scope: message.replyTo.scope || 'private'
+          scope: message.replyTo.scope || 'private',
+          attachment: message.replyTo.attachment?.url
+            ? {
+              url: message.replyTo.attachment.url,
+              name: message.replyTo.attachment.name || 'Attachment',
+              mimeType: message.replyTo.attachment.mimeType || 'application/octet-stream',
+              size: Number(message.replyTo.attachment.size || 0),
+              isImage: !!message.replyTo.attachment.isImage
+            }
+            : null
         }
         : null,
       forwardedFrom: message.forwardedFrom?.messageId
@@ -1227,9 +1656,42 @@ export class ChatComponent {
           messageId: message.forwardedFrom.messageId,
           from: message.forwardedFrom.from || '',
           text: String(message.forwardedFrom.text || '').trim().slice(0, 160),
-          scope: message.forwardedFrom.scope || 'private'
+          scope: message.forwardedFrom.scope || 'private',
+          attachment: message.forwardedFrom.attachment?.url
+            ? {
+              url: message.forwardedFrom.attachment.url,
+              name: message.forwardedFrom.attachment.name || 'Attachment',
+              mimeType: message.forwardedFrom.attachment.mimeType || 'application/octet-stream',
+              size: Number(message.forwardedFrom.attachment.size || 0),
+              isImage: !!message.forwardedFrom.attachment.isImage
+            }
+            : null
         }
         : null,
+      attachment: message.attachment?.url
+        ? {
+          url: message.attachment.url,
+          name: message.attachment.name || 'Attachment',
+          mimeType: message.attachment.mimeType || 'application/octet-stream',
+          size: Number(message.attachment.size || 0),
+          isImage: !!message.attachment.isImage
+        }
+        : null,
+      attachments: (
+        (message.attachments && message.attachments.length)
+          ? message.attachments
+          : (message.attachment ? [message.attachment] : [])
+      )
+        .map((a) => a?.url
+          ? {
+            url: a.url,
+            name: a.name || 'Attachment',
+            mimeType: a.mimeType || 'application/octet-stream',
+            size: Number(a.size || 0),
+            isImage: !!a.isImage
+          }
+          : null)
+        .filter((a): a is Attachment => !!a),
       readAt: message.readAt || null,
       editedAt: message.editedAt || null,
       deletedAt: message.deletedAt || null,
@@ -1301,6 +1763,8 @@ export class ChatComponent {
         return {
           ...msg,
           text: '',
+          attachment: null,
+          attachments: [],
           reactions: [],
           deletedAt,
           editedAt: msg.editedAt || null
@@ -1465,6 +1929,16 @@ export class ChatComponent {
     return first?.id || null;
   }
 
+  private messageReplySeedText(message: ChatMessage): string {
+    const text = String(message.text || '').trim();
+    if (text) return text.slice(0, 160);
+
+    const attachmentName = String(this.messageAttachments(message)[0]?.name || '').trim();
+    if (attachmentName) return `[Attachment] ${attachmentName}`.slice(0, 160);
+
+    return '';
+  }
+
   private clearUnreadMarker(user: string | null) {
     if (!user) return;
     if (!this.unreadMarkerByUser[user]) return;
@@ -1535,7 +2009,8 @@ export class ChatComponent {
       messageId: this.replyingTo.messageId,
       from: this.replyingTo.from,
       text: String(this.replyingTo.text || '').trim().slice(0, 160),
-      scope: this.replyingTo.sourceScope
+      scope: this.replyingTo.sourceScope,
+      attachment: this.replyingTo.attachment
     };
   }
 
