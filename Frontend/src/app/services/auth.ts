@@ -13,6 +13,7 @@ export class AuthService {
   private apiUrl = `${environment.apiUrl}/api/user`;
   private tokenKey = 'token';
   private refreshTokenKey = 'refreshToken';
+  private rememberKey = 'rememberSession';
 
   constructor(private http: HttpClient) {}
 
@@ -20,7 +21,8 @@ export class AuthService {
     return this.http.post(`${this.apiUrl}/register`, { username, email, password });
   }
 
-  login(identifier: string, password: string) {
+  login(identifier: string, password: string, remember = true) {
+    this.setRememberSession(remember);
     return this.http.post(`${this.apiUrl}/login`, { identifier, password }).pipe(
       tap((res: any) => this.saveAuthSessionFromResponse(res))
     );
@@ -78,20 +80,34 @@ export class AuthService {
   }
 
 
-  saveToken(token: string) {
-    localStorage.setItem(this.tokenKey, token);
+  saveToken(token: string, remember = this.shouldRememberSession()) {
+    const storage = remember ? localStorage : sessionStorage;
+    const other = remember ? sessionStorage : localStorage;
+    storage.setItem(this.tokenKey, token);
+    other.removeItem(this.tokenKey);
   }
 
-  saveRefreshToken(refreshToken: string) {
-    localStorage.setItem(this.refreshTokenKey, refreshToken);
+  saveRefreshToken(refreshToken: string, remember = this.shouldRememberSession()) {
+    const storage = remember ? localStorage : sessionStorage;
+    const other = remember ? sessionStorage : localStorage;
+    storage.setItem(this.refreshTokenKey, refreshToken);
+    other.removeItem(this.refreshTokenKey);
+  }
+
+  setRememberSession(remember: boolean) {
+    localStorage.setItem(this.rememberKey, remember ? '1' : '0');
+  }
+
+  shouldRememberSession(): boolean {
+    return localStorage.getItem(this.rememberKey) !== '0';
   }
 
   getToken(): string | null {
-    return localStorage.getItem(this.tokenKey);
+    return localStorage.getItem(this.tokenKey) || sessionStorage.getItem(this.tokenKey);
   }
 
   getRefreshToken(): string | null {
-    return localStorage.getItem(this.refreshTokenKey);
+    return localStorage.getItem(this.refreshTokenKey) || sessionStorage.getItem(this.refreshTokenKey);
   }
 
   getPrivateChatWith(username: string): Observable<any[]> {
@@ -129,12 +145,14 @@ export class AuthService {
   logout() {
     localStorage.removeItem(this.tokenKey);
     localStorage.removeItem(this.refreshTokenKey);
+    sessionStorage.removeItem(this.tokenKey);
+    sessionStorage.removeItem(this.refreshTokenKey);
   }
 
   private saveAuthSessionFromResponse(res: any) {
     const token = String(res?.token || '');
     const refreshToken = String(res?.refreshToken || '');
-    if (token) this.saveToken(token);
-    if (refreshToken) this.saveRefreshToken(refreshToken);
+    if (token) this.saveToken(token, this.shouldRememberSession());
+    if (refreshToken) this.saveRefreshToken(refreshToken, this.shouldRememberSession());
   }
 }

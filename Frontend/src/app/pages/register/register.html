@@ -21,21 +21,36 @@
 
       <form (ngSubmit)="register()" class="auth-form">
         <label class="field">
+          <span>Email</span>
+          <input type="email" [(ngModel)]="email" (input)="onEmailInput()" name="email" autocomplete="email" required />
+          <small class="hint">Use an email you can access.</small>
+        </label>
+
+        <label class="field">
           <span>Username</span>
-          <input type="text" [(ngModel)]="username" name="username" autocomplete="username" required />
+          <input type="text" [(ngModel)]="username" (input)="onUsernameInput()" name="username" autocomplete="username" required />
+          <small class="hint">3-24 chars, lowercase letters, numbers, underscores.</small>
         </label>
 
         <label class="field">
           <span>Password</span>
-          <input type="password" [(ngModel)]="password" name="password" autocomplete="new-password" required />
+          <div class="passwordField">
+            <input [type]="showPassword ? 'text' : 'password'" [(ngModel)]="password" name="password" autocomplete="new-password" required />
+            <button type="button" class="ghost-btn" (click)="toggleShowPassword()">{{ showPassword ? 'Hide' : 'Show' }}</button>
+          </div>
+          <small class="hint">{{ passwordPolicyHint() }}</small>
         </label>
 
         <label class="field">
           <span>Confirm password</span>
-          <input type="password" [(ngModel)]="confirmPassword" name="confirmPassword" autocomplete="new-password" required />
+          <div class="passwordField">
+            <input [type]="showConfirmPassword ? 'text' : 'password'" [(ngModel)]="confirmPassword" name="confirmPassword" autocomplete="new-password" required />
+            <button type="button" class="ghost-btn" (click)="toggleShowConfirmPassword()">{{ showConfirmPassword ? 'Hide' : 'Show' }}</button>
+          </div>
+          <small class="hint" [class.hint-ok]="passwordsMatch()" [class.hint-bad]="!passwordsMatch() && passwordMatchHint()">{{ passwordMatchHint() }}</small>
         </label>
 
-        <button type="submit" class="primary-btn">Create account</button>
+        <button type="submit" class="primary-btn" [disabled]="submitting">{{ submitting ? 'Creating...' : 'Create account' }}</button>
       </form>
 
       <p class="footnote">

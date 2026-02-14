@@ -20,6 +20,8 @@ export class LoginComponent {
   infoMessage = '';
   submitting = false;
   showPassword = false;
+  rememberSession = true;
+  capsLockOn = false;
   socialBusy: 'google' | 'apple' | null = null;
   socialPendingProvider: 'google' | 'apple' | null = null;
   socialSuggestedUsername = '';
@@ -38,6 +40,7 @@ export class LoginComponent {
     private router: Router,
     private route: ActivatedRoute
   ) {
+    this.rememberSession = this.auth.shouldRememberSession();
     if (this.auth.hasValidSession()) {
       this.router.navigate(['/chat']);
     }
@@ -78,7 +81,7 @@ export class LoginComponent {
     this.pendingVerificationEmail = isEmail ? identifier : '';
     this.submitting = true;
 
-    this.auth.login(identifier, password).subscribe({
+    this.auth.login(identifier, password, this.rememberSession).subscribe({
       next: (res: any) => {
         this.socket.connect();
         this.router.navigate(['/chat']);
@@ -173,6 +176,10 @@ export class LoginComponent {
 
   toggleShowPassword() {
     this.showPassword = !this.showPassword;
+  }
+
+  onPasswordKeyEvent(event: KeyboardEvent) {
+    this.capsLockOn = !!event.getModifierState && event.getModifierState('CapsLock');
   }
 
   private normalizeIdentifier(value: string): string {

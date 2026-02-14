@@ -109,6 +109,36 @@
   transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
+.passwordField {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.hint {
+  color: #60758a;
+  font-size: 0.75rem;
+}
+
+.hint-ok {
+  color: #1e6f4c;
+}
+
+.hint-bad {
+  color: #9f2e2e;
+}
+
+.ghost-btn {
+  border: 1px solid var(--line);
+  background: #f4f8fc;
+  color: #2f4b64;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
 .field input:focus {
   outline: none;
   border-color: var(--brand);
@@ -131,6 +161,12 @@
 .primary-btn:hover {
   background: var(--brand-hover);
   transform: translateY(-1px);
+}
+
+.primary-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .notice {

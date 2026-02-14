@@ -37,10 +37,16 @@
         <label class="field">
           <span>Password</span>
           <div class="passwordField">
-            <input [type]="showPassword ? 'text' : 'password'" [(ngModel)]="password" name="password" autocomplete="current-password" required />
+            <input [type]="showPassword ? 'text' : 'password'" [(ngModel)]="password" (keyup)="onPasswordKeyEvent($event)" (keydown)="onPasswordKeyEvent($event)" name="password" autocomplete="current-password" required />
             <button type="button" class="ghost-btn" (click)="toggleShowPassword()">{{ showPassword ? 'Hide' : 'Show' }}</button>
           </div>
           <small class="hint"><a routerLink="/forgot-password">Forgot password?</a></small>
+          <small class="hint" *ngIf="capsLockOn">Caps lock appears to be on.</small>
+        </label>
+
+        <label class="rememberRow">
+          <input type="checkbox" [(ngModel)]="rememberSession" name="rememberSession" />
+          <span>Remember this device</span>
         </label>
 
         <button type="submit" class="primary-btn" [disabled]="submitting">{{ submitting ? 'Signing in...' : 'Sign in' }}</button>

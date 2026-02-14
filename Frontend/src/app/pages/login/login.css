@@ -129,6 +129,18 @@
   cursor: pointer;
 }
 
+.rememberRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #39566f;
+  font-size: 0.86rem;
+}
+
+.rememberRow input {
+  accent-color: #0b7285;
+}
+
 .field input:focus {
   outline: none;
   border-color: var(--brand);
