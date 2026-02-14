@@ -773,13 +773,13 @@ export class ChatComponent implements AfterViewChecked {
         if (media instanceof HTMLVideoElement) media.load();
       };
 
-      const done = () => {
+      const done = (durationOverride?: number) => {
         const width = Number((media as any).videoWidth || (media as any).naturalWidth || 0);
         const height = Number((media as any).videoHeight || (media as any).naturalHeight || 0);
-        const duration = media instanceof HTMLVideoElement ? Number(media.duration) : 0;
+        const rawDuration = Number(durationOverride || (media instanceof HTMLVideoElement ? media.duration : 0));
         cleanup();
         resolve({
-          durationSeconds: Number.isFinite(duration) && duration > 0 ? Math.round(duration) : undefined,
+          durationSeconds: Number.isFinite(rawDuration) && rawDuration > 0 ? Math.round(rawDuration) : undefined,
           width: Number.isFinite(width) && width > 0 ? Math.round(width) : undefined,
           height: Number.isFinite(height) && height > 0 ? Math.round(height) : undefined
         });
@@ -787,9 +787,39 @@ export class ChatComponent implements AfterViewChecked {
 
       if (media instanceof HTMLVideoElement) {
         media.preload = 'metadata';
-        media.onloadedmetadata = done;
+        media.onloadedmetadata = () => {
+          const initialDuration = Number(media.duration);
+          if (!Number.isFinite(initialDuration) || initialDuration <= 0) {
+            done();
+            return;
+          }
+
+          let settled = false;
+          const fallbackTimer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            done(initialDuration);
+          }, 850);
+
+          const finalizeFromSeek = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(fallbackTimer);
+            const corrected = Number(media.duration);
+            done(Number.isFinite(corrected) && corrected > 0 ? corrected : initialDuration);
+          };
+
+          media.addEventListener('seeked', finalizeFromSeek, { once: true });
+          try {
+            media.currentTime = 1e9;
+          } catch {
+            settled = true;
+            clearTimeout(fallbackTimer);
+            done(initialDuration);
+          }
+        };
       } else {
-        media.onload = done;
+        media.onload = () => done();
       }
       media.onerror = () => {
         cleanup();
@@ -1304,6 +1334,22 @@ export class ChatComponent implements AfterViewChecked {
       void video.play();
     } catch {
       // no-op
+    }
+  }
+
+  onVideoPreviewMetadata(event: Event, attachment: ChatMessage['attachment']) {
+    this.enforceMutedPreview(event);
+    if (!attachment) return;
+
+    const video = event.target as HTMLVideoElement | null;
+    if (!video) return;
+
+    const duration = Math.round(Number(video.duration || 0));
+    if (!Number.isFinite(duration) || duration <= 0) return;
+
+    const current = Number(attachment.durationSeconds || 0);
+    if (!current || Math.abs(current - duration) >= 2) {
+      attachment.durationSeconds = duration;
     }
   }
 

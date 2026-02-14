@@ -152,14 +152,14 @@
                 <span class="replyAuthor">Forwarded from {{ replyAuthorLabel(m.forwardedFrom.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.forwardedFrom.text) }}</span>
                 <img *ngIf="m.forwardedFrom.attachment?.isImage" [src]="attachmentUrl(m.forwardedFrom.attachment)" [alt]="m.forwardedFrom.attachment?.name" loading="lazy" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
-                <video *ngIf="isVideoAttachment(m.forwardedFrom.attachment)" [src]="attachmentUrl(m.forwardedFrom.attachment)" preload="metadata" (loadedmetadata)="enforceMutedPreview($event)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+                <video *ngIf="isVideoAttachment(m.forwardedFrom.attachment)" [src]="attachmentUrl(m.forwardedFrom.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, m.forwardedFrom.attachment)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
                 <span class="replyText" *ngIf="m.forwardedFrom.attachment">{{ attachmentTypeLabel(m.forwardedFrom.attachment) }} • {{ m.forwardedFrom.attachment.name }}</span>
               </button>
               <button class="replySnippet" type="button" *ngIf="m.replyTo" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToReplyTarget(m)">
                 <span class="replyAuthor">{{ replyAuthorLabel(m.replyTo.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.replyTo.text) }}</span>
                 <img *ngIf="m.replyTo.attachment?.isImage" [src]="attachmentUrl(m.replyTo.attachment)" [alt]="m.replyTo.attachment?.name" loading="lazy" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
-                <video *ngIf="isVideoAttachment(m.replyTo.attachment)" [src]="attachmentUrl(m.replyTo.attachment)" preload="metadata" (loadedmetadata)="enforceMutedPreview($event)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+                <video *ngIf="isVideoAttachment(m.replyTo.attachment)" [src]="attachmentUrl(m.replyTo.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, m.replyTo.attachment)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
                 <span class="replyText" *ngIf="m.replyTo.attachment">{{ attachmentTypeLabel(m.replyTo.attachment) }} • {{ m.replyTo.attachment.name }}</span>
               </button>
               <ng-container *ngIf="hasAlbumMedia(m)">
@@ -183,7 +183,7 @@
                         *ngIf="isVideoAttachment(attachment)"
                         [src]="attachmentUrl(attachment)"
                         preload="metadata"
-                        (loadedmetadata)="enforceMutedPreview($event)"
+                        (loadedmetadata)="onVideoPreviewMetadata($event, attachment)"
                         muted
                         autoplay
                         loop
@@ -225,7 +225,7 @@
                         [src]="attachmentUrl(attachment)"
                         [attr.data-preview-key]="attachmentPreviewKey(m, attachment, 'public')"
                         preload="metadata"
-                        (loadedmetadata)="enforceMutedPreview($event)"
+                        (loadedmetadata)="onVideoPreviewMetadata($event, attachment)"
                         style="max-width: 220px; max-height: 180px; border-radius: 10px; border: 1px solid #d9e2ef; display: block; background: #000;"
                         autoplay
                         loop
@@ -359,14 +359,14 @@
                 <span class="replyAuthor">Forwarded from {{ replyAuthorLabel(m.forwardedFrom.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.forwardedFrom.text) }}</span>
                 <img *ngIf="m.forwardedFrom.attachment?.isImage" [src]="attachmentUrl(m.forwardedFrom.attachment)" [alt]="m.forwardedFrom.attachment?.name" loading="lazy" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
-                <video *ngIf="isVideoAttachment(m.forwardedFrom.attachment)" [src]="attachmentUrl(m.forwardedFrom.attachment)" preload="metadata" (loadedmetadata)="enforceMutedPreview($event)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+                <video *ngIf="isVideoAttachment(m.forwardedFrom.attachment)" [src]="attachmentUrl(m.forwardedFrom.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, m.forwardedFrom.attachment)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
                 <span class="replyText" *ngIf="m.forwardedFrom.attachment">{{ attachmentTypeLabel(m.forwardedFrom.attachment) }} • {{ m.forwardedFrom.attachment.name }}</span>
               </button>
               <button class="replySnippet" type="button" *ngIf="m.replyTo" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToReplyTarget(m)">
                 <span class="replyAuthor">{{ replyAuthorLabel(m.replyTo.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.replyTo.text) }}</span>
                 <img *ngIf="m.replyTo.attachment?.isImage" [src]="attachmentUrl(m.replyTo.attachment)" [alt]="m.replyTo.attachment?.name" loading="lazy" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
-                <video *ngIf="isVideoAttachment(m.replyTo.attachment)" [src]="attachmentUrl(m.replyTo.attachment)" preload="metadata" (loadedmetadata)="enforceMutedPreview($event)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+                <video *ngIf="isVideoAttachment(m.replyTo.attachment)" [src]="attachmentUrl(m.replyTo.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, m.replyTo.attachment)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
                 <span class="replyText" *ngIf="m.replyTo.attachment">{{ attachmentTypeLabel(m.replyTo.attachment) }} • {{ m.replyTo.attachment.name }}</span>
               </button>
               <ng-container *ngIf="hasAlbumMedia(m)">
@@ -390,7 +390,7 @@
                         *ngIf="isVideoAttachment(attachment)"
                         [src]="attachmentUrl(attachment)"
                         preload="metadata"
-                        (loadedmetadata)="enforceMutedPreview($event)"
+                        (loadedmetadata)="onVideoPreviewMetadata($event, attachment)"
                         muted
                         autoplay
                         loop
@@ -432,7 +432,7 @@
                         [src]="attachmentUrl(attachment)"
                         [attr.data-preview-key]="attachmentPreviewKey(m, attachment, 'private')"
                         preload="metadata"
-                        (loadedmetadata)="enforceMutedPreview($event)"
+                        (loadedmetadata)="onVideoPreviewMetadata($event, attachment)"
                         style="max-width: 220px; max-height: 180px; border-radius: 10px; border: 1px solid #d9e2ef; display: block; background: #000;"
                         autoplay
                         loop
@@ -558,7 +558,7 @@
             <strong>Replying to {{ replyAuthorLabel(replyingTo.from) }}</strong>
             <span>{{ replyPreviewText(replyingTo.text) }}</span>
             <img *ngIf="replyingTo.attachment?.isImage" [src]="attachmentUrl(replyingTo.attachment)" [alt]="replyingTo.attachment?.name" loading="lazy" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
-            <video *ngIf="isVideoAttachment(replyingTo.attachment)" [src]="attachmentUrl(replyingTo.attachment)" preload="metadata" (loadedmetadata)="enforceMutedPreview($event)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
+            <video *ngIf="isVideoAttachment(replyingTo.attachment)" [src]="attachmentUrl(replyingTo.attachment)" preload="metadata" (loadedmetadata)="onVideoPreviewMetadata($event, replyingTo.attachment)" muted playsinline autoplay loop style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef; background: #000;"></video>
             <span *ngIf="replyingTo.attachment">{{ attachmentTypeLabel(replyingTo.attachment) }} • {{ replyingTo.attachment.name }}</span>
           </div>
           <button mat-icon-button type="button" (click)="clearReplyTarget()" matTooltip="Cancel reply">
@@ -819,6 +819,7 @@
         <video
           *ngIf="isVideoAttachment(viewerCurrentAttachment())"
           [src]="attachmentUrl(viewerCurrentAttachment())"
+          (loadedmetadata)="onVideoPreviewMetadata($event, viewerCurrentAttachment())"
           controls
           autoplay
           playsinline
