@@ -1682,7 +1682,7 @@ export class ChatComponent implements AfterViewChecked {
 
   highlightText(text: string): string {
     const safe = this.escapeHtml(text || '');
-    const q = this.messageSearchQuery.trim();
+    const q = this.parseSearchQuery(this.messageSearchQuery).text;
     if (q.length < 2) return safe;
 
     const re = new RegExp(this.escapeRegex(q), 'gi');
@@ -2307,10 +2307,14 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   private searchMessages(query: string) {
-    const q = query.toLowerCase();
+    const parsed = this.parseSearchQuery(query);
+    const q = parsed.text.toLowerCase();
     this.searchMatchIds = this.currentThread()
       .filter((m) => !!m.id)
-      .filter((m) => String(m.text ?? '').toLowerCase().includes(q))
+      .filter((m) => {
+        const textMatch = !q || String(m.text ?? '').toLowerCase().includes(q);
+        return textMatch && this.messageMatchesSearchFilters(m, parsed);
+      })
       .map((m) => m.id);
 
     if (!this.searchMatchIds.length) {
@@ -2332,6 +2336,62 @@ export class ChatComponent implements AfterViewChecked {
     }
 
     this.searchMessages(q);
+  }
+
+  private parseSearchQuery(raw: string): {
+    text: string;
+    hasMedia: boolean;
+    types: Array<'image' | 'video' | 'audio' | 'document'>;
+  } {
+    const tokens = String(raw || '').trim().split(/\s+/).filter(Boolean);
+    const textParts: string[] = [];
+    let hasMedia = false;
+    const types = new Set<'image' | 'video' | 'audio' | 'document'>();
+
+    tokens.forEach((token) => {
+      const normalized = token.toLowerCase();
+      if (normalized === 'has:media') {
+        hasMedia = true;
+        return;
+      }
+      if (normalized.startsWith('type:')) {
+        const value = normalized.slice(5);
+        if (value === 'image' || value === 'video' || value === 'audio' || value === 'document') {
+          types.add(value);
+          return;
+        }
+      }
+      textParts.push(token);
+    });
+
+    return { text: textParts.join(' ').trim(), hasMedia, types: Array.from(types) };
+  }
+
+  private messageMatchesSearchFilters(
+    message: ChatMessage,
+    filters: { hasMedia: boolean; types: Array<'image' | 'video' | 'audio' | 'document'> }
+  ): boolean {
+    const attachments = this.messageAttachments(message);
+    if (!attachments.length) return !filters.hasMedia && !filters.types.length;
+
+    const hasMediaAttachment = attachments.some((a) => a.isImage || this.isVideoAttachment(a));
+    if (filters.hasMedia && !hasMediaAttachment) return false;
+    if (!filters.types.length) return true;
+
+    return attachments.some((attachment) => {
+      if (filters.types.includes('image') && attachment.isImage) return true;
+      if (filters.types.includes('video') && this.isVideoAttachment(attachment)) return true;
+      if (filters.types.includes('audio') && this.isAudioAttachment(attachment)) return true;
+      if (
+        filters.types.includes('document') &&
+        !attachment.isImage &&
+        !this.isVideoAttachment(attachment) &&
+        !this.isAudioAttachment(attachment)
+      ) {
+        return true;
+      }
+      return false;
+    });
   }
 
   private scrollToMessage(messageId: string) {

@@ -70,7 +70,7 @@
             [(ngModel)]="messageSearchQuery"
             (input)="onMessageSearchInput()"
             (keydown.enter)="nextSearchMatch()"
-            placeholder="Search in this room"
+            placeholder="Search, has:media, type:image"
           />
           <span class="searchCount">{{ currentSearchPositionLabel() }}</span>
           <button mat-icon-button type="button" (click)="prevSearchMatch()" [disabled]="searchMatchIds.length < 2" matTooltip="Previous">
