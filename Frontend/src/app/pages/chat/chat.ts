@@ -1241,6 +1241,16 @@ export class ChatComponent implements AfterViewChecked {
     };
   }
 
+  viewerJumpTo(index: number) {
+    if (!this.imageViewerTarget) return;
+    if (index < 0 || index >= this.imageViewerTarget.media.length) return;
+    this.imageViewerTarget = {
+      ...this.imageViewerTarget,
+      index,
+      message: { ...this.imageViewerTarget.message, attachment: this.imageViewerTarget.media[index] }
+    };
+  }
+
   albumMediaAttachments(message: ChatMessage): Attachment[] {
     return this.messageAttachments(message).filter((a) => this.canPreviewMediaAttachment(a));
   }
