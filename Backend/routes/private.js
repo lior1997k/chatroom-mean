@@ -18,6 +18,7 @@ function serializeAttachment(a) {
     waveform: Array.isArray(a.waveform)
       ? a.waveform.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 96)
       : undefined,
+    audioKind: a.audioKind === 'voice-note' || a.audioKind === 'uploaded-audio' ? a.audioKind : undefined,
     width: Number(a.width) > 0 ? Math.round(Number(a.width)) : undefined,
     height: Number(a.height) > 0 ? Math.round(Number(a.height)) : undefined,
     storageProvider: a.storageProvider || 'local',
@@ -31,6 +32,38 @@ function serializeAttachments(m) {
   if (normalized.length) return normalized;
   const single = serializeAttachment(m?.attachment);
   return single ? [single] : [];
+}
+
+function serializeReference(ref, fallbackScope) {
+  if (!ref?.messageId) return null;
+  const attachments = serializeAttachments(ref);
+  return {
+    messageId: ref.messageId.toString(),
+    from: ref.from || '',
+    text: ref.text || '',
+    scope: ref.scope || fallbackScope,
+    attachment: attachments[0] || null,
+    attachments
+  };
+}
+
+function serializeAudioPlayback(playback) {
+  if (!playback || typeof playback !== 'object') return null;
+  const progress = Number(playback.progress || 0);
+  const currentTimeSeconds = Number(playback.currentTimeSeconds || 0);
+  const durationSeconds = Number(playback.durationSeconds || 0);
+  const listenedAt = playback.listenedAt ? new Date(playback.listenedAt) : null;
+
+  if (!Number.isFinite(progress) || progress <= 0) return null;
+
+  return {
+    by: playback.by || '',
+    progress: Math.max(0, Math.min(1, progress)),
+    currentTimeSeconds: Number.isFinite(currentTimeSeconds) && currentTimeSeconds >= 0 ? Math.round(currentTimeSeconds) : 0,
+    durationSeconds: Number.isFinite(durationSeconds) && durationSeconds >= 0 ? Math.round(durationSeconds) : 0,
+    attachmentKey: playback.attachmentKey || undefined,
+    listenedAt: listenedAt && !Number.isNaN(listenedAt.getTime()) ? listenedAt.toISOString() : null
+  };
 }
 
 router.get('/unread-counts', auth, async (req, res) => {
@@ -96,26 +129,11 @@ router.get('/:username', auth, async (req, res) => {
       text: m.text,
       attachment: serializeAttachment(m.attachment),
       attachments: serializeAttachments(m),
-      replyTo: m.replyTo?.messageId
-        ? {
-          messageId: m.replyTo.messageId.toString(),
-          from: m.replyTo.from || '',
-          text: m.replyTo.text || '',
-          scope: m.replyTo.scope || 'private',
-          attachment: serializeAttachment(m.replyTo.attachment)
-        }
-        : null,
-      forwardedFrom: m.forwardedFrom?.messageId
-        ? {
-          messageId: m.forwardedFrom.messageId.toString(),
-          from: m.forwardedFrom.from || '',
-          text: m.forwardedFrom.text || '',
-          scope: m.forwardedFrom.scope || 'private',
-          attachment: serializeAttachment(m.forwardedFrom.attachment)
-        }
-        : null,
+      replyTo: serializeReference(m.replyTo, 'private'),
+      forwardedFrom: serializeReference(m.forwardedFrom, 'private'),
       timestamp: m.ts.toISOString(),
       readAt: m.readAt ? m.readAt.toISOString() : null,
+      audioPlayback: serializeAudioPlayback(m.audioPlayback),
       reactions: m.reactions || [],
       editedAt: m.editedAt ? m.editedAt.toISOString() : null,
       deletedAt: m.deletedAt ? m.deletedAt.toISOString() : null
@@ -144,26 +162,11 @@ router.get('/by-id/:id', auth, async (req, res) => {
       text: msg.text,
       attachment: serializeAttachment(msg.attachment),
       attachments: serializeAttachments(msg),
-      replyTo: msg.replyTo?.messageId
-        ? {
-          messageId: msg.replyTo.messageId.toString(),
-          from: msg.replyTo.from || '',
-          text: msg.replyTo.text || '',
-          scope: msg.replyTo.scope || 'private',
-          attachment: serializeAttachment(msg.replyTo.attachment)
-        }
-        : null,
-      forwardedFrom: msg.forwardedFrom?.messageId
-        ? {
-          messageId: msg.forwardedFrom.messageId.toString(),
-          from: msg.forwardedFrom.from || '',
-          text: msg.forwardedFrom.text || '',
-          scope: msg.forwardedFrom.scope || 'private',
-          attachment: serializeAttachment(msg.forwardedFrom.attachment)
-        }
-        : null,
+      replyTo: serializeReference(msg.replyTo, 'private'),
+      forwardedFrom: serializeReference(msg.forwardedFrom, 'private'),
       timestamp: msg.ts.toISOString(),
       readAt: msg.readAt ? msg.readAt.toISOString() : null,
+      audioPlayback: serializeAudioPlayback(msg.audioPlayback),
       reactions: msg.reactions || [],
       editedAt: msg.editedAt ? msg.editedAt.toISOString() : null,
       deletedAt: msg.deletedAt ? msg.deletedAt.toISOString() : null

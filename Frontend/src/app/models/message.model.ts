@@ -6,6 +6,7 @@ export interface Attachment {
   isImage: boolean;
   durationSeconds?: number;
   waveform?: number[];
+  audioKind?: 'voice-note' | 'uploaded-audio';
   width?: number;
   height?: number;
   storageProvider?: 'local' | 's3';
@@ -23,6 +24,7 @@ export interface Message {
     text: string;
     scope?: 'public' | 'private';
     attachment?: Attachment | null;
+    attachments?: Attachment[];
   } | null;
   forwardedFrom?: {
     messageId: string;
@@ -30,11 +32,20 @@ export interface Message {
     text: string;
     scope?: 'public' | 'private';
     attachment?: Attachment | null;
+    attachments?: Attachment[];
   } | null;
   attachment?: Attachment | null;
   attachments?: Attachment[];
   timestamp?: string;
   readAt?: string | null;
+  audioPlayback?: {
+    by?: string;
+    progress?: number;
+    currentTimeSeconds?: number;
+    durationSeconds?: number;
+    attachmentKey?: string;
+    listenedAt?: string | null;
+  } | null;
   reactions?: Array<{ emoji: string; users: string[] }>;
   editedAt?: string | null;
   deletedAt?: string | null;

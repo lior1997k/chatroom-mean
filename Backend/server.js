@@ -66,6 +66,7 @@ const DIRECT_UPLOAD_THRESHOLD_BYTES = 8 * 1024 * 1024;
 const CHUNK_RESUME_TTL_MS = 24 * 60 * 60 * 1000;
 const chunkSessions = new Map();
 const chunkSessionsByResumeKey = new Map();
+const AUDIO_KIND_VALUES = new Set(['voice-note', 'uploaded-audio']);
 const ALLOWED_UPLOAD_MIME = [
   /^image\//,
   /^video\//,
@@ -117,6 +118,7 @@ app.post('/api/upload', auth, (req, res) => {
       const uploadedWaveformRaw = String(req.body?.waveform || '');
       const uploadedWidth = Number(req.body?.width);
       const uploadedHeight = Number(req.body?.height);
+      const audioKind = sanitizeAudioKind(req.body?.audioKind, mimeType);
       const durationSeconds = Number.isFinite(uploadedDuration) && uploadedDuration > 0
         ? Math.round(uploadedDuration)
         : undefined;
@@ -132,6 +134,7 @@ app.post('/api/upload', auth, (req, res) => {
         isImage,
         durationSeconds,
         waveform,
+        audioKind,
         width,
         height,
         storageProvider: 'local',
@@ -328,6 +331,7 @@ app.post('/api/upload/chunk/:sessionId/finalize', auth, async (req, res) => {
     const uploadedWaveform = parseWaveform(req.body?.waveform);
     const uploadedWidth = Number(req.body?.width);
     const uploadedHeight = Number(req.body?.height);
+    const audioKind = sanitizeAudioKind(req.body?.audioKind, session.mimeType);
 
     const payload = {
       url: `/uploads/${finalName}`,
@@ -337,6 +341,7 @@ app.post('/api/upload/chunk/:sessionId/finalize', auth, async (req, res) => {
       isImage: session.mimeType.startsWith('image/'),
       durationSeconds: Number.isFinite(uploadedDuration) && uploadedDuration > 0 ? Math.floor(uploadedDuration) : undefined,
       waveform: uploadedWaveform,
+      audioKind,
       width: Number.isFinite(uploadedWidth) && uploadedWidth > 0 ? Math.round(uploadedWidth) : undefined,
       height: Number.isFinite(uploadedHeight) && uploadedHeight > 0 ? Math.round(uploadedHeight) : undefined,
       storageProvider: 'local',
@@ -614,11 +619,21 @@ function messagePreviewText(message) {
   const text = sanitizeReplyText(message?.text);
   if (text) return text;
 
-  const firstAttachment = (message?.attachments && message.attachments[0]) || message?.attachment;
+  const attachmentList = normalizeAttachments(message?.attachments, message?.attachment);
+  if (attachmentList.length > 1) {
+    return sanitizeReplyText(`[Attachments] ${attachmentList.length} files`);
+  }
+  const firstAttachment = attachmentList[0] || null;
   const attachmentName = String(firstAttachment?.name || '').trim();
   if (attachmentName) return sanitizeReplyText(`[Attachment] ${attachmentName}`);
 
   return '';
+}
+
+function sanitizeAudioKind(input, mimeType) {
+  if (!String(mimeType || '').startsWith('audio/')) return undefined;
+  const value = String(input || '').trim().toLowerCase();
+  return AUDIO_KIND_VALUES.has(value) ? value : undefined;
 }
 
 function normalizeAttachment(attachment) {
@@ -636,6 +651,7 @@ function normalizeAttachment(attachment) {
   const waveform = parseWaveform(attachment.waveform);
   const width = Number(attachment.width);
   const height = Number(attachment.height);
+  const audioKind = sanitizeAudioKind(attachment.audioKind, mimeType);
   const storageProvider = attachment.storageProvider === 's3' ? 's3' : 'local';
   const objectKey = String(attachment.objectKey || '').trim().slice(0, 300);
 
@@ -649,6 +665,7 @@ function normalizeAttachment(attachment) {
       ? Math.min(MAX_ATTACHMENT_DURATION_SECONDS, Math.max(1, Math.round(duration)))
       : undefined,
     waveform,
+    audioKind,
     width: Number.isFinite(width) && width > 0
       ? Math.min(MAX_ATTACHMENT_DIMENSION, Math.max(1, Math.round(width)))
       : undefined,
@@ -693,8 +710,12 @@ function normalizeAttachments(attachments, fallbackAttachment) {
   return single ? [single] : [];
 }
 
+function referenceAttachmentsFromMessage(message) {
+  return normalizeAttachments(message?.attachments, message?.attachment);
+}
+
 function firstAttachmentFromMessage(message) {
-  const list = normalizeAttachments(message?.attachments, message?.attachment);
+  const list = referenceAttachmentsFromMessage(message);
   return list[0] || null;
 }
 
@@ -715,23 +736,59 @@ async function deleteAttachmentFileIfLocal(attachment) {
 
 function serializeReplyTo(replyTo) {
   if (!replyTo?.messageId) return null;
+  const attachments = normalizeAttachments(replyTo?.attachments, replyTo?.attachment);
   return {
     messageId: replyTo.messageId.toString(),
     from: replyTo.from || '',
     text: replyTo.text || '',
     scope: replyTo.scope || 'private',
-    attachment: normalizeAttachment(replyTo.attachment)
+    attachment: attachments[0] || null,
+    attachments
   };
 }
 
 function serializeForwardedFrom(forwardedFrom) {
   if (!forwardedFrom?.messageId) return null;
+  const attachments = normalizeAttachments(forwardedFrom?.attachments, forwardedFrom?.attachment);
   return {
     messageId: forwardedFrom.messageId.toString(),
     from: forwardedFrom.from || '',
     text: forwardedFrom.text || '',
     scope: forwardedFrom.scope || 'private',
-    attachment: normalizeAttachment(forwardedFrom.attachment)
+    attachment: attachments[0] || null,
+    attachments
+  };
+}
+
+function sanitizeAudioPlaybackPayload(payload = {}) {
+  const progress = Number(payload.progress || 0);
+  const currentTimeSeconds = Number(payload.currentTimeSeconds || 0);
+  const durationSeconds = Number(payload.durationSeconds || 0);
+  const attachmentKey = String(payload.attachmentKey || '').trim().slice(0, 180);
+
+  if (!Number.isFinite(progress) || progress <= 0) return null;
+
+  return {
+    progress: Math.max(0, Math.min(1, progress)),
+    currentTimeSeconds: Number.isFinite(currentTimeSeconds) && currentTimeSeconds >= 0 ? Math.round(currentTimeSeconds) : 0,
+    durationSeconds: Number.isFinite(durationSeconds) && durationSeconds >= 0 ? Math.round(durationSeconds) : 0,
+    attachmentKey: attachmentKey || undefined
+  };
+}
+
+function serializeAudioPlayback(playback) {
+  if (!playback || typeof playback !== 'object') return null;
+  const progress = Number(playback.progress || 0);
+  if (!Number.isFinite(progress) || progress <= 0) return null;
+
+  const listenedAt = playback.listenedAt ? new Date(playback.listenedAt) : null;
+  return {
+    by: playback.by || '',
+    progress: Math.max(0, Math.min(1, progress)),
+    currentTimeSeconds: Number(playback.currentTimeSeconds || 0) || 0,
+    durationSeconds: Number(playback.durationSeconds || 0) || 0,
+    attachmentKey: playback.attachmentKey || undefined,
+    listenedAt: listenedAt && !Number.isNaN(listenedAt.getTime()) ? listenedAt.toISOString() : null
   };
 }
 
@@ -742,12 +799,15 @@ async function buildPublicReply(replyTo) {
   const target = await PublicMessage.findById(messageId).lean();
   if (!target) return null;
 
+  const attachments = referenceAttachmentsFromMessage(target);
+
   return {
     messageId: target._id,
     from: target.from || '',
     text: messagePreviewText(target),
     scope: 'public',
-    attachment: firstAttachmentFromMessage(target)
+    attachment: attachments[0] || null,
+    attachments
   };
 }
 
@@ -762,12 +822,15 @@ async function buildPrivateReply(replyTo, participantIds) {
   const isAllowed = participantIds.every((id) => participants.includes(String(id)));
   if (!isAllowed) return null;
 
+  const attachments = referenceAttachmentsFromMessage(target);
+
   return {
     messageId: target._id,
     from: target.from || '',
     text: messagePreviewText(target),
     scope: 'private',
-    attachment: firstAttachmentFromMessage(target)
+    attachment: attachments[0] || null,
+    attachments
   };
 }
 
@@ -778,12 +841,15 @@ async function buildPublicForwarded(forwardedFrom) {
   const target = await PublicMessage.findById(messageId).lean();
   if (!target) return null;
 
+  const attachments = referenceAttachmentsFromMessage(target);
+
   return {
     messageId: target._id,
     from: target.from || '',
     text: messagePreviewText(target),
     scope: 'public',
-    attachment: firstAttachmentFromMessage(target)
+    attachment: attachments[0] || null,
+    attachments
   };
 }
 
@@ -797,12 +863,15 @@ async function buildPrivateForwarded(forwardedFrom, userId) {
   const participants = [String(target.fromId), String(target.toId)];
   if (!participants.includes(String(userId))) return null;
 
+  const attachments = referenceAttachmentsFromMessage(target);
+
   return {
     messageId: target._id,
     from: target.from || '',
     text: messagePreviewText(target),
     scope: 'private',
-    attachment: firstAttachmentFromMessage(target)
+    attachment: attachments[0] || null,
+    attachments
   };
 }
 
@@ -918,7 +987,6 @@ io.on('connection', (socket) => {
       stopPrivateTyping(username, to, true);
       const normalizedText = String(text || '').trim();
       const normalizedAttachments = normalizeAttachments(attachments, attachment);
-      if (!normalizedText && !normalizedAttachments.length) return;
 
       const toUser = await User.findOne({ username: to }).lean();
       const timestamp = new Date().toISOString();
@@ -939,6 +1007,8 @@ io.on('connection', (socket) => {
           normalizedForwarded = await buildPrivateForwarded(forwardedFrom, userId);
         }
       }
+
+      if (!normalizedText && !normalizedAttachments.length && !normalizedForwarded?.messageId) return;
 
       let savedId = tempId || `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
       if (toUser) {
@@ -973,6 +1043,7 @@ io.on('connection', (socket) => {
           attachments: normalizedAttachments,
           replyTo: serializeReplyTo(normalizedReply),
           forwardedFrom: serializeForwardedFrom(normalizedForwarded),
+          audioPlayback: null,
           timestamp,
           reactions: [],
           editedAt: null,
@@ -1004,6 +1075,53 @@ io.on('connection', (socket) => {
       emitUnreadCounts(userId);
     } catch (e) {
       console.error('markAsRead error', e);
+    }
+  });
+
+  socket.on('audioPlaybackProgress', async ({ id, progress, currentTimeSeconds, durationSeconds, attachmentKey }) => {
+    try {
+      if (!id || !mongoose.Types.ObjectId.isValid(id)) return;
+      const sanitized = sanitizeAudioPlaybackPayload({ progress, currentTimeSeconds, durationSeconds, attachmentKey });
+      if (!sanitized) return;
+
+      const message = await PrivateMessage.findById(id);
+      if (!message || message.deletedAt) return;
+
+      const participants = [String(message.fromId), String(message.toId)];
+      if (!participants.includes(String(userId))) return;
+
+      // Audio read receipt only tracks receiver playback on sender's message.
+      if (String(message.toId) !== String(userId)) return;
+
+      const previous = Number(message.audioPlayback?.progress || 0);
+      const isMeaningfulAdvance = sanitized.progress >= 0.98 || sanitized.progress >= previous + 0.02;
+      if (!isMeaningfulAdvance) return;
+
+      const listenedAt = new Date();
+      message.audioPlayback = {
+        by: username,
+        progress: sanitized.progress,
+        currentTimeSeconds: sanitized.currentTimeSeconds,
+        durationSeconds: sanitized.durationSeconds,
+        attachmentKey: sanitized.attachmentKey,
+        listenedAt
+      };
+      await message.save();
+
+      const payload = {
+        id: message._id.toString(),
+        by: username,
+        progress: sanitized.progress,
+        currentTimeSeconds: sanitized.currentTimeSeconds,
+        durationSeconds: sanitized.durationSeconds,
+        attachmentKey: sanitized.attachmentKey,
+        listenedAt: listenedAt.toISOString()
+      };
+
+      io.to(`user:${message.fromId}`).emit('privateAudioPlayback', payload);
+      io.to(`user:${message.toId}`).emit('privateAudioPlayback', payload);
+    } catch (e) {
+      console.error('audioPlaybackProgress error', e);
     }
   });
 

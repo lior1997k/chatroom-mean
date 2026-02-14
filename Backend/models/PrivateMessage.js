@@ -16,6 +16,7 @@ const privateMessageSchema = new Schema(
       isImage: { type: Boolean, default: false },
       durationSeconds: { type: Number, default: null },
       waveform: { type: [Number], default: [] },
+      audioKind: { type: String, enum: ['voice-note', 'uploaded-audio'], default: null },
       width: { type: Number, default: null },
       height: { type: Number, default: null }
     },
@@ -29,6 +30,7 @@ const privateMessageSchema = new Schema(
           isImage: { type: Boolean, default: false },
           durationSeconds: { type: Number, default: null },
           waveform: { type: [Number], default: [] },
+          audioKind: { type: String, enum: ['voice-note', 'uploaded-audio'], default: null },
           width: { type: Number, default: null },
           height: { type: Number, default: null }
         }
@@ -48,15 +50,62 @@ const privateMessageSchema = new Schema(
         isImage: { type: Boolean, default: false },
         durationSeconds: { type: Number, default: null },
         waveform: { type: [Number], default: [] },
+        audioKind: { type: String, enum: ['voice-note', 'uploaded-audio'], default: null },
         width: { type: Number, default: null },
         height: { type: Number, default: null }
+      },
+      attachments: {
+        type: [
+          {
+            url: { type: String, default: null },
+            name: { type: String, default: null },
+            mimeType: { type: String, default: null },
+            size: { type: Number, default: null },
+            isImage: { type: Boolean, default: false },
+            durationSeconds: { type: Number, default: null },
+            waveform: { type: [Number], default: [] },
+            audioKind: { type: String, enum: ['voice-note', 'uploaded-audio'], default: null },
+            width: { type: Number, default: null },
+            height: { type: Number, default: null }
+          }
+        ],
+        default: []
       }
     },
     forwardedFrom: {
       messageId: { type: Schema.Types.ObjectId, default: null },
       from: { type: String, default: null },
       text: { type: String, default: null },
-      scope: { type: String, enum: ['public', 'private'], default: null }
+      scope: { type: String, enum: ['public', 'private'], default: null },
+      attachment: {
+        url: { type: String, default: null },
+        name: { type: String, default: null },
+        mimeType: { type: String, default: null },
+        size: { type: Number, default: null },
+        isImage: { type: Boolean, default: false },
+        durationSeconds: { type: Number, default: null },
+        waveform: { type: [Number], default: [] },
+        audioKind: { type: String, enum: ['voice-note', 'uploaded-audio'], default: null },
+        width: { type: Number, default: null },
+        height: { type: Number, default: null }
+      },
+      attachments: {
+        type: [
+          {
+            url: { type: String, default: null },
+            name: { type: String, default: null },
+            mimeType: { type: String, default: null },
+            size: { type: Number, default: null },
+            isImage: { type: Boolean, default: false },
+            durationSeconds: { type: Number, default: null },
+            waveform: { type: [Number], default: [] },
+            audioKind: { type: String, enum: ['voice-note', 'uploaded-audio'], default: null },
+            width: { type: Number, default: null },
+            height: { type: Number, default: null }
+          }
+        ],
+        default: []
+      }
     },
     reactions: {
       type: [
@@ -69,6 +118,14 @@ const privateMessageSchema = new Schema(
     },
     editedAt: { type: Date, default: null },
     deletedAt: { type: Date, default: null },
+    audioPlayback: {
+      by: { type: String, default: null },
+      progress: { type: Number, default: 0 },
+      currentTimeSeconds: { type: Number, default: 0 },
+      durationSeconds: { type: Number, default: 0 },
+      attachmentKey: { type: String, default: null },
+      listenedAt: { type: Date, default: null }
+    },
     ts:     { type: Date, default: Date.now, index: true },
     readAt: { type: Date, default: null, index: true },
   },

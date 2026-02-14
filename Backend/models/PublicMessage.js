@@ -14,6 +14,7 @@ const publicMessageSchema = new Schema(
       isImage: { type: Boolean, default: false },
       durationSeconds: { type: Number, default: null },
       waveform: { type: [Number], default: [] },
+      audioKind: { type: String, enum: ['voice-note', 'uploaded-audio'], default: null },
       width: { type: Number, default: null },
       height: { type: Number, default: null }
     },
@@ -27,6 +28,7 @@ const publicMessageSchema = new Schema(
           isImage: { type: Boolean, default: false },
           durationSeconds: { type: Number, default: null },
           waveform: { type: [Number], default: [] },
+          audioKind: { type: String, enum: ['voice-note', 'uploaded-audio'], default: null },
           width: { type: Number, default: null },
           height: { type: Number, default: null }
         }
@@ -46,6 +48,7 @@ const publicMessageSchema = new Schema(
         isImage: { type: Boolean, default: false },
         durationSeconds: { type: Number, default: null },
         waveform: { type: [Number], default: [] },
+        audioKind: { type: String, enum: ['voice-note', 'uploaded-audio'], default: null },
         width: { type: Number, default: null },
         height: { type: Number, default: null }
       }

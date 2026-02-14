@@ -64,7 +64,14 @@ export class SocketService {
   // Send
   sendPublicMessage(
     text: string,
-    replyTo?: { messageId: string; from: string; text: string; scope?: 'public' | 'private'; attachment?: Attachment | null } | null,
+    replyTo?: {
+      messageId: string;
+      from: string;
+      text: string;
+      scope?: 'public' | 'private';
+      attachment?: Attachment | null;
+      attachments?: Attachment[];
+    } | null,
     attachments?: Attachment[]
   ): void {
     this.socket.emit('publicMessage', {
@@ -78,8 +85,22 @@ export class SocketService {
     to: string,
     text: string,
     tempId?: string,
-    replyTo?: { messageId: string; from: string; text: string; scope?: 'public' | 'private'; attachment?: Attachment | null } | null,
-    forwardedFrom?: { messageId: string; from: string; text: string; scope?: 'public' | 'private'; attachment?: Attachment | null } | null,
+    replyTo?: {
+      messageId: string;
+      from: string;
+      text: string;
+      scope?: 'public' | 'private';
+      attachment?: Attachment | null;
+      attachments?: Attachment[];
+    } | null,
+    forwardedFrom?: {
+      messageId: string;
+      from: string;
+      text: string;
+      scope?: 'public' | 'private';
+      attachment?: Attachment | null;
+      attachments?: Attachment[];
+    } | null,
     attachments?: Attachment[]
   ): void {
     this.socket.emit('privateMessage', {

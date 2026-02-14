@@ -25,6 +25,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 const DRAFTS_STORAGE_KEY = 'chatroom:composerDrafts';
 const UPLOAD_UI_STORAGE_KEY = 'chatroom:uploadUiState';
 const CHUNK_UPLOAD_RECOVERY_KEY = 'chatroom:chunkUploadRecovery';
+const VOICE_CACHE_INDEX_STORAGE_KEY = 'chatroom:voiceCacheIndex';
 
 @Component({
   selector: 'app-chat',
@@ -51,6 +52,29 @@ export class ChatComponent implements AfterViewChecked {
   uploadingAttachmentCount = 0;
   isRecordingVoice = false;
   voiceRecordingSeconds = 0;
+  voiceDraft: {
+    blob: Blob;
+    mimeType: string;
+    durationSeconds: number;
+    trimStartSeconds: number;
+    trimEndSeconds: number;
+    normalize: boolean;
+    waveform: number[];
+    sampleRateHz?: number;
+    channels?: number;
+    bitrateKbps?: number;
+  } | null = null;
+  voiceDraftPreviewUrl: string | null = null;
+  voiceDraftPreviewCurrentTime = 0;
+  voiceDraftPreviewPlaying = false;
+  voiceDraftProcessing = false;
+  voiceKeyboardControlsEnabled = true;
+  offlineVoiceCacheEnabled = true;
+  private voiceDraftTrimDrag: {
+    pointerId: number;
+    handle: 'start' | 'end';
+    host: HTMLElement | null;
+  } | null = null;
   uploadErrors: string[] = [];
   persistedFailedUploadNames: string[] = [];
   uploadProgressItems: Array<{
@@ -124,6 +148,7 @@ export class ChatComponent implements AfterViewChecked {
     from: string;
     text: string;
     attachment: Attachment | null;
+    attachments: Attachment[];
     scope: 'public' | 'private';
     sourceScope: 'public' | 'private';
     privatePeer: string | null;
@@ -134,6 +159,7 @@ export class ChatComponent implements AfterViewChecked {
     text: string;
     scope: 'public' | 'private';
     attachment: Attachment | null;
+    attachments: Attachment[];
   } | null = null;
   forwardSelectedUsers: string[] = [];
   forwardSearchTerm = '';
@@ -154,6 +180,7 @@ export class ChatComponent implements AfterViewChecked {
   @ViewChild('imageViewerTpl') imageViewerTpl!: TemplateRef<any>;
   @ViewChild('searchInput') searchInput?: ElementRef<HTMLInputElement>;
   @ViewChild('attachmentInput') attachmentInput?: ElementRef<HTMLInputElement>;
+  @ViewChild('voiceDraftAudio') voiceDraftAudio?: ElementRef<HTMLAudioElement>;
   deleteCandidate: { id: string; scope: 'public' | 'private'; preview: string } | null = null;
   imageViewerTarget: {
     message: ChatMessage;
@@ -193,9 +220,20 @@ export class ChatComponent implements AfterViewChecked {
   private voicePlaybackRateByKey: Record<string, number> = {};
   private voiceUiStateByKey: Record<string, { currentTime: number; duration: number; playing: boolean; muted: boolean; volume: number }> = {};
   private voiceWaveformByKey: Record<string, number[]> = {};
+  private voiceWaveformQualityByKey: Record<string, 'real' | 'fallback'> = {};
   private voiceWaveformLoading = new Set<string>();
+  private voiceWaveformZoomByKey: Record<string, number> = {};
   private voiceDurationResolveLoading = new Set<string>();
   private voiceLastNonZeroVolumeByKey: Record<string, number> = {};
+  private voiceAutoPlayNext = true;
+  private voiceSilenceSkipEnabled = false;
+  private voiceInsightsByKey: Record<string, { bitrateKbps?: number; sampleRateHz?: number; channels?: number }> = {};
+  private voiceInsightsLoading = new Set<string>();
+  private voiceSilenceRangesByKey: Record<string, Array<{ start: number; end: number }>> = {};
+  private voiceLastSilenceSkipAtByKey: Record<string, number> = {};
+  private activeVoiceKey: string | null = null;
+  private voiceAttachmentByKey: Record<string, Attachment> = {};
+  private referenceAudioIndexByKey: Record<string, number> = {};
   private readonly defaultVoiceWaveform = [4, 5, 6, 7, 8, 10, 11, 9, 8, 7, 6, 5, 4, 6, 8, 10, 12, 11, 9, 8, 6, 5, 4, 4, 5, 6, 7, 8, 9, 11, 12, 10, 8, 7, 6, 5, 4, 5, 6, 8, 9, 11, 10, 8, 7, 6, 5, 4];
   private voiceRecorder: MediaRecorder | null = null;
   private voiceRecorderStream: MediaStream | null = null;
@@ -208,6 +246,13 @@ export class ChatComponent implements AfterViewChecked {
   private voiceProgressTimers = new Map<string, ReturnType<typeof setInterval>>();
   private voiceVolumeHoverKey: string | null = null;
   private voiceAudioElementByKey = new Map<string, HTMLAudioElement>();
+  private voiceOfflineCacheIndex: Array<{ url: string; cachedAt: number }> = [];
+  private voiceOfflineCachedUrlSet = new Set<string>();
+  private voiceOfflineBlobUrlBySource: Record<string, string> = {};
+  private voiceOfflineCacheLoading = new Set<string>();
+  private voicePlaybackEmitStateByMessageId: Record<string, { at: number; progress: number }> = {};
+  private readonly voiceOfflineCacheStore = 'chatroom-voice-audio-v1';
+  private readonly voiceOfflineCacheLimit = 36;
   private previewVisibilityObserver: IntersectionObserver | null = null;
   private observedPreviewVideos = new WeakSet<HTMLVideoElement>();
   private chunkRecovery: Record<string, {
@@ -269,6 +314,7 @@ export class ChatComponent implements AfterViewChecked {
     this.loadDraftsFromStorage();
     this.loadUploadUiState();
     this.loadChunkRecoveryState();
+    this.loadVoiceOfflineCacheIndex();
     this.message = this.draftForContext(null);
     this.loadUnreadCounts();
     this.loadPublicMessages();
@@ -356,6 +402,18 @@ export class ChatComponent implements AfterViewChecked {
         Object.keys(this.privateChats).forEach(u => this.updateMessageStatus(u, d.id, 'read'));
       });
 
+    this.socket.onEvent<{
+      id: string;
+      by: string;
+      progress: number;
+      currentTimeSeconds?: number;
+      durationSeconds?: number;
+      attachmentKey?: string;
+      listenedAt?: string | null;
+    }>('privateAudioPlayback').subscribe((payload) => {
+      this.applyPrivateAudioPlaybackReceipt(payload);
+    });
+
     this.socket.onEvent<{ scope: 'public' | 'private'; messageId: string; reactions: Array<{ emoji: string; users: string[] }> }>('messageReactionUpdated')
       .subscribe((payload) => {
         if (!payload?.messageId) return;
@@ -434,11 +492,20 @@ export class ChatComponent implements AfterViewChecked {
     this.durationRecheckTimers.clear();
     this.voiceProgressTimers.forEach((t) => clearInterval(t));
     this.voiceProgressTimers.clear();
+    this.discardVoiceDraft();
     this.previewVisibilityObserver?.disconnect();
     this.previewVisibilityObserver = null;
     this.stopViewerMomentum();
     if (this.viewerZoomHudTimer) clearTimeout(this.viewerZoomHudTimer);
     this.stopHourglassAnimation();
+    Object.values(this.voiceOfflineBlobUrlBySource).forEach((blobUrl) => {
+      try {
+        URL.revokeObjectURL(blobUrl);
+      } catch {
+        // no-op
+      }
+    });
+    this.voiceOfflineBlobUrlBySource = {};
   }
 
   ngAfterViewChecked() {
@@ -701,6 +768,9 @@ export class ChatComponent implements AfterViewChecked {
       this.stopVoiceRecording(false);
       return;
     }
+    if (this.voiceDraft && !this.voiceDraftProcessing) {
+      this.discardVoiceDraft();
+    }
     await this.startVoiceRecording();
   }
 
@@ -787,20 +857,321 @@ export class ChatComponent implements AfterViewChecked {
       return;
     }
 
-    const extension = mimeType.includes('ogg')
-      ? 'ogg'
-      : mimeType.includes('mp4') || mimeType.includes('aac')
-        ? 'm4a'
-        : 'webm';
+    await this.openVoiceDraft(blob, mimeType, elapsedSeconds);
+  }
 
-    const stamp = new Date().toISOString().replace(/[.:]/g, '-');
-    const file = new File([blob], `voice-note-${stamp}.${extension}`, {
-      type: mimeType,
-      lastModified: Date.now()
-    });
-    (file as any).__durationSecondsHint = elapsedSeconds;
+  private async openVoiceDraft(blob: Blob, mimeType: string, durationHintSeconds = 0) {
+    this.discardVoiceDraft();
+    const decoded = await this.decodeAudioBufferFromBlob(blob);
+    const decodedDuration = Number(decoded?.duration || 0);
+    const durationSeconds = Number.isFinite(decodedDuration) && decodedDuration > 0
+      ? decodedDuration
+      : Math.max(1, Number(durationHintSeconds || 0));
+    const firstChannel = decoded && decoded.numberOfChannels > 0 ? decoded.getChannelData(0) : null;
+    const waveform = firstChannel?.length
+      ? this.buildWaveformFromChannelData(firstChannel, 96)
+      : this.defaultVoiceWaveform;
+    const bitrateKbps = this.approximateAudioBitrateKbps(Number(blob.size || 0), durationSeconds);
 
-    await this.uploadAttachmentFiles([file]);
+    this.voiceDraft = {
+      blob,
+      mimeType: String(mimeType || 'audio/webm').trim() || 'audio/webm',
+      durationSeconds,
+      trimStartSeconds: 0,
+      trimEndSeconds: durationSeconds,
+      normalize: true,
+      waveform,
+      sampleRateHz: Number(decoded?.sampleRate || 0) || undefined,
+      channels: Number(decoded?.numberOfChannels || 0) || undefined,
+      bitrateKbps: bitrateKbps || undefined
+    };
+    this.voiceDraftPreviewCurrentTime = 0;
+    this.voiceDraftPreviewPlaying = false;
+    this.voiceDraftPreviewUrl = URL.createObjectURL(blob);
+  }
+
+  discardVoiceDraft() {
+    this.voiceDraftTrimDrag = null;
+    const audio = this.voiceDraftAudioElement();
+    if (audio) {
+      audio.pause();
+      try {
+        audio.currentTime = 0;
+      } catch {
+        // no-op
+      }
+    }
+    this.voiceDraft = null;
+    this.voiceDraftPreviewCurrentTime = 0;
+    this.voiceDraftPreviewPlaying = false;
+    this.voiceDraftProcessing = false;
+    if (this.voiceDraftPreviewUrl) {
+      URL.revokeObjectURL(this.voiceDraftPreviewUrl);
+      this.voiceDraftPreviewUrl = null;
+    }
+  }
+
+  voiceDraftTrimDurationLabel(): string {
+    if (!this.voiceDraft) return '0:00';
+    const seconds = Math.max(0.1, Number(this.voiceDraft.trimEndSeconds || 0) - Number(this.voiceDraft.trimStartSeconds || 0));
+    return this.formatDuration(Math.max(1, Math.round(seconds)));
+  }
+
+  voiceDraftSelectionStartPercent(): number {
+    if (!this.voiceDraft) return 0;
+    const duration = Math.max(0.1, Number(this.voiceDraft.durationSeconds || 0));
+    return Math.max(0, Math.min(100, (Number(this.voiceDraft.trimStartSeconds || 0) / duration) * 100));
+  }
+
+  voiceDraftSelectionWidthPercent(): number {
+    if (!this.voiceDraft) return 0;
+    const duration = Math.max(0.1, Number(this.voiceDraft.durationSeconds || 0));
+    const width = Math.max(0, Number(this.voiceDraft.trimEndSeconds || 0) - Number(this.voiceDraft.trimStartSeconds || 0));
+    return Math.max(0, Math.min(100, (width / duration) * 100));
+  }
+
+  voiceDraftSelectionEndPercent(): number {
+    if (!this.voiceDraft) return 100;
+    const duration = Math.max(0.1, Number(this.voiceDraft.durationSeconds || 0));
+    return Math.max(0, Math.min(100, (Number(this.voiceDraft.trimEndSeconds || duration) / duration) * 100));
+  }
+
+  startVoiceDraftTrimDrag(handle: 'start' | 'end', event: PointerEvent, host?: HTMLElement | null) {
+    if (!this.voiceDraft) return;
+    event.stopPropagation();
+    event.preventDefault();
+
+    const dragHost = host || (event.currentTarget as HTMLElement | null);
+    this.voiceDraftTrimDrag = {
+      pointerId: event.pointerId,
+      handle,
+      host: dragHost
+    };
+
+    if (dragHost?.setPointerCapture) {
+      try {
+        dragHost.setPointerCapture(event.pointerId);
+      } catch {
+        // no-op
+      }
+    }
+
+    this.updateVoiceDraftTrimFromPointer(event, handle, dragHost);
+  }
+
+  onVoiceDraftTrimPointerMove(event: PointerEvent) {
+    if (!this.voiceDraftTrimDrag) return;
+    if (event.pointerId !== this.voiceDraftTrimDrag.pointerId) return;
+    this.updateVoiceDraftTrimFromPointer(event, this.voiceDraftTrimDrag.handle, this.voiceDraftTrimDrag.host || null);
+  }
+
+  finishVoiceDraftTrimDrag(event?: PointerEvent) {
+    if (!this.voiceDraftTrimDrag) return;
+    if (event && event.pointerId !== this.voiceDraftTrimDrag.pointerId) return;
+
+    if (event && this.voiceDraftTrimDrag.host?.releasePointerCapture) {
+      try {
+        this.voiceDraftTrimDrag.host.releasePointerCapture(event.pointerId);
+      } catch {
+        // no-op
+      }
+    }
+
+    this.voiceDraftTrimDrag = null;
+  }
+
+  private updateVoiceDraftTrimFromPointer(
+    event: PointerEvent,
+    handle: 'start' | 'end',
+    host: HTMLElement | null
+  ) {
+    if (!this.voiceDraft || !host) return;
+    const rect = host.getBoundingClientRect();
+    if (!rect.width) return;
+
+    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    const duration = Math.max(0.1, Number(this.voiceDraft.durationSeconds || 0));
+    const seconds = ratio * duration;
+
+    if (handle === 'start') {
+      this.setVoiceDraftTrimStart(seconds);
+      return;
+    }
+
+    this.setVoiceDraftTrimEnd(seconds);
+  }
+
+  setVoiceDraftTrimStart(value: number | string) {
+    if (!this.voiceDraft) return;
+    const duration = Math.max(0.1, Number(this.voiceDraft.durationSeconds || 0));
+    const end = Math.max(0.1, Number(this.voiceDraft.trimEndSeconds || duration));
+    const next = Math.max(0, Math.min(duration - 0.1, Number(value || 0)));
+    this.voiceDraft.trimStartSeconds = Math.min(next, Math.max(0, end - 0.1));
+    this.syncVoiceDraftPreviewBounds();
+  }
+
+  setVoiceDraftTrimEnd(value: number | string) {
+    if (!this.voiceDraft) return;
+    const duration = Math.max(0.1, Number(this.voiceDraft.durationSeconds || 0));
+    const start = Math.max(0, Number(this.voiceDraft.trimStartSeconds || 0));
+    const next = Math.max(0.1, Math.min(duration, Number(value || duration)));
+    this.voiceDraft.trimEndSeconds = Math.max(next, Math.min(duration, start + 0.1));
+    this.syncVoiceDraftPreviewBounds();
+  }
+
+  toggleVoiceDraftNormalize() {
+    if (!this.voiceDraft) return;
+    this.voiceDraft.normalize = !this.voiceDraft.normalize;
+  }
+
+  async rerecordVoiceDraft() {
+    if (this.voiceDraftProcessing || this.uploadingAttachment || this.isRecordingVoice) return;
+    this.discardVoiceDraft();
+    await this.startVoiceRecording();
+  }
+
+  toggleVoiceDraftPreviewPlay() {
+    const draft = this.voiceDraft;
+    const audio = this.voiceDraftAudioElement();
+    if (!draft || !audio) return;
+
+    const start = Math.max(0, Number(draft.trimStartSeconds || 0));
+    const end = Math.max(start + 0.05, Number(draft.trimEndSeconds || draft.durationSeconds || 0));
+
+    if (audio.paused) {
+      const current = Number(audio.currentTime || 0);
+      if (!Number.isFinite(current) || current < start || current >= end - 0.02) {
+        try {
+          audio.currentTime = start;
+        } catch {
+          // no-op
+        }
+      }
+      this.voiceDraftPreviewPlaying = true;
+      void audio.play();
+      return;
+    }
+
+    audio.pause();
+    this.voiceDraftPreviewPlaying = false;
+  }
+
+  onVoiceDraftPreviewMetadata(event: Event) {
+    const audio = event.target as HTMLAudioElement | null;
+    if (!audio || !this.voiceDraft) return;
+
+    const start = Math.max(0, Number(this.voiceDraft.trimStartSeconds || 0));
+    try {
+      audio.currentTime = start;
+    } catch {
+      // no-op
+    }
+    this.voiceDraftPreviewCurrentTime = start;
+  }
+
+  onVoiceDraftPreviewTimeUpdate(event: Event) {
+    const audio = event.target as HTMLAudioElement | null;
+    if (!audio || !this.voiceDraft) return;
+
+    const start = Math.max(0, Number(this.voiceDraft.trimStartSeconds || 0));
+    const end = Math.max(start + 0.05, Number(this.voiceDraft.trimEndSeconds || this.voiceDraft.durationSeconds || 0));
+    const current = Number(audio.currentTime || 0);
+
+    if (current >= end - 0.02) {
+      audio.pause();
+      try {
+        audio.currentTime = start;
+      } catch {
+        // no-op
+      }
+      this.voiceDraftPreviewCurrentTime = start;
+      this.voiceDraftPreviewPlaying = false;
+      return;
+    }
+
+    this.voiceDraftPreviewCurrentTime = Math.max(start, current);
+  }
+
+  onVoiceDraftPreviewPlay() {
+    this.voiceDraftPreviewPlaying = true;
+  }
+
+  onVoiceDraftPreviewPause() {
+    this.voiceDraftPreviewPlaying = false;
+  }
+
+  voiceDraftPreviewPlayIcon(): string {
+    return this.voiceDraftPreviewPlaying ? 'pause' : 'play_arrow';
+  }
+
+  voiceDraftPreviewCurrentLabel(): string {
+    if (!this.voiceDraft) return '0:00';
+    const start = Math.max(0, Number(this.voiceDraft.trimStartSeconds || 0));
+    const current = Math.max(start, Number(this.voiceDraftPreviewCurrentTime || start));
+    return this.formatDuration(current - start);
+  }
+
+  voiceDraftPreviewProgressPercent(): number {
+    if (!this.voiceDraft) return 0;
+    const start = Math.max(0, Number(this.voiceDraft.trimStartSeconds || 0));
+    const end = Math.max(start + 0.05, Number(this.voiceDraft.trimEndSeconds || this.voiceDraft.durationSeconds || 0));
+    const current = Math.max(start, Number(this.voiceDraftPreviewCurrentTime || start));
+    const relative = Math.max(0, Math.min(1, (current - start) / Math.max(0.05, end - start)));
+    const startPct = this.voiceDraftSelectionStartPercent() / 100;
+    const widthPct = this.voiceDraftSelectionWidthPercent() / 100;
+    return Math.max(0, Math.min(100, (startPct + (relative * widthPct)) * 100));
+  }
+
+  voiceDraftInsightsLabel(): string {
+    if (!this.voiceDraft) return '';
+    const codec = String(this.voiceDraft.mimeType || 'audio').replace('audio/', '').toUpperCase();
+    const parts: string[] = [];
+    if (codec) parts.push(codec);
+    if (Number(this.voiceDraft.bitrateKbps || 0) > 0) parts.push(`~${Math.round(Number(this.voiceDraft.bitrateKbps))} kbps`);
+    if (Number(this.voiceDraft.sampleRateHz || 0) > 0) parts.push(`${(Number(this.voiceDraft.sampleRateHz) / 1000).toFixed(1)} kHz`);
+    if (Number(this.voiceDraft.channels || 0) > 0) parts.push(Number(this.voiceDraft.channels) === 1 ? 'mono' : Number(this.voiceDraft.channels) === 2 ? 'stereo' : `${Math.round(Number(this.voiceDraft.channels))}ch`);
+    return parts.join(' • ');
+  }
+
+  private syncVoiceDraftPreviewBounds() {
+    if (!this.voiceDraft) return;
+    const audio = this.voiceDraftAudioElement();
+    if (!audio) return;
+
+    const start = Math.max(0, Number(this.voiceDraft.trimStartSeconds || 0));
+    const end = Math.max(start + 0.05, Number(this.voiceDraft.trimEndSeconds || this.voiceDraft.durationSeconds || 0));
+    const current = Number(audio.currentTime || 0);
+
+    if (current < start || current > end) {
+      try {
+        audio.currentTime = start;
+      } catch {
+        // no-op
+      }
+      this.voiceDraftPreviewCurrentTime = start;
+    }
+  }
+
+  private voiceDraftAudioElement(): HTMLAudioElement | null {
+    return this.voiceDraftAudio?.nativeElement || null;
+  }
+
+  async commitVoiceDraft() {
+    if (!this.voiceDraft || this.voiceDraftProcessing || this.uploadingAttachment) return;
+    const previewAudio = this.voiceDraftAudioElement();
+    if (previewAudio && !previewAudio.paused) previewAudio.pause();
+    this.voiceDraftPreviewPlaying = false;
+    this.voiceDraftProcessing = true;
+
+    try {
+      const processed = await this.buildVoiceDraftFile(this.voiceDraft);
+      await this.uploadAttachmentFiles([processed]);
+      this.discardVoiceDraft();
+    } catch {
+      this.pushUploadError('Could not process this voice note. Try recording again.');
+    } finally {
+      this.voiceDraftProcessing = false;
+    }
   }
 
   private cleanupVoiceRecordingResources() {
@@ -910,28 +1281,37 @@ export class ChatComponent implements AfterViewChecked {
 
       try {
         const mediaMetadata = await this.extractMediaMetadata(preparedFile);
+        const audioKind = this.audioKindForFile(preparedFile);
+        const uploadMetadata = {
+          ...mediaMetadata,
+          audioKind
+        };
         const uploaded = preparedFile.size < this.directUploadThreshold
-          ? await this.uploadSingleAttachment(preparedFile, headers, itemId, mediaMetadata)
-          : await this.uploadLargeAttachmentInChunks(preparedFile, headers, itemId, mediaMetadata);
+          ? await this.uploadSingleAttachment(preparedFile, headers, itemId, uploadMetadata)
+          : await this.uploadLargeAttachmentInChunks(preparedFile, headers, itemId, uploadMetadata);
 
         if (uploaded?.url) {
-          this.pendingAttachments.push({
-              url: uploaded.url,
-              name: uploaded.name || preparedFile.name,
-              mimeType: uploaded.mimeType || preparedFile.type || 'application/octet-stream',
-              size: Number(uploaded.size || preparedFile.size || 0),
-              isImage: !!uploaded.isImage,
-              durationSeconds: Number(uploaded.durationSeconds || mediaMetadata.durationSeconds || 0) || undefined,
-              waveform: Array.isArray(uploaded.waveform) && uploaded.waveform.length
-                ? uploaded.waveform
-                : Array.isArray(mediaMetadata.waveform) && mediaMetadata.waveform.length
-                  ? mediaMetadata.waveform
-                  : undefined,
-              width: Number(uploaded.width || mediaMetadata.width || 0) || undefined,
-              height: Number(uploaded.height || mediaMetadata.height || 0) || undefined,
-              storageProvider: uploaded.storageProvider,
-              objectKey: uploaded.objectKey
-            });
+          const inferredAudioKind = this.audioKindForFile(preparedFile);
+          const pendingAttachment: Attachment = {
+            url: uploaded.url,
+            name: uploaded.name || preparedFile.name,
+            mimeType: uploaded.mimeType || preparedFile.type || 'application/octet-stream',
+            size: Number(uploaded.size || preparedFile.size || 0),
+            isImage: !!uploaded.isImage,
+            durationSeconds: Number(uploaded.durationSeconds || mediaMetadata.durationSeconds || 0) || undefined,
+            waveform: Array.isArray(uploaded.waveform) && uploaded.waveform.length
+              ? uploaded.waveform
+              : Array.isArray(mediaMetadata.waveform) && mediaMetadata.waveform.length
+                ? mediaMetadata.waveform
+                : undefined,
+            audioKind: uploaded.audioKind || inferredAudioKind,
+            width: Number(uploaded.width || mediaMetadata.width || 0) || undefined,
+            height: Number(uploaded.height || mediaMetadata.height || 0) || undefined,
+            storageProvider: uploaded.storageProvider,
+            objectKey: uploaded.objectKey
+          };
+          this.pendingAttachments.push(pendingAttachment);
+          this.ensureVoiceInsightsKnown(pendingAttachment, mediaMetadata.audioInsights);
           this.persistUploadUiState();
           this.setUploadItemStatus(itemId, 'done', '');
         }
@@ -1036,7 +1416,13 @@ export class ChatComponent implements AfterViewChecked {
     file: File,
     headers: HttpHeaders,
     itemId: string,
-    metadata?: { durationSeconds?: number | null; waveform?: number[] | null; width?: number | null; height?: number | null }
+    metadata?: {
+      durationSeconds?: number | null;
+      waveform?: number[] | null;
+      audioKind?: 'voice-note' | 'uploaded-audio' | null;
+      width?: number | null;
+      height?: number | null;
+    }
   ): Promise<Attachment> {
     const formData = new FormData();
     formData.append('file', file);
@@ -1045,6 +1431,9 @@ export class ChatComponent implements AfterViewChecked {
     }
     if (Array.isArray(metadata?.waveform) && metadata!.waveform!.length) {
       formData.append('waveform', JSON.stringify(metadata!.waveform));
+    }
+    if (metadata?.audioKind) {
+      formData.append('audioKind', metadata.audioKind);
     }
     if (Number(metadata?.width) > 0) {
       formData.append('width', String(Math.round(Number(metadata?.width))));
@@ -1084,7 +1473,13 @@ export class ChatComponent implements AfterViewChecked {
     file: File,
     headers: HttpHeaders,
     itemId: string,
-    metadata?: { durationSeconds?: number | null; waveform?: number[] | null; width?: number | null; height?: number | null }
+    metadata?: {
+      durationSeconds?: number | null;
+      waveform?: number[] | null;
+      audioKind?: 'voice-note' | 'uploaded-audio' | null;
+      width?: number | null;
+      height?: number | null;
+    }
   ): Promise<Attachment> {
     const chunkSize = Math.max(256 * 1024, this.uploadChunkSize || (1024 * 1024));
     const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize));
@@ -1157,6 +1552,7 @@ export class ChatComponent implements AfterViewChecked {
     const finalizePayload = await this.http.post<Attachment>(`${environment.apiUrl}/api/upload/chunk/${sessionId}/finalize`, {
       durationSeconds: Number(metadata?.durationSeconds || 0) || undefined,
       waveform: Array.isArray(metadata?.waveform) && metadata!.waveform!.length ? metadata!.waveform : undefined,
+      audioKind: metadata?.audioKind || undefined,
       width: Number(metadata?.width || 0) || undefined,
       height: Number(metadata?.height || 0) || undefined
     }, { headers }).toPromise();
@@ -1171,11 +1567,28 @@ export class ChatComponent implements AfterViewChecked {
     return `${file.name}|${file.size}|${file.lastModified}|${file.type || 'application/octet-stream'}`;
   }
 
-  private extractMediaMetadata(file: File): Promise<{ durationSeconds?: number; waveform?: number[]; width?: number; height?: number }> {
+  private extractMediaMetadata(file: File): Promise<{
+    durationSeconds?: number;
+    waveform?: number[];
+    width?: number;
+    height?: number;
+    audioInsights?: { sampleRateHz?: number; channels?: number; bitrateKbps?: number };
+  }> {
     const isVideo = file.type.startsWith('video/');
     const isImage = file.type.startsWith('image/');
     const isAudio = file.type.startsWith('audio/');
     const durationHint = Number((file as any).__durationSecondsHint || 0);
+    const waveformHint = Array.isArray((file as any).__waveformHint)
+      ? (file as any).__waveformHint.map((x: unknown) => Number(x)).filter((x: number) => Number.isFinite(x) && x > 0).slice(0, 96)
+      : [];
+    const audioInsightsHintRaw = (file as any).__audioInsightsHint || null;
+    const audioInsightsHint = audioInsightsHintRaw && typeof audioInsightsHintRaw === 'object'
+      ? {
+        sampleRateHz: Number(audioInsightsHintRaw.sampleRateHz || 0) || undefined,
+        channels: Number(audioInsightsHintRaw.channels || 0) || undefined,
+        bitrateKbps: Number(audioInsightsHintRaw.bitrateKbps || 0) || undefined
+      }
+      : undefined;
     if (!isVideo && !isImage && !isAudio) {
       return Promise.resolve({});
     }
@@ -1189,7 +1602,11 @@ export class ChatComponent implements AfterViewChecked {
         if (media instanceof HTMLVideoElement || media instanceof HTMLAudioElement) media.load();
       };
 
-      const done = (durationOverride?: number, waveformOverride?: number[]) => {
+      const done = (
+        durationOverride?: number,
+        waveformOverride?: number[],
+        insightsOverride?: { sampleRateHz?: number; channels?: number; bitrateKbps?: number }
+      ) => {
         const width = Number((media as any).videoWidth || (media as any).naturalWidth || 0);
         const height = Number((media as any).videoHeight || (media as any).naturalHeight || 0);
         const rawDuration = Number(durationOverride || (media instanceof HTMLVideoElement || media instanceof HTMLAudioElement ? media.duration : 0));
@@ -1197,13 +1614,24 @@ export class ChatComponent implements AfterViewChecked {
         const finalDuration = roundedDuration || (Number.isFinite(durationHint) && durationHint > 0 ? Math.max(1, Math.round(durationHint)) : undefined);
         const finalWaveform = Array.isArray(waveformOverride) && waveformOverride.length
           ? waveformOverride
+          : waveformHint.length
+            ? waveformHint
           : isAudio
             ? this.defaultVoiceWaveform
             : undefined;
+        const bitrateKbps = this.approximateAudioBitrateKbps(Number(file.size || 0), Number(finalDuration || 0));
+        const finalInsights = isAudio
+          ? {
+            sampleRateHz: Number(insightsOverride?.sampleRateHz || audioInsightsHint?.sampleRateHz || 0) || undefined,
+            channels: Number(insightsOverride?.channels || audioInsightsHint?.channels || 0) || undefined,
+            bitrateKbps: Number(insightsOverride?.bitrateKbps || audioInsightsHint?.bitrateKbps || bitrateKbps || 0) || undefined
+          }
+          : undefined;
         cleanup();
         resolve({
           durationSeconds: finalDuration,
           waveform: finalWaveform,
+          audioInsights: finalInsights,
           width: Number.isFinite(width) && width > 0 ? Math.round(width) : undefined,
           height: Number.isFinite(height) && height > 0 ? Math.round(height) : undefined
         });
@@ -1237,7 +1665,11 @@ export class ChatComponent implements AfterViewChecked {
 
             if (isAudio) {
               const decoded = await this.decodeAudioAnalysisFromFile(file);
-              done(decoded.duration, decoded.waveform);
+              done(decoded.duration, decoded.waveform, {
+                sampleRateHz: decoded.sampleRateHz,
+                channels: decoded.channels,
+                bitrateKbps: this.approximateAudioBitrateKbps(Number(file.size || 0), Number(decoded.duration || 0))
+              });
               return;
             }
 
@@ -1251,7 +1683,11 @@ export class ChatComponent implements AfterViewChecked {
             settled = true;
             clearTimeout(fallbackTimer);
             if (isAudio) {
-              this.decodeAudioAnalysisFromFile(file).then((decoded) => done(decoded.duration, decoded.waveform));
+              this.decodeAudioAnalysisFromFile(file).then((decoded) => done(decoded.duration, decoded.waveform, {
+                sampleRateHz: decoded.sampleRateHz,
+                channels: decoded.channels,
+                bitrateKbps: this.approximateAudioBitrateKbps(Number(file.size || 0), Number(decoded.duration || 0))
+              }));
             } else {
               done();
             }
@@ -1268,7 +1704,12 @@ export class ChatComponent implements AfterViewChecked {
     });
   }
 
-  private async decodeAudioAnalysisFromFile(file: File): Promise<{ duration?: number; waveform?: number[] }> {
+  private async decodeAudioAnalysisFromFile(file: File): Promise<{
+    duration?: number;
+    waveform?: number[];
+    sampleRateHz?: number;
+    channels?: number;
+  }> {
     if (!file.type.startsWith('audio/')) return {};
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioCtx) return {};
@@ -1282,7 +1723,9 @@ export class ChatComponent implements AfterViewChecked {
         const channelData = decoded?.numberOfChannels ? decoded.getChannelData(0) : null;
         return {
           duration: Number.isFinite(duration) && duration > 0 ? duration : undefined,
-          waveform: channelData?.length ? this.buildWaveformFromChannelData(channelData, 48) : undefined
+          waveform: channelData?.length ? this.buildWaveformFromChannelData(channelData, 48) : undefined,
+          sampleRateHz: Number(decoded?.sampleRate || 0) || undefined,
+          channels: Number(decoded?.numberOfChannels || 0) || undefined
         };
       } finally {
         await context.close();
@@ -1290,6 +1733,178 @@ export class ChatComponent implements AfterViewChecked {
     } catch {
       return {};
     }
+  }
+
+  private async decodeAudioBufferFromBlob(blob: Blob): Promise<AudioBuffer | null> {
+    if (!blob || !blob.size) return null;
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return null;
+
+    try {
+      const context = new AudioCtx();
+      try {
+        const buffer = await blob.arrayBuffer();
+        return await context.decodeAudioData(buffer.slice(0));
+      } finally {
+        await context.close();
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  private async buildVoiceDraftFile(draft: NonNullable<ChatComponent['voiceDraft']>): Promise<File> {
+    const source = await this.decodeAudioBufferFromBlob(draft.blob);
+    const durationHint = Math.max(1, Math.round(Number(draft.trimEndSeconds || 0) - Number(draft.trimStartSeconds || 0)));
+
+    if (!source) {
+      const fallbackExt = this.extensionForMimeType(draft.mimeType || draft.blob.type || 'audio/webm');
+      const stamp = new Date().toISOString().replace(/[.:]/g, '-');
+      const fallback = new File([draft.blob], `voice-note-${stamp}.${fallbackExt}`, {
+        type: draft.mimeType || draft.blob.type || 'audio/webm',
+        lastModified: Date.now()
+      });
+      (fallback as any).__durationSecondsHint = durationHint;
+      (fallback as any).__audioKind = 'voice-note';
+      (fallback as any).__waveformHint = draft.waveform;
+      return fallback;
+    }
+
+    const processed = this.trimAndNormalizeAudioBuffer(
+      source,
+      Number(draft.trimStartSeconds || 0),
+      Number(draft.trimEndSeconds || source.duration || 0),
+      !!draft.normalize
+    );
+
+    const wavBlob = this.encodeAudioBufferToWav(processed.buffer);
+    const stamp = new Date().toISOString().replace(/[.:]/g, '-');
+    const file = new File([wavBlob], `voice-note-${stamp}.wav`, {
+      type: 'audio/wav',
+      lastModified: Date.now()
+    });
+
+    const durationSeconds = Number(processed.buffer.duration || 0);
+    const firstChannel = processed.buffer.numberOfChannels > 0 ? processed.buffer.getChannelData(0) : null;
+    const waveform = firstChannel?.length ? this.buildWaveformFromChannelData(firstChannel, 96) : this.defaultVoiceWaveform;
+    const bitrateKbps = this.approximateAudioBitrateKbps(Number(file.size || 0), durationSeconds);
+
+    (file as any).__durationSecondsHint = Number.isFinite(durationSeconds) && durationSeconds > 0
+      ? Math.max(1, Math.round(durationSeconds))
+      : durationHint;
+    (file as any).__audioKind = 'voice-note';
+    (file as any).__waveformHint = waveform;
+    (file as any).__audioInsightsHint = {
+      sampleRateHz: Number(processed.buffer.sampleRate || 0) || undefined,
+      channels: Number(processed.buffer.numberOfChannels || 0) || undefined,
+      bitrateKbps: bitrateKbps || undefined
+    };
+
+    return file;
+  }
+
+  private trimAndNormalizeAudioBuffer(
+    source: AudioBuffer,
+    startSeconds: number,
+    endSeconds: number,
+    normalize: boolean
+  ): { buffer: AudioBuffer; gainApplied: number } {
+    const sampleRate = Math.max(1, Number(source.sampleRate || 44100));
+    const duration = Math.max(0.1, Number(source.duration || (source.length / sampleRate) || 0));
+    const start = Math.max(0, Math.min(duration - 0.05, Number(startSeconds || 0)));
+    const end = Math.max(start + 0.05, Math.min(duration, Number(endSeconds || duration)));
+    const startFrame = Math.max(0, Math.floor(start * sampleRate));
+    const endFrame = Math.max(startFrame + 1, Math.min(source.length, Math.ceil(end * sampleRate)));
+    const frameLength = Math.max(1, endFrame - startFrame);
+    const channels = Math.max(1, Number(source.numberOfChannels || 1));
+
+    const OfflineCtx = (window as any).OfflineAudioContext || (window as any).webkitOfflineAudioContext;
+    const working = OfflineCtx
+      ? new OfflineCtx(channels, frameLength, sampleRate).createBuffer(channels, frameLength, sampleRate)
+      : new AudioBuffer({ length: frameLength, numberOfChannels: channels, sampleRate });
+
+    for (let channel = 0; channel < channels; channel += 1) {
+      const sourceData = source.getChannelData(channel).subarray(startFrame, endFrame);
+      working.copyToChannel(new Float32Array(sourceData), channel, 0);
+    }
+
+    let peak = 0;
+    for (let channel = 0; channel < channels; channel += 1) {
+      const data = working.getChannelData(channel);
+      for (let i = 0; i < data.length; i += 1) {
+        const value = Math.abs(data[i]);
+        if (value > peak) peak = value;
+      }
+    }
+
+    let gainApplied = 1;
+    if (normalize && peak > 0.0001) {
+      const targetPeak = 0.92;
+      gainApplied = Math.max(0.3, Math.min(2.4, targetPeak / peak));
+      if (Math.abs(gainApplied - 1) > 0.01) {
+        for (let channel = 0; channel < channels; channel += 1) {
+          const data = working.getChannelData(channel);
+          for (let i = 0; i < data.length; i += 1) {
+            const scaled = data[i] * gainApplied;
+            data[i] = Math.max(-1, Math.min(1, scaled));
+          }
+        }
+      }
+    }
+
+    return { buffer: working, gainApplied };
+  }
+
+  private encodeAudioBufferToWav(buffer: AudioBuffer): Blob {
+    const channels = Math.max(1, Number(buffer.numberOfChannels || 1));
+    const sampleRate = Math.max(1, Number(buffer.sampleRate || 44100));
+    const bytesPerSample = 2;
+    const blockAlign = channels * bytesPerSample;
+    const dataLength = buffer.length * blockAlign;
+    const wavLength = 44 + dataLength;
+    const output = new ArrayBuffer(wavLength);
+    const view = new DataView(output);
+
+    this.writeWavString(view, 0, 'RIFF');
+    view.setUint32(4, 36 + dataLength, true);
+    this.writeWavString(view, 8, 'WAVE');
+    this.writeWavString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, channels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, 16, true);
+    this.writeWavString(view, 36, 'data');
+    view.setUint32(40, dataLength, true);
+
+    const channelData = Array.from({ length: channels }, (_, i) => buffer.getChannelData(i));
+    let offset = 44;
+    for (let frame = 0; frame < buffer.length; frame += 1) {
+      for (let channel = 0; channel < channels; channel += 1) {
+        const sample = Math.max(-1, Math.min(1, Number(channelData[channel][frame] || 0)));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+        offset += 2;
+      }
+    }
+
+    return new Blob([output], { type: 'audio/wav' });
+  }
+
+  private writeWavString(view: DataView, offset: number, value: string) {
+    for (let i = 0; i < value.length; i += 1) {
+      view.setUint8(offset + i, value.charCodeAt(i));
+    }
+  }
+
+  private extensionForMimeType(mimeType: string): string {
+    const normalized = String(mimeType || '').toLowerCase();
+    if (normalized.includes('ogg')) return 'ogg';
+    if (normalized.includes('mp4') || normalized.includes('aac') || normalized.includes('m4a')) return 'm4a';
+    if (normalized.includes('wav')) return 'wav';
+    if (normalized.includes('mpeg') || normalized.includes('mp3')) return 'mp3';
+    return 'webm';
   }
 
   private setUploadItemProgress(itemId: string, progress: number) {
@@ -1515,12 +2130,14 @@ export class ChatComponent implements AfterViewChecked {
 
   replyToMessage(message: ChatMessage, scope: 'public' | 'private') {
     if (!message?.id || message.id.startsWith('temp-') || message.deletedAt) return;
+    const referenceAttachments = this.messageAttachments(message);
 
     this.replyingTo = {
       messageId: message.id,
       from: message.from,
       text: this.messageReplySeedText(message),
-      attachment: this.messageAttachments(message)[0] || null,
+      attachment: this.preferredReferenceAttachment(referenceAttachments),
+      attachments: referenceAttachments,
       scope,
       sourceScope: scope,
       privatePeer: scope === 'private' ? this.selectedUser : null
@@ -1547,13 +2164,15 @@ export class ChatComponent implements AfterViewChecked {
 
   openForwardDialog(message: ChatMessage, scope: 'public' | 'private') {
     if (!message?.id || message.id.startsWith('temp-') || message.deletedAt) return;
+    const referenceAttachments = this.messageAttachments(message);
 
     this.forwardCandidate = {
       messageId: message.id,
       from: message.from,
-      text: String(message.text || '').trim().slice(0, 160),
+      text: this.messageReplySeedText(message),
       scope,
-      attachment: this.messageAttachments(message)[0] || null
+      attachment: this.preferredReferenceAttachment(referenceAttachments),
+      attachments: referenceAttachments
     };
     this.forwardSelectedUsers = this.selectedUser ? [this.selectedUser] : [];
     this.forwardSearchTerm = '';
@@ -1577,7 +2196,9 @@ export class ChatComponent implements AfterViewChecked {
     if (!candidate || !recipients.length) return;
 
     const note = (this.forwardNote || '').trim();
-    const text = note || 'Forwarded message';
+    const text = note;
+    const forwardedAttachments = this.referenceAttachments(candidate);
+    const forwardedPrimary = this.preferredReferenceAttachment(forwardedAttachments) || candidate.attachment || null;
 
     recipients.forEach((to) => {
       if (!this.users.includes(to)) this.users.unshift(to);
@@ -1597,7 +2218,8 @@ export class ChatComponent implements AfterViewChecked {
           from: candidate.from,
           text: candidate.text,
           scope: candidate.scope,
-          attachment: candidate.attachment
+          attachment: forwardedPrimary,
+          attachments: forwardedAttachments
         }
       };
 
@@ -1609,7 +2231,8 @@ export class ChatComponent implements AfterViewChecked {
         from: candidate.from,
         text: candidate.text,
         scope: candidate.scope,
-        attachment: candidate.attachment
+        attachment: forwardedPrimary,
+        attachments: forwardedAttachments
       });
     });
 
@@ -1660,10 +2283,32 @@ export class ChatComponent implements AfterViewChecked {
     return from === this.myUsername ? 'You' : from;
   }
 
-  replyPreviewText(text: string): string {
+  replyPreviewText(text: string, attachment?: ChatMessage['attachment'], attachments?: Attachment[] | null): string {
+    const list = this.referenceAttachments({ attachment: attachment || null, attachments: attachments || [] });
     const trimmed = String(text || '').trim();
-    if (!trimmed) return 'Message unavailable';
+    if (!trimmed) {
+      if (list.length > 1) return `${list.length} attachments`;
+      if (attachment) {
+        if (this.isAudioAttachment(attachment)) return this.audioAttachmentLabel(attachment);
+        if (this.isVideoAttachment(attachment)) return 'Video attachment';
+        if (attachment.isImage) return 'Image attachment';
+        const attachmentName = String(attachment.name || '').trim();
+        if (attachmentName) return `[Attachment] ${attachmentName}`;
+        return 'Attachment';
+      }
+      return 'Message unavailable';
+    }
+    if (/^\[attachment\]\s+/i.test(trimmed) && list.length > 1) {
+      return `${list.length} attachments`;
+    }
     return trimmed.length > 70 ? `${trimmed.slice(0, 70)}...` : trimmed;
+  }
+
+  messageBodyText(message: ChatMessage): string {
+    const text = String(message?.text || '').trim();
+    if (!text) return '';
+    if (message?.forwardedFrom?.messageId && /^forwarded message$/i.test(text)) return '';
+    return text;
   }
 
   attachmentUrl(attachment: ChatMessage['attachment']): string {
@@ -1680,6 +2325,243 @@ export class ChatComponent implements AfterViewChecked {
     const media = list.filter((a) => this.canPreviewMediaAttachment(a));
     const other = list.filter((a) => !this.canPreviewMediaAttachment(a));
     return [...media, ...other];
+  }
+
+  referenceAttachments(ref: { attachment?: Attachment | null; attachments?: Attachment[] } | null | undefined): Attachment[] {
+    const fromArray = Array.isArray(ref?.attachments)
+      ? ref!.attachments!.filter((a) => !!a?.url)
+      : [];
+    if (fromArray.length) return fromArray;
+    const single = ref?.attachment?.url ? [ref.attachment] : [];
+    return single as Attachment[];
+  }
+
+  referenceAttachmentCount(ref: { attachment?: Attachment | null; attachments?: Attachment[] } | null | undefined): number {
+    return this.referenceAttachments(ref).length;
+  }
+
+  preferredReferenceAttachment(list: Attachment[]): Attachment | null {
+    const attachments = Array.isArray(list) ? list.filter((a) => !!a?.url) : [];
+    if (!attachments.length) return null;
+    return attachments.find((a) => this.isAudioAttachment(a))
+      || attachments.find((a) => this.canPreviewMediaAttachment(a))
+      || attachments[0]
+      || null;
+  }
+
+  referenceMediaAttachments(ref: { attachment?: Attachment | null; attachments?: Attachment[] } | null | undefined): Attachment[] {
+    return this.referenceAttachments(ref).filter((a) => this.canPreviewMediaAttachment(a));
+  }
+
+  referenceAlbumPreviewItems(ref: { attachment?: Attachment | null; attachments?: Attachment[] } | null | undefined): Attachment[] {
+    return this.referenceMediaAttachments(ref).slice(0, 4);
+  }
+
+  referenceAlbumMoreCount(ref: { attachment?: Attachment | null; attachments?: Attachment[] } | null | undefined): number {
+    const count = this.referenceMediaAttachments(ref).length;
+    return count > 4 ? count - 4 : 0;
+  }
+
+  referenceAudioAttachments(ref: { attachment?: Attachment | null; attachments?: Attachment[] } | null | undefined): Attachment[] {
+    return this.referenceAttachments(ref).filter((a) => this.isAudioAttachment(a));
+  }
+
+  referenceAudioAttachmentCount(ref: { attachment?: Attachment | null; attachments?: Attachment[] } | null | undefined): number {
+    return this.referenceAudioAttachments(ref).length;
+  }
+
+  referenceAudioIndex(ref: { messageId?: string; scope?: 'public' | 'private' } | null | undefined): number {
+    const total = this.referenceAudioAttachmentCount(ref as any);
+    if (!total) return 0;
+    const key = this.referenceIdentity(ref);
+    const value = Number(this.referenceAudioIndexByKey[key] || 0);
+    if (!Number.isInteger(value) || value < 0 || value >= total) return 0;
+    return value;
+  }
+
+  referenceAudioCurrentAttachment(ref: { attachment?: Attachment | null; attachments?: Attachment[]; messageId?: string; scope?: 'public' | 'private' } | null | undefined): Attachment | null {
+    const list = this.referenceAudioAttachments(ref);
+    if (!list.length) return null;
+    return list[this.referenceAudioIndex(ref)] || list[0] || null;
+  }
+
+  prevReferenceAudio(ref: { attachment?: Attachment | null; attachments?: Attachment[]; messageId?: string; scope?: 'public' | 'private' } | null | undefined, event?: Event) {
+    const total = this.referenceAudioAttachmentCount(ref);
+    if (total <= 1) {
+      event?.stopPropagation();
+      return;
+    }
+    this.setReferenceAudioIndex(ref, this.referenceAudioIndex(ref) - 1, event);
+  }
+
+  nextReferenceAudio(ref: { attachment?: Attachment | null; attachments?: Attachment[]; messageId?: string; scope?: 'public' | 'private' } | null | undefined, event?: Event) {
+    const total = this.referenceAudioAttachmentCount(ref);
+    if (total <= 1) {
+      event?.stopPropagation();
+      return;
+    }
+    this.setReferenceAudioIndex(ref, this.referenceAudioIndex(ref) + 1, event);
+  }
+
+  private tryAutoAdvanceReferenceAudio(endedAttachment: ChatMessage['attachment']): boolean {
+    const endedKey = this.voiceAttachmentKey(endedAttachment);
+    if (!endedKey) return false;
+
+    const refs = this.referenceCandidatesForAudioAdvance();
+    for (const ref of refs) {
+      const list = this.referenceAudioAttachments(ref);
+      if (list.length < 2) continue;
+      const index = this.referenceAudioIndex(ref);
+      const current = list[index] || list[0];
+      if (!current || this.voiceAttachmentKey(current) !== endedKey) continue;
+      if (index >= list.length - 1) continue;
+
+      this.setReferenceAudioIndex(ref, index + 1);
+      setTimeout(() => {
+        const nextAttachment = this.referenceAudioCurrentAttachment(ref);
+        if (!nextAttachment) return;
+        const nextKey = this.voiceAttachmentKey(nextAttachment);
+        const nextAudio = this.resolveVoiceAudioElement(nextKey, null);
+        if (!nextAudio) return;
+        this.pauseAllVoicePlayersExcept(nextKey);
+        const rate = this.voicePlaybackRate(nextAttachment);
+        nextAudio.playbackRate = rate;
+        nextAudio.defaultPlaybackRate = rate;
+        this.activeVoiceKey = nextKey;
+        void nextAudio.play();
+      }, 70);
+      return true;
+    }
+
+    return false;
+  }
+
+  private referenceCandidatesForAudioAdvance(): Array<{
+    messageId?: string;
+    scope?: 'public' | 'private';
+    attachment?: Attachment | null;
+    attachments?: Attachment[];
+  }> {
+    const refs: Array<{ messageId?: string; scope?: 'public' | 'private'; attachment?: Attachment | null; attachments?: Attachment[] }> = [];
+
+    this.publicMessages.forEach((message) => {
+      if (message.replyTo?.messageId) refs.push(message.replyTo);
+      if (message.forwardedFrom?.messageId) refs.push(message.forwardedFrom);
+    });
+
+    Object.values(this.privateChats || {}).forEach((messages) => {
+      (messages || []).forEach((message) => {
+        if (message.replyTo?.messageId) refs.push(message.replyTo);
+        if (message.forwardedFrom?.messageId) refs.push(message.forwardedFrom);
+      });
+    });
+
+    return refs;
+  }
+
+  referenceMetaLabel(ref: { attachment?: Attachment | null; attachments?: Attachment[] } | null | undefined): string {
+    const list = this.referenceAttachments(ref);
+    if (!list.length) return '';
+
+    const totalBytes = list.reduce((sum, a) => {
+      const size = Number(a?.size || 0);
+      return sum + (Number.isFinite(size) && size > 0 ? size : 0);
+    }, 0);
+
+    const audio = this.referenceAudioAttachments(ref);
+    const totalAudioSeconds = audio.reduce((sum, a) => {
+      const seconds = Number(a?.durationSeconds || 0);
+      return sum + (Number.isFinite(seconds) && seconds > 0 ? seconds : 0);
+    }, 0);
+
+    const parts = [`${list.length} attachment${list.length === 1 ? '' : 's'}`];
+    if (totalBytes > 0) parts.push(this.attachmentSizeLabel(totalBytes));
+    if (audio.length) parts.push(`audio ${this.formatDuration(totalAudioSeconds)}`);
+
+    const mediaCount = this.referenceMediaAttachments(ref).length;
+    if (mediaCount > 1) parts.push(`album ${mediaCount}`);
+    return parts.join(' • ');
+  }
+
+  async jumpToReferenceAttachment(
+    ref: { messageId: string; scope?: 'public' | 'private' } | null | undefined,
+    attachment?: Attachment | null,
+    event?: Event
+  ) {
+    event?.stopPropagation();
+    if (!ref?.messageId) return;
+
+    await this.jumpToReference({ messageId: ref.messageId, scope: ref.scope || 'private' });
+    if (!attachment) return;
+
+    const scope = ref.scope || 'private';
+    const message = this.findReferencedMessage(scope, ref.messageId);
+    if (!message) return;
+
+    const target = this.matchReferenceAttachmentInMessage(message, attachment);
+    if (!target || !this.canPreviewMediaAttachment(target)) return;
+    setTimeout(() => this.openAttachmentViewer(message, scope, target), 70);
+  }
+
+  private setReferenceAudioIndex(
+    ref: { messageId?: string; scope?: 'public' | 'private' } | null | undefined,
+    index: number,
+    event?: Event
+  ) {
+    event?.stopPropagation();
+    const total = this.referenceAudioAttachmentCount(ref as any);
+    if (!total) return;
+    const key = this.referenceIdentity(ref);
+    const normalized = ((Math.floor(index) % total) + total) % total;
+    this.referenceAudioIndexByKey[key] = normalized;
+  }
+
+  private referenceIdentity(ref: { messageId?: string; scope?: 'public' | 'private' } | null | undefined): string {
+    return `ref:${ref?.scope || 'private'}:${ref?.messageId || 'none'}`;
+  }
+
+  private findReferencedMessage(scope: 'public' | 'private', messageId: string): ChatMessage | null {
+    if (!messageId) return null;
+    if (scope === 'public') {
+      return this.publicMessages.find((m) => m.id === messageId) || null;
+    }
+
+    const users = Object.keys(this.privateChats || {});
+    for (const user of users) {
+      const hit = (this.privateChats[user] || []).find((m) => m.id === messageId);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  private matchReferenceAttachmentInMessage(message: ChatMessage, attachment: Attachment): Attachment | null {
+    const list = this.messageAttachments(message);
+    if (!list.length) return null;
+
+    const targetUrl = String(attachment?.url || '').trim();
+    if (targetUrl) {
+      const byUrl = list.find((a) => String(a?.url || '').trim() === targetUrl);
+      if (byUrl) return byUrl;
+    }
+
+    const targetKey = String(attachment?.objectKey || '').trim();
+    if (targetKey) {
+      const byObjectKey = list.find((a) => String(a?.objectKey || '').trim() === targetKey);
+      if (byObjectKey) return byObjectKey;
+    }
+
+    const targetName = String(attachment?.name || '').trim().toLowerCase();
+    const targetSize = Number(attachment?.size || 0);
+    if (targetName) {
+      const byName = list.find((a) => {
+        const name = String(a?.name || '').trim().toLowerCase();
+        const size = Number(a?.size || 0);
+        return name === targetName && size === targetSize;
+      });
+      if (byName) return byName;
+    }
+
+    return this.preferredReferenceAttachment(list);
   }
 
   attachmentSizeLabel(size: number | null | undefined): string {
@@ -1709,16 +2591,39 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   isAudioAttachment(attachment: ChatMessage['attachment']): boolean {
-    return !!attachment?.mimeType?.startsWith('audio/');
+    const mime = String(attachment?.mimeType || '').trim().toLowerCase();
+    if (mime.startsWith('audio/')) return true;
+    const name = String(attachment?.name || '').toLowerCase();
+    return /\.(webm|ogg|mp3|m4a|wav|aac|flac|opus)$/i.test(name);
+  }
+
+  isVoiceNoteAttachment(attachment: ChatMessage['attachment']): boolean {
+    if (!this.isAudioAttachment(attachment)) return false;
+    if (attachment?.audioKind === 'voice-note') return true;
+    if (attachment?.audioKind === 'uploaded-audio') return false;
+    return /^voice-note-[^\s]+\.(ogg|webm|m4a|mp3|wav)$/i.test(String(attachment?.name || ''));
+  }
+
+  audioAttachmentLabel(attachment: ChatMessage['attachment']): string {
+    return this.isVoiceNoteAttachment(attachment) ? 'Voice note' : 'Audio file';
+  }
+
+  private audioKindForFile(file: File): 'voice-note' | 'uploaded-audio' | undefined {
+    if (!String(file?.type || '').startsWith('audio/')) return undefined;
+    if ((file as any)?.__audioKind === 'voice-note') return 'voice-note';
+    return 'uploaded-audio';
   }
 
   voiceAttachmentKey(attachment: ChatMessage['attachment']): string {
     if (!attachment) return 'voice:none';
-    if (attachment.url) return `voice:${attachment.url}`;
-    return `voice:${attachment.name || 'audio'}:${attachment.size || 0}`;
+    const key = attachment.url
+      ? `voice:${attachment.url}`
+      : `voice:${attachment.name || 'audio'}:${attachment.size || 0}`;
+    this.voiceAttachmentByKey[key] = attachment as Attachment;
+    return key;
   }
 
-  voiceWaveformBars(attachment: ChatMessage['attachment']): number[] {
+  private voiceWaveformSourceBars(attachment: ChatMessage['attachment']): number[] {
     const key = this.voiceAttachmentKey(attachment);
     const cached = this.voiceWaveformByKey[key];
     if (cached?.length) return cached;
@@ -1731,18 +2636,23 @@ export class ChatComponent implements AfterViewChecked {
       : [];
     if (fromAttachment.length) {
       this.voiceWaveformByKey[key] = fromAttachment;
+      this.voiceWaveformQualityByKey[key] = 'real';
       return fromAttachment;
     }
 
     if (attachment?.url && this.isAudioAttachment(attachment) && !this.voiceWaveformLoading.has(key)) {
       this.voiceWaveformLoading.add(key);
       const sourceUrl = this.attachmentUrl(attachment);
-      void this.generateVoiceWaveform(sourceUrl)
+      void this.generateVoiceWaveform(sourceUrl, attachment)
         .then((bars) => {
           this.voiceWaveformByKey[key] = bars.length ? bars : this.defaultVoiceWaveform;
+          this.voiceWaveformQualityByKey[key] = bars.length ? 'real' : 'fallback';
+          this.voiceSilenceRangesByKey[key] = [];
         })
         .catch(() => {
           this.voiceWaveformByKey[key] = this.defaultVoiceWaveform;
+          this.voiceWaveformQualityByKey[key] = 'fallback';
+          this.voiceSilenceRangesByKey[key] = [];
         })
         .finally(() => {
           this.voiceWaveformLoading.delete(key);
@@ -1750,6 +2660,97 @@ export class ChatComponent implements AfterViewChecked {
     }
 
     return this.defaultVoiceWaveform;
+  }
+
+  voiceWaveformBars(attachment: ChatMessage['attachment']): number[] {
+    const source = this.voiceWaveformSourceBars(attachment);
+    const zoom = this.voiceWaveformZoom(attachment);
+    if (zoom <= 1 || source.length <= 8) return source;
+
+    const { start, span } = this.voiceWaveformWindow(attachment);
+    const displayBars = Math.max(24, Math.min(96, source.length));
+    const bars: number[] = [];
+    for (let i = 0; i < displayBars; i += 1) {
+      const point = displayBars <= 1 ? start : start + (i / (displayBars - 1)) * span;
+      const index = Math.max(0, Math.min(source.length - 1, Math.round(point * (source.length - 1))));
+      bars.push(source[index]);
+    }
+    return bars;
+  }
+
+  voiceWaveformZoom(attachment: ChatMessage['attachment']): number {
+    const key = this.voiceAttachmentKey(attachment);
+    const raw = Number(this.voiceWaveformZoomByKey[key] || 1);
+    if (raw >= 4) return 4;
+    if (raw >= 2) return 2;
+    return 1;
+  }
+
+  voiceWaveformZoomLabel(attachment: ChatMessage['attachment']): string {
+    return `${this.voiceWaveformZoom(attachment)}x`;
+  }
+
+  canZoomVoiceWaveform(attachment: ChatMessage['attachment']): boolean {
+    const bars = this.voiceWaveformSourceBars(attachment);
+    const duration = Math.max(0, Number(this.voiceUiState(attachment).duration || attachment?.durationSeconds || 0));
+    return bars.length >= 32 || duration >= 60;
+  }
+
+  zoomInVoiceWaveform(attachment: ChatMessage['attachment'], event?: Event) {
+    event?.stopPropagation();
+    if (!attachment) return;
+    const key = this.voiceAttachmentKey(attachment);
+    const current = this.voiceWaveformZoom(attachment);
+    this.voiceWaveformZoomByKey[key] = current >= 4 ? 4 : current >= 2 ? 4 : 2;
+  }
+
+  zoomOutVoiceWaveform(attachment: ChatMessage['attachment'], event?: Event) {
+    event?.stopPropagation();
+    if (!attachment) return;
+    const key = this.voiceAttachmentKey(attachment);
+    const current = this.voiceWaveformZoom(attachment);
+    this.voiceWaveformZoomByKey[key] = current <= 1 ? 1 : current <= 2 ? 1 : 2;
+  }
+
+  toggleVoiceAutoPlayNext() {
+    this.voiceAutoPlayNext = !this.voiceAutoPlayNext;
+    this.persistUploadUiState();
+  }
+
+  isVoiceAutoPlayNextEnabled(): boolean {
+    return !!this.voiceAutoPlayNext;
+  }
+
+  toggleVoiceSilenceSkip() {
+    this.voiceSilenceSkipEnabled = !this.voiceSilenceSkipEnabled;
+    this.persistUploadUiState();
+  }
+
+  isVoiceSilenceSkipEnabled(): boolean {
+    return !!this.voiceSilenceSkipEnabled;
+  }
+
+  toggleVoiceKeyboardControls() {
+    this.voiceKeyboardControlsEnabled = !this.voiceKeyboardControlsEnabled;
+    this.persistUploadUiState();
+  }
+
+  toggleOfflineVoiceCache() {
+    this.offlineVoiceCacheEnabled = !this.offlineVoiceCacheEnabled;
+    this.persistUploadUiState();
+  }
+
+  isVoiceOfflineCached(attachment: ChatMessage['attachment']): boolean {
+    if (!attachment?.url) return false;
+    const sourceUrl = this.attachmentUrl(attachment);
+    return this.voiceOfflineCachedUrlSet.has(sourceUrl);
+  }
+
+  voiceProgressDisplayRatio(attachment: ChatMessage['attachment']): number {
+    const absolute = this.voiceProgressRatio(attachment);
+    const { start, span } = this.voiceWaveformWindow(attachment);
+    if (span <= 0) return absolute;
+    return Math.max(0, Math.min(1, (absolute - start) / span));
   }
 
   voicePlaybackRate(attachment: ChatMessage['attachment']): number {
@@ -1807,9 +2808,113 @@ export class ChatComponent implements AfterViewChecked {
     return Math.max(0, Math.min(1, current / duration));
   }
 
+  voiceInsightsLabel(attachment: ChatMessage['attachment']): string {
+    if (!attachment || !this.isAudioAttachment(attachment)) return '';
+    this.ensureVoiceInsightsKnown(attachment);
+    const key = this.voiceAttachmentKey(attachment);
+    const insights = this.voiceInsightsByKey[key] || {};
+    const mime = String(attachment.mimeType || '').toLowerCase();
+    const codec = mime.startsWith('audio/') ? mime.replace('audio/', '').toUpperCase() : this.attachmentTypeLabel(attachment);
+    const parts: string[] = [];
+    if (codec && codec !== 'FILE') parts.push(codec);
+    if (Number(insights.bitrateKbps || 0) > 0) parts.push(`~${Math.round(Number(insights.bitrateKbps))} kbps`);
+    if (Number(insights.sampleRateHz || 0) > 0) parts.push(`${(Number(insights.sampleRateHz) / 1000).toFixed(1)} kHz`);
+    if (Number(insights.channels || 0) > 0) parts.push(Number(insights.channels) === 1 ? 'mono' : Number(insights.channels) === 2 ? 'stereo' : `${Math.round(Number(insights.channels))}ch`);
+    return parts.join(' • ');
+  }
+
+  private voiceWaveformWindow(attachment: ChatMessage['attachment']): { start: number; span: number } {
+    const zoom = this.voiceWaveformZoom(attachment);
+    if (zoom <= 1) return { start: 0, span: 1 };
+
+    const span = 1 / zoom;
+    const progress = this.voiceProgressRatio(attachment);
+    let start = progress - span / 2;
+    if (!Number.isFinite(start)) start = 0;
+    start = Math.max(0, Math.min(1 - span, start));
+    return { start, span };
+  }
+
+  private ensureVoiceInsightsKnown(
+    attachment: ChatMessage['attachment'],
+    hints?: { sampleRateHz?: number; channels?: number; bitrateKbps?: number }
+  ) {
+    if (!attachment || !this.isAudioAttachment(attachment)) return;
+    const key = this.voiceAttachmentKey(attachment);
+    const existing = this.voiceInsightsByKey[key] || {};
+    const next = { ...existing };
+
+    if (Number(hints?.sampleRateHz || 0) > 0) next.sampleRateHz = Number(hints!.sampleRateHz);
+    if (Number(hints?.channels || 0) > 0) next.channels = Math.max(1, Math.round(Number(hints!.channels)));
+    if (Number(hints?.bitrateKbps || 0) > 0) next.bitrateKbps = Number(hints!.bitrateKbps);
+
+    if (!next.bitrateKbps) {
+      const duration = Math.max(0, Number(attachment.durationSeconds || this.voiceUiState(attachment).duration || 0));
+      const computed = this.approximateAudioBitrateKbps(Number(attachment.size || 0), duration);
+      if (computed > 0) next.bitrateKbps = computed;
+    }
+
+    this.voiceInsightsByKey[key] = next;
+
+    if ((next.sampleRateHz || next.channels) || this.voiceInsightsLoading.has(key) || !attachment.url) return;
+    this.voiceInsightsLoading.add(key);
+
+    const sourceUrl = this.attachmentUrl(attachment);
+    void this.decodeAudioInsightFromUrl(sourceUrl)
+      .then((decoded) => {
+        if (!decoded) return;
+        const merged = {
+          ...this.voiceInsightsByKey[key],
+          sampleRateHz: Number(decoded.sampleRateHz || this.voiceInsightsByKey[key]?.sampleRateHz || 0) || undefined,
+          channels: Number(decoded.channels || this.voiceInsightsByKey[key]?.channels || 0) || undefined
+        };
+        if (!merged.bitrateKbps) {
+          const duration = Math.max(0, Number(decoded.duration || attachment.durationSeconds || this.voiceUiState(attachment).duration || 0));
+          merged.bitrateKbps = this.approximateAudioBitrateKbps(Number(attachment.size || 0), duration) || undefined;
+        }
+        this.voiceInsightsByKey[key] = merged;
+      })
+      .finally(() => {
+        this.voiceInsightsLoading.delete(key);
+      });
+  }
+
+  private async decodeAudioInsightFromUrl(sourceUrl: string): Promise<{ duration?: number; sampleRateHz?: number; channels?: number } | null> {
+    if (!sourceUrl) return null;
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return null;
+
+    try {
+      const response = await fetch(sourceUrl);
+      if (!response.ok) return null;
+      const raw = await response.arrayBuffer();
+      const context = new AudioCtx();
+      try {
+        const decoded = await context.decodeAudioData(raw.slice(0));
+        const duration = Number(decoded?.duration || 0);
+        return {
+          duration: Number.isFinite(duration) && duration > 0 ? duration : undefined,
+          sampleRateHz: Number(decoded?.sampleRate || 0) || undefined,
+          channels: Number(decoded?.numberOfChannels || 0) || undefined
+        };
+      } finally {
+        await context.close();
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  private approximateAudioBitrateKbps(bytes: number, durationSeconds: number): number {
+    const size = Number(bytes || 0);
+    const duration = Number(durationSeconds || 0);
+    if (!Number.isFinite(size) || !Number.isFinite(duration) || size <= 0 || duration <= 0) return 0;
+    return Math.max(8, (size * 8) / duration / 1000);
+  }
+
   isVoiceWaveformBarActive(index: number, barCount: number, attachment: ChatMessage['attachment']): boolean {
     if (barCount <= 0) return false;
-    const activeBars = Math.max(0, Math.min(barCount, Math.round(this.voiceProgressRatio(attachment) * barCount)));
+    const activeBars = Math.max(0, Math.min(barCount, Math.round(this.voiceProgressDisplayRatio(attachment) * barCount)));
     return index < activeBars;
   }
 
@@ -1852,6 +2957,7 @@ export class ChatComponent implements AfterViewChecked {
     if (!attachment) return;
 
     const key = this.voiceAttachmentKey(attachment);
+    this.activeVoiceKey = key;
     const next = Math.max(0, Math.min(1, Number(value) / 100));
     const audio = this.resolveVoiceAudioElement(key, audioEl);
     if (audio) {
@@ -1872,18 +2978,22 @@ export class ChatComponent implements AfterViewChecked {
     event?.stopPropagation();
     if (!attachment) return;
     const key = this.voiceAttachmentKey(attachment);
+    this.activeVoiceKey = key;
     const audio = this.resolveVoiceAudioElement(key, audioEl);
     if (!audio) return;
 
     if (audio.paused) {
       this.pauseAllVoicePlayersExcept(key);
-      audio.playbackRate = this.voicePlaybackRate(attachment);
-      audio.defaultPlaybackRate = this.voicePlaybackRate(attachment);
-      const remaining = Number(audio.duration || 0) - Number(audio.currentTime || 0);
-      if (Number.isFinite(remaining) && remaining <= 0.05) {
-        audio.currentTime = 0;
-      }
-      void audio.play();
+      void this.prepareVoiceSourceForPlayback(attachment, audio)
+        .finally(() => {
+          audio.playbackRate = this.voicePlaybackRate(attachment);
+          audio.defaultPlaybackRate = this.voicePlaybackRate(attachment);
+          const remaining = Number(audio.duration || 0) - Number(audio.currentTime || 0);
+          if (Number.isFinite(remaining) && remaining <= 0.05) {
+            audio.currentTime = 0;
+          }
+          void audio.play();
+        });
     } else {
       audio.pause();
     }
@@ -1893,6 +3003,7 @@ export class ChatComponent implements AfterViewChecked {
     event?.stopPropagation();
     if (!attachment) return;
     const key = this.voiceAttachmentKey(attachment);
+    this.activeVoiceKey = key;
     const state = this.voiceUiState(attachment);
     const nextMuted = !state.muted;
     const audio = this.resolveVoiceAudioElement(key, audioEl);
@@ -1929,6 +3040,7 @@ export class ChatComponent implements AfterViewChecked {
     event.preventDefault();
     if (!attachment) return;
     const host = event.currentTarget as HTMLElement | null;
+    this.activeVoiceKey = this.voiceAttachmentKey(attachment);
     this.voiceWaveformScrub = {
       pointerId: event.pointerId,
       key: this.voiceAttachmentKey(attachment),
@@ -1970,11 +3082,13 @@ export class ChatComponent implements AfterViewChecked {
 
     const rect = host.getBoundingClientRect();
     const x = event.clientX - rect.left;
-    const ratio = Math.max(0, Math.min(1, rect.width > 0 ? x / rect.width : 0));
+    const localRatio = Math.max(0, Math.min(1, rect.width > 0 ? x / rect.width : 0));
+    const { start, span } = this.voiceWaveformWindow(attachment);
+    const ratio = Math.max(0, Math.min(1, start + (localRatio * span)));
     this.seekVoiceToRatio(attachment, ratio, audioEl);
   }
 
-  onVoiceAudioMetadata(event: Event, attachment: ChatMessage['attachment']) {
+  onVoiceAudioMetadata(event: Event, attachment: ChatMessage['attachment'], message?: ChatMessage | null) {
     const audio = event.target as HTMLAudioElement | null;
     if (!audio || !attachment) return;
 
@@ -1988,7 +3102,9 @@ export class ChatComponent implements AfterViewChecked {
     }
 
     const key = this.voiceAttachmentKey(attachment);
+    this.ensureVoiceInsightsKnown(attachment);
     this.voiceAudioElementByKey.set(key, audio);
+    void this.cacheVoiceAttachmentForOffline(attachment);
     const nextState = this.voiceUiState(attachment);
     const currentDuration = Number.isFinite(nextState.duration) ? nextState.duration : 0;
     nextState.duration = Math.max(currentDuration, duration || 0);
@@ -2006,12 +3122,17 @@ export class ChatComponent implements AfterViewChecked {
     }
 
     this.applyVoicePlaybackRateToDom(key, this.voicePlaybackRate(attachment));
+
+    if (message) {
+      this.maybeEmitPrivateAudioPlaybackReceipt(message, attachment, nextState.currentTime, nextState.duration);
+    }
   }
 
-  onVoiceAudioTimeUpdate(event: Event, attachment: ChatMessage['attachment']) {
+  onVoiceAudioTimeUpdate(event: Event, attachment: ChatMessage['attachment'], message?: ChatMessage | null) {
     const audio = event.target as HTMLAudioElement | null;
     if (!audio || !attachment) return;
     const key = this.voiceAttachmentKey(attachment);
+    this.ensureVoiceInsightsKnown(attachment);
     this.voiceAudioElementByKey.set(key, audio);
     const state = this.voiceUiState(attachment);
     state.currentTime = Number(audio.currentTime || 0);
@@ -2025,10 +3146,17 @@ export class ChatComponent implements AfterViewChecked {
     state.muted = !!audio.muted;
     state.volume = Number.isFinite(audio.volume) ? audio.volume : state.volume;
     this.voiceUiStateByKey[key] = state;
+
+    if (message) {
+      this.maybeEmitPrivateAudioPlaybackReceipt(message, attachment, state.currentTime, state.duration);
+    }
   }
 
-  onVoiceAudioPlay(attachment: ChatMessage['attachment'], event?: Event) {
+  onVoiceAudioPlay(attachment: ChatMessage['attachment'], event?: Event, message?: ChatMessage | null) {
     const key = this.voiceAttachmentKey(attachment);
+    this.activeVoiceKey = key;
+    this.ensureVoiceInsightsKnown(attachment);
+    void this.cacheVoiceAttachmentForOffline(attachment);
     const state = this.voiceUiState(attachment);
     const audio = event?.target as HTMLAudioElement | null;
     if (audio) this.voiceAudioElementByKey.set(key, audio);
@@ -2036,9 +3164,13 @@ export class ChatComponent implements AfterViewChecked {
     state.volume = Number.isFinite(Number(audio?.volume)) ? Number(audio?.volume) : state.volume;
     this.voiceUiStateByKey[key] = state;
     this.startVoiceProgressTracking(key, attachment, audio);
+
+    if (message) {
+      this.maybeEmitPrivateAudioPlaybackReceipt(message, attachment, state.currentTime, state.duration);
+    }
   }
 
-  onVoiceAudioPause(attachment: ChatMessage['attachment'], event?: Event) {
+  onVoiceAudioPause(attachment: ChatMessage['attachment'], event?: Event, message?: ChatMessage | null) {
     const key = this.voiceAttachmentKey(attachment);
     const audio = event?.target as HTMLAudioElement | null;
     if (audio) this.voiceAudioElementByKey.set(key, audio);
@@ -2057,10 +3189,15 @@ export class ChatComponent implements AfterViewChecked {
     }
     this.voiceUiStateByKey[key] = state;
     this.stopVoiceProgressTracking(key);
+
+    if (message) {
+      this.maybeEmitPrivateAudioPlaybackReceipt(message, attachment, state.currentTime, state.duration, true);
+    }
   }
 
-  onVoiceAudioEnded(attachment: ChatMessage['attachment'], event?: Event) {
+  onVoiceAudioEnded(attachment: ChatMessage['attachment'], event?: Event, message?: ChatMessage | null) {
     const key = this.voiceAttachmentKey(attachment);
+    this.activeVoiceKey = key;
     const audio = event?.target as HTMLAudioElement | null;
     if (audio) this.voiceAudioElementByKey.set(key, audio);
     const state = this.voiceUiState(attachment);
@@ -2073,6 +3210,24 @@ export class ChatComponent implements AfterViewChecked {
     }
     this.voiceUiStateByKey[key] = state;
     this.stopVoiceProgressTracking(key);
+
+    if (message) {
+      const duration = Math.max(0, Number(state.duration || attachment?.durationSeconds || 0));
+      this.maybeEmitPrivateAudioPlaybackReceipt(message, attachment, duration, duration, true);
+    }
+
+    if (this.voiceAutoPlayNext) {
+      const movedWithinReference = this.tryAutoAdvanceReferenceAudio(attachment);
+      if (!movedWithinReference) {
+        setTimeout(() => this.playNextVoiceInQueue(key), 70);
+      }
+    }
+  }
+
+  onVoiceAudioError(event: Event, attachment: ChatMessage['attachment']) {
+    const audio = event.target as HTMLAudioElement | null;
+    if (!audio || !attachment) return;
+    void this.restoreVoiceSourceFromOfflineCache(attachment, audio);
   }
 
   trackByNumber(index: number, value: number): string {
@@ -2080,7 +3235,10 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   isVideoAttachment(attachment: ChatMessage['attachment']): boolean {
-    return !!attachment?.mimeType?.startsWith('video/');
+    const mime = String(attachment?.mimeType || '').trim().toLowerCase();
+    if (mime.startsWith('video/')) return true;
+    const name = String(attachment?.name || '').toLowerCase();
+    return /\.(mp4|mov|mkv|avi|m4v)$/i.test(name);
   }
 
   private applyVoicePlaybackRateToDom(key: string, rate: number) {
@@ -2113,6 +3271,271 @@ export class ChatComponent implements AfterViewChecked {
     });
   }
 
+  private playNextVoiceInQueue(currentKey: string) {
+    if (!currentKey) return;
+    const nodes = Array.from(document.querySelectorAll('audio[data-voice-audio-key]')) as HTMLAudioElement[];
+    if (!nodes.length) return;
+
+    const orderedKeys = nodes.reduce((acc, node) => {
+      const key = String(node.getAttribute('data-voice-audio-key') || '');
+      if (key && !acc.includes(key)) acc.push(key);
+      return acc;
+    }, [] as string[]);
+
+    const index = orderedKeys.indexOf(currentKey);
+    if (index < 0 || index >= orderedKeys.length - 1) return;
+
+    const nextKey = orderedKeys[index + 1];
+    const nextAudio = this.resolveVoiceAudioElement(nextKey, null);
+    if (!nextAudio) return;
+
+    const nextAttachment = this.voiceAttachmentByKey[nextKey] || null;
+    this.pauseAllVoicePlayersExcept(nextKey);
+    if (nextAttachment) {
+      const rate = this.voicePlaybackRate(nextAttachment);
+      nextAudio.playbackRate = rate;
+      nextAudio.defaultPlaybackRate = rate;
+    }
+
+    const remaining = Number(nextAudio.duration || 0) - Number(nextAudio.currentTime || 0);
+    if (Number.isFinite(remaining) && remaining <= 0.05) {
+      nextAudio.currentTime = 0;
+    }
+
+    this.activeVoiceKey = nextKey;
+    void nextAudio.play();
+  }
+
+  private async prepareVoiceSourceForPlayback(attachment: ChatMessage['attachment'], audio: HTMLAudioElement): Promise<void> {
+    if (!attachment || !audio) return;
+    void this.cacheVoiceAttachmentForOffline(attachment);
+
+    if (navigator.onLine) return;
+    await this.restoreVoiceSourceFromOfflineCache(attachment, audio);
+  }
+
+  private async cacheVoiceAttachmentForOffline(attachment: ChatMessage['attachment']): Promise<void> {
+    if (!this.offlineVoiceCacheEnabled || !attachment?.url || !('caches' in window)) return;
+    const sourceUrl = this.attachmentUrl(attachment);
+    if (!sourceUrl || this.voiceOfflineCachedUrlSet.has(sourceUrl) || this.voiceOfflineCacheLoading.has(sourceUrl)) return;
+
+    this.voiceOfflineCacheLoading.add(sourceUrl);
+    try {
+      const response = await fetch(sourceUrl, { credentials: 'include' });
+      if (!response.ok) return;
+      const cache = await caches.open(this.voiceOfflineCacheStore);
+      await cache.put(sourceUrl, response.clone());
+      this.touchVoiceOfflineCacheEntry(sourceUrl);
+
+      const overflow = this.voiceOfflineCacheIndex.slice(this.voiceOfflineCacheLimit);
+      this.voiceOfflineCacheIndex = this.voiceOfflineCacheIndex.slice(0, this.voiceOfflineCacheLimit);
+      this.voiceOfflineCachedUrlSet = new Set(this.voiceOfflineCacheIndex.map((item) => item.url));
+
+      for (const item of overflow) {
+        await cache.delete(item.url);
+        const blobUrl = this.voiceOfflineBlobUrlBySource[item.url];
+        if (blobUrl) {
+          try {
+            URL.revokeObjectURL(blobUrl);
+          } catch {
+            // no-op
+          }
+          delete this.voiceOfflineBlobUrlBySource[item.url];
+        }
+      }
+
+      this.persistVoiceOfflineCacheIndex();
+    } catch {
+      // no-op
+    } finally {
+      this.voiceOfflineCacheLoading.delete(sourceUrl);
+    }
+  }
+
+  private async restoreVoiceSourceFromOfflineCache(attachment: ChatMessage['attachment'], audio: HTMLAudioElement): Promise<void> {
+    if (!this.offlineVoiceCacheEnabled || !attachment?.url || !audio || !('caches' in window)) return;
+    const sourceUrl = this.attachmentUrl(attachment);
+    if (!sourceUrl) return;
+
+    const cachedBlobUrl = await this.cachedVoiceBlobUrlForSource(sourceUrl);
+    if (!cachedBlobUrl) return;
+
+    if (audio.src === cachedBlobUrl) return;
+
+    const shouldResume = !audio.paused;
+    const state = this.voiceUiState(attachment);
+    const restoreTime = Math.max(0, Number(audio.currentTime || state.currentTime || 0));
+    audio.src = cachedBlobUrl;
+    audio.load();
+
+    const restoreAfterMetadata = () => {
+      try {
+        audio.currentTime = restoreTime;
+      } catch {
+        // no-op
+      }
+      if (shouldResume) {
+        void audio.play();
+      }
+      audio.removeEventListener('loadedmetadata', restoreAfterMetadata);
+    };
+
+    audio.addEventListener('loadedmetadata', restoreAfterMetadata);
+    this.touchVoiceOfflineCacheEntry(sourceUrl);
+    this.persistVoiceOfflineCacheIndex();
+  }
+
+  private async cachedVoiceBlobUrlForSource(sourceUrl: string): Promise<string | null> {
+    if (!sourceUrl || !('caches' in window)) return null;
+    const existing = this.voiceOfflineBlobUrlBySource[sourceUrl];
+    if (existing) return existing;
+
+    try {
+      const cache = await caches.open(this.voiceOfflineCacheStore);
+      const match = await cache.match(sourceUrl);
+      if (!match) {
+        this.voiceOfflineCacheIndex = this.voiceOfflineCacheIndex.filter((item) => item.url !== sourceUrl);
+        this.voiceOfflineCachedUrlSet.delete(sourceUrl);
+        this.persistVoiceOfflineCacheIndex();
+        return null;
+      }
+      const blob = await match.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      this.voiceOfflineBlobUrlBySource[sourceUrl] = blobUrl;
+      return blobUrl;
+    } catch {
+      return null;
+    }
+  }
+
+  private touchVoiceOfflineCacheEntry(sourceUrl: string) {
+    if (!sourceUrl) return;
+    this.voiceOfflineCacheIndex = [
+      { url: sourceUrl, cachedAt: Date.now() },
+      ...this.voiceOfflineCacheIndex.filter((item) => item.url !== sourceUrl)
+    ];
+    this.voiceOfflineCachedUrlSet.add(sourceUrl);
+  }
+
+  private maybeEmitPrivateAudioPlaybackReceipt(
+    message: ChatMessage,
+    attachment: ChatMessage['attachment'],
+    currentTimeSeconds: number,
+    durationSeconds: number,
+    force = false
+  ) {
+    if (!message?.id || !attachment) return;
+    if (!message.to || message.to !== this.myUsername) return;
+    if (message.from === this.myUsername) return;
+    if (!this.isAudioAttachment(attachment)) return;
+
+    const duration = Math.max(0, Number(durationSeconds || attachment.durationSeconds || 0));
+    const current = Math.max(0, Number(currentTimeSeconds || 0));
+    if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(current) || current <= 0) return;
+
+    const progress = Math.max(0, Math.min(1, current / duration));
+    if (progress < 0.03) return;
+
+    const now = Date.now();
+    const previous = this.voicePlaybackEmitStateByMessageId[message.id] || { at: 0, progress: 0 };
+    const steppedProgress = Math.max(previous.progress, Math.round(progress * 100) / 100);
+    const shouldEmit = force
+      || steppedProgress >= 0.99
+      || steppedProgress >= previous.progress + 0.05
+      || now - previous.at >= 10000;
+    if (!shouldEmit) return;
+
+    this.voicePlaybackEmitStateByMessageId[message.id] = {
+      at: now,
+      progress: steppedProgress
+    };
+
+    this.socket.emitEvent('audioPlaybackProgress', {
+      id: message.id,
+      progress: steppedProgress,
+      currentTimeSeconds: Math.round(current),
+      durationSeconds: Math.round(duration),
+      attachmentKey: this.voiceAttachmentKey(attachment)
+    });
+  }
+
+  private applyVoiceSilenceSkip(
+    key: string,
+    attachment: ChatMessage['attachment'],
+    audio: HTMLAudioElement,
+    resolvedDuration: number
+  ) {
+    if (!attachment) return;
+    const duration = Math.max(0, Number(resolvedDuration || attachment.durationSeconds || audio.duration || 0));
+    if (!Number.isFinite(duration) || duration <= 1.5) return;
+    if (this.voiceWaveformQualityByKey[key] !== 'real') return;
+
+    let ranges = this.voiceSilenceRangesByKey[key];
+    if (!Array.isArray(ranges) || !ranges.length) {
+      const bars = this.voiceWaveformSourceBars(attachment);
+      ranges = this.buildVoiceSilenceRangesFromBars(bars, duration);
+      this.voiceSilenceRangesByKey[key] = ranges;
+    }
+    if (!ranges.length) return;
+
+    const now = Date.now();
+    const last = Number(this.voiceLastSilenceSkipAtByKey[key] || 0);
+    if (now - last < 150) return;
+
+    const currentTime = Number(audio.currentTime || 0);
+    const hit = ranges.find((range) => currentTime >= range.start && currentTime < (range.end - 0.05));
+    if (!hit) return;
+
+    const jumpTo = Math.min(duration - 0.04, hit.end + 0.03);
+    if (!(jumpTo > currentTime + 0.1)) return;
+
+    try {
+      audio.currentTime = jumpTo;
+      this.voiceLastSilenceSkipAtByKey[key] = now;
+    } catch {
+      // no-op
+    }
+  }
+
+  private buildVoiceSilenceRangesFromBars(bars: number[], durationSeconds: number): Array<{ start: number; end: number }> {
+    if (!Array.isArray(bars) || !bars.length || !Number.isFinite(durationSeconds) || durationSeconds <= 0) return [];
+    const minBar = Math.min(...bars);
+    const maxBar = Math.max(...bars);
+    const threshold = minBar + Math.max(1, (maxBar - minBar) * 0.18);
+    const minRunBars = Math.max(2, Math.floor(bars.length * 0.035));
+    const ranges: Array<{ start: number; end: number }> = [];
+
+    let runStart = -1;
+    for (let i = 0; i < bars.length; i += 1) {
+      const isSilent = Number(bars[i]) <= threshold;
+      if (isSilent) {
+        if (runStart < 0) runStart = i;
+        continue;
+      }
+
+      if (runStart >= 0) {
+        const runLength = i - runStart;
+        if (runLength >= minRunBars) {
+          const start = (runStart / bars.length) * durationSeconds;
+          const end = (i / bars.length) * durationSeconds;
+          if (end - start >= 0.35) ranges.push({ start, end });
+        }
+        runStart = -1;
+      }
+    }
+
+    if (runStart >= 0) {
+      const runLength = bars.length - runStart;
+      if (runLength >= minRunBars) {
+        const start = (runStart / bars.length) * durationSeconds;
+        const end = durationSeconds;
+        if (end - start >= 0.35) ranges.push({ start, end });
+      }
+    }
+
+    return ranges;
+  }
+
   private firstVoiceAudioElement(key: string): HTMLAudioElement | null {
     if (!key) return null;
     return document.querySelector(`audio[data-voice-audio-key="${key}"]`) as HTMLAudioElement | null;
@@ -2127,6 +3550,7 @@ export class ChatComponent implements AfterViewChecked {
 
   private seekVoiceToRatio(attachment: ChatMessage['attachment'], ratio: number, audioEl?: HTMLAudioElement | null) {
     const key = this.voiceAttachmentKey(attachment);
+    this.activeVoiceKey = key;
     const audio = this.resolveVoiceAudioElement(key, audioEl);
     if (!audio) return;
 
@@ -2258,6 +3682,9 @@ export class ChatComponent implements AfterViewChecked {
       state.playing = !audio.paused;
       state.muted = !!audio.muted;
       state.volume = Number.isFinite(audio.volume) ? audio.volume : state.volume;
+      if (this.voiceSilenceSkipEnabled && !audio.paused && !audio.ended) {
+        this.applyVoiceSilenceSkip(key, attachment, audio, state.duration);
+      }
       if (attachment && state.duration > 0 && (!attachment.durationSeconds || attachment.durationSeconds <= 0)) {
         attachment.durationSeconds = Math.max(1, Math.round(state.duration));
       }
@@ -2274,7 +3701,7 @@ export class ChatComponent implements AfterViewChecked {
     this.voiceProgressTimers.delete(key);
   }
 
-  private async generateVoiceWaveform(sourceUrl: string): Promise<number[]> {
+  private async generateVoiceWaveform(sourceUrl: string, attachment?: ChatMessage['attachment']): Promise<number[]> {
     if (!sourceUrl) return this.defaultVoiceWaveform;
     const response = await fetch(sourceUrl);
     if (!response.ok) throw new Error('Waveform fetch failed');
@@ -2286,6 +3713,14 @@ export class ChatComponent implements AfterViewChecked {
     try {
       const decoded = await context.decodeAudioData(buffer.slice(0));
       const channelData = decoded.getChannelData(0);
+      this.ensureVoiceInsightsKnown(attachment || null, {
+        sampleRateHz: Number(decoded?.sampleRate || 0) || undefined,
+        channels: Number(decoded?.numberOfChannels || 0) || undefined,
+        bitrateKbps: this.approximateAudioBitrateKbps(
+          Number(attachment?.size || 0),
+          Number(decoded?.duration || attachment?.durationSeconds || 0)
+        ) || undefined
+      });
       if (!channelData?.length) return this.defaultVoiceWaveform;
       return this.buildWaveformFromChannelData(channelData, 48);
     } finally {
@@ -3805,11 +5240,13 @@ export class ChatComponent implements AfterViewChecked {
     await this.openChat(username);
 
     if (quoted?.id && !quoted.deletedAt) {
+      const referenceAttachments = this.messageAttachments(quoted);
       this.replyingTo = {
         messageId: quoted.id,
         from: quoted.from,
         text: this.messageReplySeedText(quoted),
-        attachment: this.messageAttachments(quoted)[0] || null,
+        attachment: this.preferredReferenceAttachment(referenceAttachments),
+        attachments: referenceAttachments,
         scope: 'private',
         sourceScope: 'public',
         privatePeer: username
@@ -3986,30 +5423,134 @@ export class ChatComponent implements AfterViewChecked {
 
   @HostListener('document:keydown', ['$event'])
   onDocumentKeydown(event: KeyboardEvent) {
-    if (!this.imageViewerTarget) return;
+    if (this.imageViewerTarget) {
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        this.viewerPrev();
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        this.viewerNext();
+      }
+      if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
+        this.viewerZoomIn();
+      }
+      if (event.key === '-') {
+        event.preventDefault();
+        this.viewerZoomOut();
+      }
+      if (event.key.toLowerCase() === '0') {
+        event.preventDefault();
+        this.viewerZoomReset();
+      }
+      if (event.key === '?' && this.imageViewerTarget) {
+        event.preventDefault();
+        this.showViewerShortcutHints = !this.showViewerShortcutHints;
+      }
+      return;
+    }
+
+    if (this.voiceDraft && (event.key === 'Enter' || event.code === 'Enter' || event.code === 'NumpadEnter')) {
+      if (!(event.ctrlKey || event.altKey || event.metaKey || event.shiftKey)) {
+        event.preventDefault();
+        event.stopPropagation();
+        void this.commitVoiceDraft();
+      }
+      return;
+    }
+
+    if (!this.voiceKeyboardControlsEnabled || this.shouldIgnoreVoiceShortcut(event)) return;
+    const attachment = this.activeVoiceAttachment();
+    if (!attachment) return;
+
+    if (event.key === ' ' || event.code === 'Space') {
+      event.preventDefault();
+      this.toggleVoicePlay(attachment);
+      return;
+    }
+
     if (event.key === 'ArrowLeft') {
       event.preventDefault();
-      this.viewerPrev();
+      this.nudgeVoicePosition(attachment, -5);
+      return;
     }
+
     if (event.key === 'ArrowRight') {
       event.preventDefault();
-      this.viewerNext();
+      this.nudgeVoicePosition(attachment, 5);
+      return;
     }
-    if (event.key === '+' || event.key === '=') {
+
+    if (event.key === '[') {
       event.preventDefault();
-      this.viewerZoomIn();
+      this.setVoicePlaybackRate(attachment, this.voicePlaybackRate(attachment) - 0.5);
+      return;
     }
-    if (event.key === '-') {
+
+    if (event.key === ']') {
       event.preventDefault();
-      this.viewerZoomOut();
+      this.setVoicePlaybackRate(attachment, this.voicePlaybackRate(attachment) + 0.5);
+      return;
     }
-    if (event.key.toLowerCase() === '0') {
+
+    if (event.key.toLowerCase() === 'm') {
       event.preventDefault();
-      this.viewerZoomReset();
+      this.toggleVoiceMute(attachment);
+      return;
     }
-    if (event.key === '?' && this.imageViewerTarget) {
+
+    if (event.key === 'ArrowUp') {
       event.preventDefault();
-      this.showViewerShortcutHints = !this.showViewerShortcutHints;
+      this.setVoiceVolume(attachment, Math.min(100, this.voiceVolumePercent(attachment) + 10));
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      this.setVoiceVolume(attachment, Math.max(0, this.voiceVolumePercent(attachment) - 10));
+    }
+  }
+
+  private shouldIgnoreVoiceShortcut(event: KeyboardEvent): boolean {
+    if (event.defaultPrevented) return true;
+    if (event.ctrlKey || event.altKey || event.metaKey) return true;
+    const target = event.target as HTMLElement | null;
+    if (!target) return false;
+    const tag = String(target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button' || tag === 'a' || target.isContentEditable) return true;
+    return false;
+  }
+
+  private activeVoiceAttachment(): Attachment | null {
+    const key = this.activeVoiceKey || '';
+    if (!key) return null;
+    const attachment = this.voiceAttachmentByKey[key] || null;
+    if (!attachment) return null;
+    return attachment;
+  }
+
+  private nudgeVoicePosition(attachment: ChatMessage['attachment'], deltaSeconds: number) {
+    if (!attachment) return;
+    const key = this.voiceAttachmentKey(attachment);
+    const audio = this.resolveVoiceAudioElement(key, null);
+    if (!audio) return;
+    const duration = Math.max(
+      0,
+      Number(this.resolveVoiceDuration(audio, attachment) || this.voiceUiState(attachment).duration || attachment.durationSeconds || 0)
+    );
+    const current = Number(audio.currentTime || this.voiceUiState(attachment).currentTime || 0);
+    const next = Math.max(0, Math.min(duration > 0 ? duration : Math.max(current + Math.abs(deltaSeconds), 1), current + deltaSeconds));
+    if (duration > 0) {
+      const ratio = Math.max(0, Math.min(1, next / duration));
+      this.seekVoiceToRatio(attachment, ratio, audio);
+      return;
+    }
+
+    try {
+      audio.currentTime = next;
+    } catch {
+      // no-op
     }
   }
 
@@ -4029,6 +5570,7 @@ export class ChatComponent implements AfterViewChecked {
   @HostListener('document:pointerup', ['$event'])
   onDocumentPointerUp(event: PointerEvent) {
     this.finishVoiceWaveformSeek(event);
+    this.finishVoiceDraftTrimDrag(event);
   }
 
   private loadUnreadCounts() {
@@ -4185,100 +5727,76 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   private normalizeMessage(message: ChatMessage): ChatMessage {
+    const normalizeAttachment = (a: any): Attachment | null => {
+      if (!a?.url) return null;
+      return {
+        url: a.url,
+        name: a.name || 'Attachment',
+        mimeType: a.mimeType || 'application/octet-stream',
+        size: Number(a.size || 0),
+        isImage: !!a.isImage,
+        durationSeconds: Number(a.durationSeconds || 0) || undefined,
+        waveform: Array.isArray(a.waveform)
+          ? a.waveform.map((x: unknown) => Number(x)).filter((x: number) => Number.isFinite(x) && x > 0).slice(0, 96)
+          : undefined,
+        audioKind: a.audioKind === 'voice-note' || a.audioKind === 'uploaded-audio' ? a.audioKind : undefined,
+        width: Number(a.width || 0) || undefined,
+        height: Number(a.height || 0) || undefined,
+        storageProvider: a.storageProvider,
+        objectKey: a.objectKey
+      };
+    };
+
+    const normalizeAttachments = (list?: any[] | null, fallback?: any): Attachment[] => {
+      const fromArray = Array.isArray(list) ? list : [];
+      const normalized = fromArray
+        .map((a) => normalizeAttachment(a))
+        .filter((a): a is Attachment => !!a?.url);
+      if (normalized.length) return normalized;
+      const single = normalizeAttachment(fallback);
+      return single ? [single] : [];
+    };
+
+    const normalizeReference = (
+      ref: any,
+      fallbackScope: 'public' | 'private'
+    ): { messageId: string; from: string; text: string; scope: 'public' | 'private'; attachment?: Attachment | null; attachments?: Attachment[] } | null => {
+      if (!ref?.messageId) return null;
+      const attachments = normalizeAttachments(ref.attachments, ref.attachment);
+      return {
+        messageId: ref.messageId,
+        from: ref.from || '',
+        text: String(ref.text || '').trim().slice(0, 160),
+        scope: ref.scope || fallbackScope,
+        attachment: this.preferredReferenceAttachment(attachments),
+        attachments
+      };
+    };
+
+    const normalizeAudioPlayback = (playback: any) => {
+      if (!playback || typeof playback !== 'object') return null;
+      const progress = Number(playback.progress || 0);
+      if (!Number.isFinite(progress) || progress <= 0) return null;
+      return {
+        by: String(playback.by || ''),
+        progress: Math.max(0, Math.min(1, progress)),
+        currentTimeSeconds: Math.max(0, Number(playback.currentTimeSeconds || 0) || 0),
+        durationSeconds: Math.max(0, Number(playback.durationSeconds || 0) || 0),
+        attachmentKey: String(playback.attachmentKey || ''),
+        listenedAt: playback.listenedAt || null
+      };
+    };
+
+    const normalizedAttachments = normalizeAttachments(message.attachments, message.attachment);
+
     return {
       ...message,
-      replyTo: message.replyTo?.messageId
-        ? {
-          messageId: message.replyTo.messageId,
-          from: message.replyTo.from || '',
-          text: String(message.replyTo.text || '').trim().slice(0, 160),
-          scope: message.replyTo.scope || 'private',
-          attachment: message.replyTo.attachment?.url
-            ? {
-              url: message.replyTo.attachment.url,
-              name: message.replyTo.attachment.name || 'Attachment',
-              mimeType: message.replyTo.attachment.mimeType || 'application/octet-stream',
-              size: Number(message.replyTo.attachment.size || 0),
-              isImage: !!message.replyTo.attachment.isImage,
-              durationSeconds: Number(message.replyTo.attachment.durationSeconds || 0) || undefined,
-              waveform: Array.isArray(message.replyTo.attachment.waveform)
-                ? message.replyTo.attachment.waveform.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 96)
-                : undefined,
-              width: Number(message.replyTo.attachment.width || 0) || undefined,
-              height: Number(message.replyTo.attachment.height || 0) || undefined,
-              storageProvider: message.replyTo.attachment.storageProvider,
-              objectKey: message.replyTo.attachment.objectKey
-            }
-            : null
-        }
-        : null,
-      forwardedFrom: message.forwardedFrom?.messageId
-        ? {
-          messageId: message.forwardedFrom.messageId,
-          from: message.forwardedFrom.from || '',
-          text: String(message.forwardedFrom.text || '').trim().slice(0, 160),
-          scope: message.forwardedFrom.scope || 'private',
-          attachment: message.forwardedFrom.attachment?.url
-            ? {
-              url: message.forwardedFrom.attachment.url,
-              name: message.forwardedFrom.attachment.name || 'Attachment',
-              mimeType: message.forwardedFrom.attachment.mimeType || 'application/octet-stream',
-              size: Number(message.forwardedFrom.attachment.size || 0),
-              isImage: !!message.forwardedFrom.attachment.isImage,
-              durationSeconds: Number(message.forwardedFrom.attachment.durationSeconds || 0) || undefined,
-              waveform: Array.isArray(message.forwardedFrom.attachment.waveform)
-                ? message.forwardedFrom.attachment.waveform.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 96)
-                : undefined,
-              width: Number(message.forwardedFrom.attachment.width || 0) || undefined,
-              height: Number(message.forwardedFrom.attachment.height || 0) || undefined,
-              storageProvider: message.forwardedFrom.attachment.storageProvider,
-              objectKey: message.forwardedFrom.attachment.objectKey
-            }
-            : null
-        }
-        : null,
-      attachment: message.attachment?.url
-        ? {
-          url: message.attachment.url,
-          name: message.attachment.name || 'Attachment',
-          mimeType: message.attachment.mimeType || 'application/octet-stream',
-          size: Number(message.attachment.size || 0),
-          isImage: !!message.attachment.isImage,
-          durationSeconds: Number(message.attachment.durationSeconds || 0) || undefined,
-          waveform: Array.isArray(message.attachment.waveform)
-            ? message.attachment.waveform.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 96)
-            : undefined,
-          width: Number(message.attachment.width || 0) || undefined,
-          height: Number(message.attachment.height || 0) || undefined,
-          storageProvider: message.attachment.storageProvider,
-          objectKey: message.attachment.objectKey
-        }
-        : null,
-      attachments: (
-        (message.attachments && message.attachments.length)
-          ? message.attachments
-          : (message.attachment ? [message.attachment] : [])
-      )
-        .reduce((acc, a) => {
-          if (!a?.url) return acc;
-          acc.push({
-            url: a.url,
-            name: a.name || 'Attachment',
-            mimeType: a.mimeType || 'application/octet-stream',
-            size: Number(a.size || 0),
-            isImage: !!a.isImage,
-            durationSeconds: Number(a.durationSeconds || 0) || undefined,
-            waveform: Array.isArray(a.waveform)
-              ? a.waveform.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 96)
-              : undefined,
-            width: Number(a.width || 0) || undefined,
-            height: Number(a.height || 0) || undefined,
-            storageProvider: a.storageProvider,
-            objectKey: a.objectKey
-          });
-          return acc;
-        }, [] as Attachment[]),
+      replyTo: normalizeReference(message.replyTo, 'private'),
+      forwardedFrom: normalizeReference(message.forwardedFrom, 'private'),
+      attachment: this.preferredReferenceAttachment(normalizedAttachments),
+      attachments: normalizedAttachments,
       readAt: message.readAt || null,
+      audioPlayback: normalizeAudioPlayback((message as any).audioPlayback),
       editedAt: message.editedAt || null,
       deletedAt: message.deletedAt || null,
       reactions: (message.reactions || []).map((r) => ({
@@ -4286,6 +5804,55 @@ export class ChatComponent implements AfterViewChecked {
         users: Array.from(new Set(r.users || []))
       }))
     };
+  }
+
+  messageHasAudioAttachment(message: ChatMessage): boolean {
+    return this.messageAttachments(message).some((attachment) => this.isAudioAttachment(attachment));
+  }
+
+  audioPlaybackReceiptLabel(message: ChatMessage): string {
+    if (!message || message.from !== this.myUsername) return '';
+    if (!this.messageHasAudioAttachment(message)) return '';
+    const playback = (message as any).audioPlayback;
+    const progress = Number(playback?.progress || 0);
+    if (!Number.isFinite(progress) || progress <= 0) return '';
+    if (progress >= 0.995) return 'Played';
+    return `Played ${Math.max(1, Math.round(progress * 100))}%`;
+  }
+
+  private applyPrivateAudioPlaybackReceipt(payload: {
+    id: string;
+    by?: string;
+    progress?: number;
+    currentTimeSeconds?: number;
+    durationSeconds?: number;
+    attachmentKey?: string;
+    listenedAt?: string | null;
+  }) {
+    if (!payload?.id) return;
+    const progress = Number(payload.progress || 0);
+    if (!Number.isFinite(progress) || progress <= 0) return;
+
+    const patch = (message: ChatMessage): ChatMessage => {
+      if (message.id !== payload.id) return message;
+      const previous = Number((message as any).audioPlayback?.progress || 0);
+      const nextProgress = Math.max(previous, Math.max(0, Math.min(1, progress)));
+      return {
+        ...message,
+        audioPlayback: {
+          by: String(payload.by || ''),
+          progress: nextProgress,
+          currentTimeSeconds: Math.max(0, Number(payload.currentTimeSeconds || 0) || 0),
+          durationSeconds: Math.max(0, Number(payload.durationSeconds || 0) || 0),
+          attachmentKey: String(payload.attachmentKey || ''),
+          listenedAt: payload.listenedAt || new Date().toISOString()
+        }
+      } as ChatMessage;
+    };
+
+    Object.keys(this.privateChats).forEach((user) => {
+      this.privateChats[user] = (this.privateChats[user] || []).map(patch);
+    });
   }
 
   private applyReactionUpdate(
@@ -4671,7 +6238,10 @@ export class ChatComponent implements AfterViewChecked {
     const text = String(message.text || '').trim();
     if (text) return text.slice(0, 160);
 
-    const attachmentName = String(this.messageAttachments(message)[0]?.name || '').trim();
+    const list = this.messageAttachments(message);
+    if (list.length > 1) return `[Attachments] ${list.length} files`.slice(0, 160);
+
+    const attachmentName = String(list[0]?.name || '').trim();
     if (attachmentName) return `[Attachment] ${attachmentName}`.slice(0, 160);
 
     return '';
@@ -4749,6 +6319,10 @@ export class ChatComponent implements AfterViewChecked {
         autoplayMediaPreviews?: boolean;
         autoOpenPrivateMediaTimeline?: boolean;
         hideMediaPreviewsByDefault?: boolean;
+        voiceAutoPlayNext?: boolean;
+        voiceSilenceSkipEnabled?: boolean;
+        voiceKeyboardControlsEnabled?: boolean;
+        offlineVoiceCacheEnabled?: boolean;
         pendingAttachments?: Attachment[];
         uploadErrors?: string[];
         failedNames?: string[];
@@ -4766,6 +6340,18 @@ export class ChatComponent implements AfterViewChecked {
       if (typeof parsed.hideMediaPreviewsByDefault === 'boolean') {
         this.hideMediaPreviewsByDefault = parsed.hideMediaPreviewsByDefault;
       }
+      if (typeof parsed.voiceAutoPlayNext === 'boolean') {
+        this.voiceAutoPlayNext = parsed.voiceAutoPlayNext;
+      }
+      if (typeof parsed.voiceSilenceSkipEnabled === 'boolean') {
+        this.voiceSilenceSkipEnabled = parsed.voiceSilenceSkipEnabled;
+      }
+      if (typeof parsed.voiceKeyboardControlsEnabled === 'boolean') {
+        this.voiceKeyboardControlsEnabled = parsed.voiceKeyboardControlsEnabled;
+      }
+      if (typeof parsed.offlineVoiceCacheEnabled === 'boolean') {
+        this.offlineVoiceCacheEnabled = parsed.offlineVoiceCacheEnabled;
+      }
 
       if (Array.isArray(parsed.pendingAttachments)) {
         this.pendingAttachments = parsed.pendingAttachments
@@ -4781,6 +6367,7 @@ export class ChatComponent implements AfterViewChecked {
               waveform: Array.isArray(a.waveform)
                 ? a.waveform.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 96)
                 : undefined,
+              audioKind: a.audioKind === 'voice-note' || a.audioKind === 'uploaded-audio' ? a.audioKind : undefined,
               width: Number(a.width || 0) || undefined,
               height: Number(a.height || 0) || undefined,
               storageProvider: a.storageProvider,
@@ -4810,11 +6397,48 @@ export class ChatComponent implements AfterViewChecked {
         autoplayMediaPreviews: this.autoplayMediaPreviews,
         autoOpenPrivateMediaTimeline: this.autoOpenPrivateMediaTimeline,
         hideMediaPreviewsByDefault: this.hideMediaPreviewsByDefault,
+        voiceAutoPlayNext: this.voiceAutoPlayNext,
+        voiceSilenceSkipEnabled: this.voiceSilenceSkipEnabled,
+        voiceKeyboardControlsEnabled: this.voiceKeyboardControlsEnabled,
+        offlineVoiceCacheEnabled: this.offlineVoiceCacheEnabled,
         pendingAttachments: this.pendingAttachments.slice(0, 20),
         uploadErrors: this.uploadErrors.slice(0, 4),
         failedNames: this.persistedFailedUploadNames.slice(0, 8)
       };
       localStorage.setItem(UPLOAD_UI_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // no-op
+    }
+  }
+
+  private loadVoiceOfflineCacheIndex() {
+    try {
+      const raw = localStorage.getItem(VOICE_CACHE_INDEX_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Array<{ url?: string; cachedAt?: number }>;
+      if (!Array.isArray(parsed)) return;
+
+      this.voiceOfflineCacheIndex = parsed
+        .map((item) => ({
+          url: String(item?.url || '').trim(),
+          cachedAt: Number(item?.cachedAt || 0) || 0
+        }))
+        .filter((item) => !!item.url)
+        .sort((a, b) => b.cachedAt - a.cachedAt)
+        .slice(0, this.voiceOfflineCacheLimit);
+
+      this.voiceOfflineCachedUrlSet = new Set(this.voiceOfflineCacheIndex.map((item) => item.url));
+    } catch {
+      // no-op
+    }
+  }
+
+  private persistVoiceOfflineCacheIndex() {
+    try {
+      localStorage.setItem(
+        VOICE_CACHE_INDEX_STORAGE_KEY,
+        JSON.stringify(this.voiceOfflineCacheIndex.slice(0, this.voiceOfflineCacheLimit))
+      );
     } catch {
       // no-op
     }
@@ -4936,12 +6560,14 @@ export class ChatComponent implements AfterViewChecked {
   private activeReplyPayload(scope: 'public' | 'private') {
     if (!this.replyingTo || this.replyingTo.scope !== scope) return null;
     if (scope === 'private' && this.replyingTo.privatePeer !== this.selectedUser) return null;
+    const replyAttachments = this.referenceAttachments(this.replyingTo);
     return {
       messageId: this.replyingTo.messageId,
       from: this.replyingTo.from,
       text: String(this.replyingTo.text || '').trim().slice(0, 160),
       scope: this.replyingTo.sourceScope,
-      attachment: this.replyingTo.attachment
+      attachment: this.preferredReferenceAttachment(replyAttachments) || this.replyingTo.attachment,
+      attachments: replyAttachments
     };
   }
 
