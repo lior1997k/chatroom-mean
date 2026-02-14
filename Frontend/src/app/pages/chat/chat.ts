@@ -154,6 +154,7 @@ export class ChatComponent implements AfterViewChecked {
   private hiddenAttachmentPreviewKeys = new Set<string>();
   private temporaryExpandedAlbumKeys = new Set<string>();
   private albumCollapseTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private durationRecheckTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     private socket: SocketService,
@@ -333,6 +334,8 @@ export class ChatComponent implements AfterViewChecked {
     this.privateTypingTimeouts.clear();
     this.albumCollapseTimers.forEach((t) => clearTimeout(t));
     this.albumCollapseTimers.clear();
+    this.durationRecheckTimers.forEach((t) => clearTimeout(t));
+    this.durationRecheckTimers.clear();
     this.stopHourglassAnimation();
   }
 
@@ -779,7 +782,7 @@ export class ChatComponent implements AfterViewChecked {
         const rawDuration = Number(durationOverride || (media instanceof HTMLVideoElement ? media.duration : 0));
         cleanup();
         resolve({
-          durationSeconds: Number.isFinite(rawDuration) && rawDuration > 0 ? Math.round(rawDuration) : undefined,
+          durationSeconds: Number.isFinite(rawDuration) && rawDuration > 0 ? Math.floor(rawDuration) : undefined,
           width: Number.isFinite(width) && width > 0 ? Math.round(width) : undefined,
           height: Number.isFinite(height) && height > 0 ? Math.round(height) : undefined
         });
@@ -1344,12 +1347,31 @@ export class ChatComponent implements AfterViewChecked {
     const video = event.target as HTMLVideoElement | null;
     if (!video) return;
 
-    const duration = Math.round(Number(video.duration || 0));
-    if (!Number.isFinite(duration) || duration <= 0) return;
+    const applyDuration = () => {
+      const raw = Number(video.duration || 0);
+      const duration = Math.floor(raw);
+      if (!Number.isFinite(duration) || duration <= 0) return;
+      const current = Number(attachment.durationSeconds || 0);
+      if (!current || Math.abs(current - duration) >= 1) {
+        attachment.durationSeconds = duration;
+      }
+    };
 
-    const current = Number(attachment.durationSeconds || 0);
-    if (!current || Math.abs(current - duration) >= 2) {
-      attachment.durationSeconds = duration;
+    applyDuration();
+    video.addEventListener('durationchange', applyDuration, { once: true });
+    video.addEventListener('canplay', applyDuration, { once: true });
+
+    const key = String(attachment.url || '');
+    const prev = this.durationRecheckTimers.get(key);
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => {
+      applyDuration();
+      this.durationRecheckTimers.delete(key);
+    }, 1400);
+    this.durationRecheckTimers.set(key, timer);
+
+    if (!video.paused) {
+      setTimeout(() => applyDuration(), 2200);
     }
   }
 
