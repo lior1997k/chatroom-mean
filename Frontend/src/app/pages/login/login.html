@@ -49,10 +49,12 @@
       <div class="socialDivider" *ngIf="googleSignInEnabled || appleSignInEnabled"><span>or</span></div>
       <div class="socialRow" *ngIf="googleSignInEnabled || appleSignInEnabled">
         <button type="button" class="social-btn" *ngIf="googleSignInEnabled" (click)="signInWithGoogle()" [disabled]="submitting || !!socialBusy">
-          Continue with Google
+          <span class="social-icon google">G</span>
+          <span>Continue with Google</span>
         </button>
         <button type="button" class="social-btn" *ngIf="appleSignInEnabled" (click)="signInWithApple()" [disabled]="submitting || !!socialBusy">
-          Continue with Apple
+          <span class="social-icon apple">&#63743;</span>
+          <span>Continue with Apple</span>
         </button>
       </div>
 
