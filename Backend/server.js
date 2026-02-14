@@ -3,7 +3,6 @@ const cors = require('cors');
 const http = require('http');
 const socketIo = require('socket.io');
 const mongoose = require('mongoose');
-const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
@@ -22,6 +21,7 @@ const privateRoutes = require('./routes/private');
 const publicRoutes = require('./routes/public');
 const searchRoutes = require('./routes/search');
 const auth = require('./middleware/auth');
+const { verifyAccessToken } = require('./utils/jwt');
 
 const app = express();
 const server = http.createServer(app);
@@ -879,7 +879,7 @@ io.use((socket, next) => {
   const token = socket.handshake.query.token || socket.handshake.auth?.token;
   if (!token) return next(new Error('AUTH_REQUIRED'));
   try {
-    const user = jwt.verify(token, process.env.JWT_SECRET);
+    const user = verifyAccessToken(String(token));
     socket.user = user; // { id, username }
     next();
   } catch (e) {

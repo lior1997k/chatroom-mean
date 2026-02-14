@@ -5,7 +5,9 @@ const nodemailer = require('nodemailer');
 const { OAuth2Client } = require('google-auth-library');
 const appleSignin = require('apple-signin-auth');
 const User = require('../models/User');
-const { signToken } = require('../utils/jwt');
+const AuthSession = require('../models/AuthSession');
+const { signAccessToken, refreshTokenExpiresAt, refreshTokenTtlMs } = require('../utils/jwt');
+const auth = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -121,6 +123,51 @@ function getMailTransport() {
 
 function hashVerificationToken(rawToken) {
   return crypto.createHash('sha256').update(String(rawToken || '')).digest('hex');
+}
+
+function createRefreshTokenRaw() {
+  return crypto.randomBytes(48).toString('hex');
+}
+
+function hashRefreshToken(rawToken) {
+  return hashVerificationToken(rawToken);
+}
+
+function clientIp(req) {
+  return String(req.ip || req.headers['x-forwarded-for'] || '').slice(0, 120);
+}
+
+async function issueSessionTokens(user, req, options = {}) {
+  const rawRefreshToken = createRefreshTokenRaw();
+  const refreshTokenHash = hashRefreshToken(rawRefreshToken);
+  const tokenFamily = String(options.tokenFamily || crypto.randomUUID());
+  const session = await AuthSession.create({
+    userId: user._id,
+    refreshTokenHash,
+    tokenFamily,
+    expiresAt: refreshTokenExpiresAt(),
+    userAgent: String(req.headers['user-agent'] || '').slice(0, 500),
+    ip: clientIp(req)
+  });
+
+  if (options.replacesSessionId) {
+    await AuthSession.updateOne(
+      { _id: options.replacesSessionId, userId: user._id, revokedAt: null },
+      { $set: { revokedAt: new Date(), replacedBySessionId: session._id } }
+    );
+  }
+
+  const token = signAccessToken({
+    id: user._id,
+    username: user.username,
+    sid: session._id.toString()
+  });
+
+  return {
+    token,
+    refreshToken: rawRefreshToken,
+    refreshTokenExpiresInMs: refreshTokenTtlMs()
+  };
 }
 
 function createEmailVerificationToken() {
@@ -365,12 +412,14 @@ async function findOrCreateSocialUser(profile, requestedUsernameRaw) {
   if (profile.email && profile.emailVerified) user.emailVerified = true;
   await user.save();
 
-  const token = signToken({ id: user._id, username: user.username });
+  const sessionTokens = await issueSessionTokens(user, req);
   return {
     status: 200,
     body: {
       message: `${profile.provider} login successful`,
-      token,
+      token: sessionTokens.token,
+      refreshToken: sessionTokens.refreshToken,
+      refreshTokenExpiresInMs: sessionTokens.refreshTokenExpiresInMs,
       user: safeUserResponse(user)
     }
   };
@@ -566,10 +615,12 @@ router.post('/login', async (req, res) => {
     user.lastLoginAt = new Date();
     await user.save();
 
-    const token = signToken({ id: user._id, username: user.username });
+    const sessionTokens = await issueSessionTokens(user, req);
     res.json({
       message: 'Login successful',
-      token,
+      token: sessionTokens.token,
+      refreshToken: sessionTokens.refreshToken,
+      refreshTokenExpiresInMs: sessionTokens.refreshTokenExpiresInMs,
       user: safeUserResponse(user)
     });
   } catch (err) {
@@ -578,6 +629,133 @@ router.post('/login', async (req, res) => {
       error: {
         code: 'LOGIN_FAILED',
         message: 'Login failed. Please try again.'
+      }
+    });
+  }
+});
+
+router.post('/refresh-token', async (req, res) => {
+  try {
+    const rawRefreshToken = String(req.body?.refreshToken || '').trim();
+    if (!rawRefreshToken) {
+      return res.status(400).json({
+        error: {
+          code: 'MISSING_REFRESH_TOKEN',
+          message: 'Refresh token is required.'
+        }
+      });
+    }
+
+    const refreshTokenHash = hashRefreshToken(rawRefreshToken);
+    const session = await AuthSession.findOne({ refreshTokenHash });
+    if (!session || session.revokedAt || Number(new Date(session.expiresAt || 0).getTime() || 0) <= Date.now()) {
+      return res.status(401).json({
+        error: {
+          code: 'REFRESH_TOKEN_INVALID',
+          message: 'Refresh token is invalid or expired.'
+        }
+      });
+    }
+
+    const user = await User.findById(session.userId);
+    if (!user) {
+      return res.status(401).json({
+        error: {
+          code: 'REFRESH_TOKEN_INVALID',
+          message: 'Refresh token is invalid or expired.'
+        }
+      });
+    }
+
+    session.lastUsedAt = new Date();
+    await session.save();
+
+    const nextTokens = await issueSessionTokens(user, req, {
+      tokenFamily: session.tokenFamily,
+      replacesSessionId: session._id
+    });
+
+    return res.json({
+      message: 'Token refreshed',
+      token: nextTokens.token,
+      refreshToken: nextTokens.refreshToken,
+      refreshTokenExpiresInMs: nextTokens.refreshTokenExpiresInMs,
+      user: safeUserResponse(user)
+    });
+  } catch (err) {
+    console.error('refresh-token error', err);
+    return res.status(500).json({
+      error: {
+        code: 'REFRESH_TOKEN_FAILED',
+        message: 'Could not refresh session.'
+      }
+    });
+  }
+});
+
+router.post('/logout', async (req, res) => {
+  try {
+    const rawRefreshToken = String(req.body?.refreshToken || '').trim();
+    if (rawRefreshToken) {
+      const refreshTokenHash = hashRefreshToken(rawRefreshToken);
+      await AuthSession.updateOne(
+        { refreshTokenHash, revokedAt: null },
+        { $set: { revokedAt: new Date() } }
+      );
+    }
+    return res.json({ message: 'Logged out.' });
+  } catch (err) {
+    console.error('logout error', err);
+    return res.status(500).json({
+      error: {
+        code: 'LOGOUT_FAILED',
+        message: 'Could not logout.'
+      }
+    });
+  }
+});
+
+router.post('/logout-all', auth, async (req, res) => {
+  try {
+    await AuthSession.updateMany(
+      { userId: req.user.id, revokedAt: null },
+      { $set: { revokedAt: new Date() } }
+    );
+    return res.json({ message: 'Logged out from all devices.' });
+  } catch (err) {
+    console.error('logout-all error', err);
+    return res.status(500).json({
+      error: {
+        code: 'LOGOUT_ALL_FAILED',
+        message: 'Could not logout all sessions.'
+      }
+    });
+  }
+});
+
+router.get('/sessions', auth, async (req, res) => {
+  try {
+    const sessions = await AuthSession.find({ userId: req.user.id })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
+
+    return res.json(sessions.map((session) => ({
+      id: session._id.toString(),
+      tokenFamily: session.tokenFamily,
+      userAgent: session.userAgent || '',
+      ip: session.ip || '',
+      createdAt: session.createdAt,
+      lastUsedAt: session.lastUsedAt,
+      expiresAt: session.expiresAt,
+      revokedAt: session.revokedAt
+    })));
+  } catch (err) {
+    console.error('sessions error', err);
+    return res.status(500).json({
+      error: {
+        code: 'SESSIONS_FETCH_FAILED',
+        message: 'Could not load sessions.'
       }
     });
   }

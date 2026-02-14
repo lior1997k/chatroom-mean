@@ -80,7 +80,6 @@ export class LoginComponent {
 
     this.auth.login(identifier, password).subscribe({
       next: (res: any) => {
-        this.auth.saveToken(res.token);
         this.socket.connect();
         this.router.navigate(['/chat']);
       },
@@ -193,7 +192,6 @@ export class LoginComponent {
   }
 
   private handleAuthSuccess(res: any) {
-    this.auth.saveToken(res.token);
     this.socket.connect();
     this.router.navigate(['/chat']);
   }
