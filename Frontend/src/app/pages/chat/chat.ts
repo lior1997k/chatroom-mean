@@ -1,9 +1,8 @@
 import { AfterViewChecked, Component, ElementRef, HostListener, TemplateRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { HttpClient, HttpEventType, HttpHeaders } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
 
 import { SocketService } from '../../services/socket';
 import { AuthService } from '../../services/auth';
@@ -45,6 +44,15 @@ export class ChatComponent implements AfterViewChecked {
   uploadingAttachment = false;
   uploadingAttachmentCount = 0;
   uploadErrors: string[] = [];
+  uploadProgressItems: Array<{
+    id: string;
+    name: string;
+    progress: number;
+    status: 'uploading' | 'done' | 'failed' | 'cancelled';
+    file: File;
+    error?: string;
+  }> = [];
+  cancelUploadRequested = false;
   hourglassTop = true;
   private hourglassTimer: ReturnType<typeof setInterval> | null = null;
   isDragAttachActive = false;
@@ -132,6 +140,7 @@ export class ChatComponent implements AfterViewChecked {
   deleteCandidate: { id: string; scope: 'public' | 'private'; preview: string } | null = null;
   imageViewerTarget: { message: ChatMessage; scope: 'public' | 'private' } | null = null;
   attachmentMenuTarget: ChatMessage['attachment'] | null = null;
+  viewerNotice = '';
   private pausedPreviewVideoKey: string | null = null;
   private lastPreviewKickAt = 0;
   private hiddenAttachmentPreviewKeys = new Set<string>();
@@ -606,38 +615,117 @@ export class ChatComponent implements AfterViewChecked {
       return;
     }
 
+    this.cancelUploadRequested = false;
     this.uploadingAttachment = true;
     this.uploadingAttachmentCount = files.length;
     this.startHourglassAnimation();
 
     for (const file of files) {
-      const formData = new FormData();
-      formData.append('file', file);
+      if (this.cancelUploadRequested) break;
+
+      const itemId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const item = {
+        id: itemId,
+        name: file.name,
+        progress: 0,
+        status: 'uploading' as const,
+        file,
+        error: ''
+      };
+      this.uploadProgressItems.unshift(item);
 
       try {
-        const uploaded = await firstValueFrom(
-          this.http.post<Attachment>(`${environment.apiUrl}/api/upload`, formData, { headers })
-        );
+        const uploaded = await this.uploadSingleAttachment(file, headers, itemId);
 
         if (uploaded?.url) {
-          this.pendingAttachments.push({
-            url: uploaded.url,
-            name: uploaded.name || file.name,
-            mimeType: uploaded.mimeType || file.type || 'application/octet-stream',
-            size: Number(uploaded.size || file.size || 0),
-            isImage: !!uploaded.isImage
-          });
+            this.pendingAttachments.push({
+              url: uploaded.url,
+              name: uploaded.name || file.name,
+              mimeType: uploaded.mimeType || file.type || 'application/octet-stream',
+              size: Number(uploaded.size || file.size || 0),
+              isImage: !!uploaded.isImage,
+              storageProvider: uploaded.storageProvider,
+              objectKey: uploaded.objectKey
+            });
+          this.setUploadItemStatus(itemId, 'done', '');
         }
       } catch (error) {
-        this.pushUploadError(this.uploadFailureReason(error, file));
+        const reason = this.uploadFailureReason(error, file);
+        this.pushUploadError(reason);
+        this.setUploadItemStatus(itemId, 'failed', reason);
       } finally {
         this.uploadingAttachmentCount = Math.max(0, this.uploadingAttachmentCount - 1);
       }
     }
 
+    if (this.cancelUploadRequested) {
+      this.uploadProgressItems
+        .filter((x) => x.status === 'uploading')
+        .forEach((x) => {
+          x.status = 'cancelled';
+          x.error = 'Cancelled';
+        });
+    }
+
     this.uploadingAttachment = false;
     this.stopHourglassAnimation();
     if (inputToClear) inputToClear.value = '';
+  }
+
+  retryFailedUploads() {
+    const failedFiles = this.uploadProgressItems
+      .filter((x) => x.status === 'failed')
+      .map((x) => x.file);
+    if (!failedFiles.length || this.uploadingAttachment) return;
+    this.uploadAttachmentFiles(failedFiles);
+  }
+
+  cancelAttachmentUploads() {
+    this.cancelUploadRequested = true;
+  }
+
+  private uploadSingleAttachment(file: File, headers: HttpHeaders, itemId: string): Promise<Attachment> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    return new Promise((resolve, reject) => {
+      const sub = this.http.post<Attachment>(`${environment.apiUrl}/api/upload`, formData, {
+        headers,
+        reportProgress: true,
+        observe: 'events'
+      }).subscribe({
+        next: (event) => {
+          if (event.type === HttpEventType.UploadProgress) {
+            const total = Number(event.total || 0);
+            const progress = total > 0 ? Math.round((event.loaded / total) * 100) : 0;
+            this.setUploadItemProgress(itemId, progress);
+            if (this.cancelUploadRequested) {
+              sub.unsubscribe();
+              reject(new Error('cancelled'));
+            }
+          }
+
+          if (event.type === HttpEventType.Response) {
+            this.setUploadItemProgress(itemId, 100);
+            resolve(event.body as Attachment);
+          }
+        },
+        error: (err) => reject(err)
+      });
+    });
+  }
+
+  private setUploadItemProgress(itemId: string, progress: number) {
+    const item = this.uploadProgressItems.find((x) => x.id === itemId);
+    if (!item) return;
+    item.progress = Math.max(0, Math.min(100, progress));
+  }
+
+  private setUploadItemStatus(itemId: string, status: 'done' | 'failed' | 'cancelled', error: string) {
+    const item = this.uploadProgressItems.find((x) => x.id === itemId);
+    if (!item) return;
+    item.status = status;
+    item.error = error;
   }
 
   private hasDraggedFiles(event: DragEvent): boolean {
@@ -991,6 +1079,7 @@ export class ChatComponent implements AfterViewChecked {
 
     ref.afterClosed().subscribe(() => {
       this.imageViewerTarget = null;
+      this.viewerNotice = '';
       this.resumeAttachmentPreviewVideo();
     });
   }
@@ -1085,6 +1174,30 @@ export class ChatComponent implements AfterViewChecked {
     const target = this.imageViewerTarget;
     if (!target?.message?.id) return;
     this.toggleReaction(target.message, target.scope, emoji);
+  }
+
+  reportAttachmentFromViewer() {
+    const target = this.imageViewerTarget;
+    const messageId = target?.message?.id;
+    const attachmentUrl = this.attachmentUrl(target?.message?.attachment || null);
+    if (!target || !messageId || !attachmentUrl) return;
+
+    const headers = this.getAuthHeaders();
+    if (!headers) return;
+
+    this.http.post(`${environment.apiUrl}/api/attachments/report`, {
+      messageId,
+      scope: target.scope,
+      attachmentUrl,
+      reason: 'User report from viewer'
+    }, { headers }).subscribe({
+      next: () => {
+        this.viewerNotice = 'Report submitted. Thanks for helping keep chat safe.';
+      },
+      error: () => {
+        this.viewerNotice = 'Could not submit report. Please retry.';
+      }
+    });
   }
 
   userChipStyle(username: string | null | undefined): Record<string, string> {
@@ -1646,7 +1759,9 @@ export class ChatComponent implements AfterViewChecked {
               name: message.replyTo.attachment.name || 'Attachment',
               mimeType: message.replyTo.attachment.mimeType || 'application/octet-stream',
               size: Number(message.replyTo.attachment.size || 0),
-              isImage: !!message.replyTo.attachment.isImage
+              isImage: !!message.replyTo.attachment.isImage,
+              storageProvider: message.replyTo.attachment.storageProvider,
+              objectKey: message.replyTo.attachment.objectKey
             }
             : null
         }
@@ -1663,7 +1778,9 @@ export class ChatComponent implements AfterViewChecked {
               name: message.forwardedFrom.attachment.name || 'Attachment',
               mimeType: message.forwardedFrom.attachment.mimeType || 'application/octet-stream',
               size: Number(message.forwardedFrom.attachment.size || 0),
-              isImage: !!message.forwardedFrom.attachment.isImage
+              isImage: !!message.forwardedFrom.attachment.isImage,
+              storageProvider: message.forwardedFrom.attachment.storageProvider,
+              objectKey: message.forwardedFrom.attachment.objectKey
             }
             : null
         }
@@ -1674,7 +1791,9 @@ export class ChatComponent implements AfterViewChecked {
           name: message.attachment.name || 'Attachment',
           mimeType: message.attachment.mimeType || 'application/octet-stream',
           size: Number(message.attachment.size || 0),
-          isImage: !!message.attachment.isImage
+          isImage: !!message.attachment.isImage,
+          storageProvider: message.attachment.storageProvider,
+          objectKey: message.attachment.objectKey
         }
         : null,
       attachments: (
@@ -1682,16 +1801,19 @@ export class ChatComponent implements AfterViewChecked {
           ? message.attachments
           : (message.attachment ? [message.attachment] : [])
       )
-        .map((a) => a?.url
-          ? {
+        .reduce((acc, a) => {
+          if (!a?.url) return acc;
+          acc.push({
             url: a.url,
             name: a.name || 'Attachment',
             mimeType: a.mimeType || 'application/octet-stream',
             size: Number(a.size || 0),
-            isImage: !!a.isImage
-          }
-          : null)
-        .filter((a): a is Attachment => !!a),
+            isImage: !!a.isImage,
+            storageProvider: a.storageProvider,
+            objectKey: a.objectKey
+          });
+          return acc;
+        }, [] as Attachment[]),
       readAt: message.readAt || null,
       editedAt: message.editedAt || null,
       deletedAt: message.deletedAt || null,

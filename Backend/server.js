@@ -11,6 +11,7 @@ require('dotenv').config();
 
 const User = require('./models/User');
 const PrivateMessage = require('./models/PrivateMessage');
+const AttachmentReport = require('./models/AttachmentReport');
 const PublicMessage = require('./models/PublicMessage');
 
 const userRoutes = require('./routes/user');
@@ -80,13 +81,46 @@ app.post('/api/upload', auth, (req, res) => {
         name,
         mimeType,
         size: req.file.size || 0,
-        isImage
+        isImage,
+        storageProvider: 'local',
+        objectKey: req.file.filename
       });
     } catch (e) {
       console.error('Upload handler error', e);
       return res.status(500).json({ error: 'Upload failed' });
     }
   });
+});
+
+app.post('/api/upload/presign', auth, (_, res) => {
+  res.status(501).json({ error: 'Presigned uploads are not configured yet' });
+});
+
+app.post('/api/attachments/report', auth, async (req, res) => {
+  try {
+    const messageId = String(req.body?.messageId || '').trim();
+    const scope = req.body?.scope === 'private' ? 'private' : 'public';
+    const attachmentUrl = String(req.body?.attachmentUrl || '').trim();
+    const reason = String(req.body?.reason || 'User report').trim().slice(0, 240);
+
+    if (!messageId || !attachmentUrl) {
+      return res.status(400).json({ error: 'Missing report fields' });
+    }
+
+    await AttachmentReport.create({
+      reportedById: req.user.id,
+      reportedBy: req.user.username,
+      messageId,
+      scope,
+      attachmentUrl,
+      reason
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Attachment report error', err);
+    res.status(500).json({ error: 'Report failed' });
+  }
 });
 
 app.get('/', (_, res) => res.send('ChatRoom Server is running'));
@@ -237,13 +271,17 @@ function normalizeAttachment(attachment) {
   const name = String(attachment.name || '').trim().slice(0, 120);
   const mimeType = String(attachment.mimeType || 'application/octet-stream').trim().slice(0, 100);
   const size = Number(attachment.size || 0);
+  const storageProvider = attachment.storageProvider === 's3' ? 's3' : 'local';
+  const objectKey = String(attachment.objectKey || '').trim().slice(0, 300);
 
   return {
     url,
     name: name || 'Attachment',
     mimeType,
     size: Number.isFinite(size) && size >= 0 ? size : 0,
-    isImage: mimeType.startsWith('image/')
+    isImage: mimeType.startsWith('image/'),
+    storageProvider,
+    objectKey: objectKey || undefined
   };
 }
 

@@ -503,6 +503,27 @@
           <div *ngFor="let err of uploadErrors" style="font-size: 0.74rem; line-height: 1.25;">
             • {{ err }}
           </div>
+          <div style="display: flex; gap: 8px; margin-top: 2px;">
+            <button mat-stroked-button type="button" (click)="retryFailedUploads()" [disabled]="uploadingAttachment">Retry failed</button>
+          </div>
+        </div>
+        <div *ngIf="uploadProgressItems.length" style="display: flex; flex-direction: column; gap: 4px; background: #f4f8ff; border: 1px solid #cfdbef; border-radius: 10px; padding: 6px 8px; margin-bottom: 6px; color: #385878;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <strong style="font-size: 0.78rem;">Upload queue</strong>
+            <button mat-stroked-button type="button" (click)="cancelAttachmentUploads()" *ngIf="uploadingAttachment">Cancel queue</button>
+          </div>
+          <div *ngFor="let item of uploadProgressItems" style="display: flex; flex-direction: column; gap: 2px;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.74rem; gap: 8px;">
+              <span style="min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ item.name }}</span>
+              <span *ngIf="item.status === 'uploading'">{{ item.progress }}%</span>
+              <span *ngIf="item.status === 'done'">done</span>
+              <span *ngIf="item.status === 'failed'">failed</span>
+              <span *ngIf="item.status === 'cancelled'">cancelled</span>
+            </div>
+            <div *ngIf="item.status === 'uploading'" style="height: 4px; background: #dae6f8; border-radius: 999px; overflow: hidden;">
+              <div [style.width.%]="item.progress" style="height: 100%; background: #4a75b8;"></div>
+            </div>
+          </div>
         </div>
         <mat-form-field appearance="outline" class="composerInput">
           <mat-label>{{ selectedUser ? 'Type a private message' : 'Type a public message' }}</mat-label>
@@ -720,10 +741,13 @@
         <button mat-stroked-button type="button" [disabled]="!canReplyPrivatelyToAttachment()" (click)="replyPrivatelyToAttachment(dialogRef)">
           Reply privately
         </button>
-        <button mat-stroked-button type="button" disabled matTooltip="Coming soon">
-          Report (soon)
+        <button mat-stroked-button type="button" (click)="reportAttachmentFromViewer()">
+          Report
         </button>
       </div>
+    </div>
+    <div *ngIf="viewerNotice" style="padding: 8px 12px; font-size: 0.76rem; color: #35506e; border-top: 1px solid #d9e5f5; background: #f3f8ff;">
+      {{ viewerNotice }}
     </div>
   </div>
 </ng-template>

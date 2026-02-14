@@ -13,7 +13,9 @@ function serializeAttachment(a) {
     name: a.name || 'Attachment',
     mimeType: a.mimeType || 'application/octet-stream',
     size: a.size || 0,
-    isImage: !!a.isImage
+    isImage: !!a.isImage,
+    storageProvider: a.storageProvider || 'local',
+    objectKey: a.objectKey || undefined
   };
 }
 

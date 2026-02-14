@@ -4,6 +4,8 @@ export interface Attachment {
   mimeType: string;
   size: number;
   isImage: boolean;
+  storageProvider?: 'local' | 's3';
+  objectKey?: string;
 }
 
 export interface Message {
