@@ -203,7 +203,8 @@ export class ChatComponent implements AfterViewChecked {
   private voiceRecordingTimer: ReturnType<typeof setInterval> | null = null;
   private voiceRecordingCancelled = false;
   private voiceRecordingStartedAt = 0;
-  private voiceWaveformScrub: { pointerId: number; key: string } | null = null;
+  private voiceWaveformScrub: { pointerId: number; key: string; host: HTMLElement | null } | null = null;
+  private voicePendingSeekRatioByKey: Record<string, number> = {};
   private voiceProgressTimers = new Map<string, ReturnType<typeof setInterval>>();
   private voiceVolumeHoverKey: string | null = null;
   private voiceAudioElementByKey = new Map<string, HTMLAudioElement>();
@@ -1931,12 +1932,12 @@ export class ChatComponent implements AfterViewChecked {
     event.stopPropagation();
     event.preventDefault();
     if (!attachment) return;
+    const host = event.currentTarget as HTMLElement | null;
     this.voiceWaveformScrub = {
       pointerId: event.pointerId,
-      key: this.voiceAttachmentKey(attachment)
+      key: this.voiceAttachmentKey(attachment),
+      host
     };
-
-    const host = event.currentTarget as HTMLElement | null;
     if (host?.setPointerCapture) {
       try {
         host.setPointerCapture(event.pointerId);
@@ -1957,6 +1958,13 @@ export class ChatComponent implements AfterViewChecked {
 
   finishVoiceWaveformSeek(event?: PointerEvent) {
     if (event && this.voiceWaveformScrub && event.pointerId !== this.voiceWaveformScrub.pointerId) return;
+    if (event && this.voiceWaveformScrub?.host?.releasePointerCapture) {
+      try {
+        this.voiceWaveformScrub.host.releasePointerCapture(event.pointerId);
+      } catch {
+        // no-op
+      }
+    }
     this.voiceWaveformScrub = null;
   }
 
@@ -1994,6 +2002,12 @@ export class ChatComponent implements AfterViewChecked {
     nextState.volume = Number.isFinite(audio.volume) ? audio.volume : nextState.volume;
     this.voiceUiStateByKey[key] = nextState;
     if (!nextState.duration || nextState.duration <= 0) this.ensureVoiceDurationResolved(attachment);
+
+    const pendingSeek = Number(this.voicePendingSeekRatioByKey[key]);
+    if (Number.isFinite(pendingSeek) && pendingSeek >= 0 && pendingSeek <= 1) {
+      delete this.voicePendingSeekRatioByKey[key];
+      this.seekVoiceToRatio(attachment, pendingSeek, audio);
+    }
 
     this.applyVoicePlaybackRateToDom(key, this.voicePlaybackRate(attachment));
   }
@@ -2120,20 +2134,33 @@ export class ChatComponent implements AfterViewChecked {
     const audio = this.resolveVoiceAudioElement(key, audioEl);
     if (!audio) return;
 
-    const duration = this.resolveVoiceDuration(audio, attachment);
-    if (!Number.isFinite(duration) || duration <= 0) return;
-
     const clamped = Math.max(0, Math.min(1, Number(ratio || 0)));
-    const time = duration * clamped;
-    audio.currentTime = time;
-
     const state = this.voiceUiState(attachment);
+    const duration = this.resolveVoiceDuration(audio, attachment);
+    const fallbackDuration = Math.max(0, Number(state.duration || 0), Number(attachment?.durationSeconds || 0));
+    const resolvedDuration = Number.isFinite(duration) && duration > 0 ? duration : fallbackDuration;
+    if (!Number.isFinite(resolvedDuration) || resolvedDuration <= 0) {
+      this.voicePendingSeekRatioByKey[key] = clamped;
+      return;
+    }
+
+    const time = resolvedDuration * clamped;
+    try {
+      audio.currentTime = time;
+    } catch {
+      this.voicePendingSeekRatioByKey[key] = clamped;
+      return;
+    }
+
     state.currentTime = time;
-    state.duration = Math.max(state.duration, duration);
+    state.duration = Math.max(state.duration, resolvedDuration);
     state.playing = !audio.paused;
     state.muted = !!audio.muted;
     state.volume = Number.isFinite(audio.volume) ? audio.volume : state.volume;
     this.voiceUiStateByKey[key] = state;
+    if (attachment && (!attachment.durationSeconds || attachment.durationSeconds <= 0)) {
+      attachment.durationSeconds = Math.max(1, Math.round(resolvedDuration));
+    }
   }
 
   private voiceUiState(attachment: ChatMessage['attachment']): { currentTime: number; duration: number; playing: boolean; muted: boolean; volume: number } {
