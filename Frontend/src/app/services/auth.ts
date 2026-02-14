@@ -28,14 +28,14 @@ export class AuthService {
     );
   }
 
-  socialGoogle(idToken: string, username?: string) {
-    return this.http.post(`${this.apiUrl}/social/google`, { idToken, username: username || undefined }).pipe(
+  socialGoogle(idToken: string, nonce: string, username?: string) {
+    return this.http.post(`${this.apiUrl}/social/google`, { idToken, nonce, username: username || undefined }).pipe(
       tap((res: any) => this.saveAuthSessionFromResponse(res))
     );
   }
 
-  socialApple(idToken: string, username?: string) {
-    return this.http.post(`${this.apiUrl}/social/apple`, { idToken, username: username || undefined }).pipe(
+  socialApple(idToken: string, nonce: string, username?: string) {
+    return this.http.post(`${this.apiUrl}/social/apple`, { idToken, nonce, username: username || undefined }).pipe(
       tap((res: any) => this.saveAuthSessionFromResponse(res))
     );
   }

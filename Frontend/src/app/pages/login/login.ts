@@ -26,6 +26,7 @@ export class LoginComponent {
   socialPendingProvider: 'google' | 'apple' | null = null;
   socialSuggestedUsername = '';
   socialTokenForSetup = '';
+  socialNonceForSetup = '';
   socialSetupNotice = '';
   socialSetupUsername = '';
   readonly googleSignInEnabled = !!String(environment.googleClientId || '').trim();
@@ -110,9 +111,10 @@ export class LoginComponent {
     this.socialBusy = 'google';
 
     try {
+      const nonce = this.generateSocialNonce();
       const google = await this.waitForGoogleIdentity();
-      const idToken = await this.promptGoogleIdToken(google);
-      this.submitSocialGoogle(idToken);
+      const idToken = await this.promptGoogleIdToken(google, nonce);
+      this.submitSocialGoogle(idToken, nonce);
     } catch (err: any) {
       this.errorMessage = err?.message || 'Google sign-in failed.';
       this.socialBusy = null;
@@ -126,8 +128,9 @@ export class LoginComponent {
     this.socialBusy = 'apple';
 
     try {
-      const idToken = await this.promptAppleIdToken();
-      this.submitSocialApple(idToken);
+      const nonce = this.generateSocialNonce();
+      const idToken = await this.promptAppleIdToken(nonce);
+      this.submitSocialApple(idToken, nonce);
     } catch (err: any) {
       this.errorMessage = err?.message || 'Apple sign-in failed.';
       this.socialBusy = null;
@@ -136,7 +139,7 @@ export class LoginComponent {
 
   completeSocialSetup() {
     const username = this.normalizeUsername(this.socialSetupUsername);
-    if (!this.socialPendingProvider || !this.socialTokenForSetup) return;
+    if (!this.socialPendingProvider || !this.socialTokenForSetup || !this.socialNonceForSetup) return;
     if (!/^[a-z0-9_]{3,24}$/.test(username)) {
       this.errorMessage = 'Username must be 3-24 chars using lowercase letters, numbers, or underscores.';
       return;
@@ -145,10 +148,10 @@ export class LoginComponent {
     this.errorMessage = '';
     this.socialBusy = this.socialPendingProvider;
     if (this.socialPendingProvider === 'google') {
-      this.submitSocialGoogle(this.socialTokenForSetup, username);
+      this.submitSocialGoogle(this.socialTokenForSetup, this.socialNonceForSetup, username);
       return;
     }
-    this.submitSocialApple(this.socialTokenForSetup, username);
+    this.submitSocialApple(this.socialTokenForSetup, this.socialNonceForSetup, username);
   }
 
   cancelSocialSetup() {
@@ -194,6 +197,7 @@ export class LoginComponent {
     this.socialPendingProvider = null;
     this.socialSuggestedUsername = '';
     this.socialTokenForSetup = '';
+    this.socialNonceForSetup = '';
     this.socialSetupNotice = '';
     this.socialSetupUsername = '';
   }
@@ -203,39 +207,40 @@ export class LoginComponent {
     this.router.navigate(['/chat']);
   }
 
-  private submitSocialGoogle(idToken: string, username?: string) {
-    this.auth.socialGoogle(idToken, username).subscribe({
+  private submitSocialGoogle(idToken: string, nonce: string, username?: string) {
+    this.auth.socialGoogle(idToken, nonce, username).subscribe({
       next: (res: any) => {
         this.socialBusy = null;
         this.handleAuthSuccess(res);
       },
       error: (err) => {
         this.socialBusy = null;
-        this.handleSocialError(err, 'google', idToken);
+        this.handleSocialError(err, 'google', idToken, nonce);
       }
     });
   }
 
-  private submitSocialApple(idToken: string, username?: string) {
-    this.auth.socialApple(idToken, username).subscribe({
+  private submitSocialApple(idToken: string, nonce: string, username?: string) {
+    this.auth.socialApple(idToken, nonce, username).subscribe({
       next: (res: any) => {
         this.socialBusy = null;
         this.handleAuthSuccess(res);
       },
       error: (err) => {
         this.socialBusy = null;
-        this.handleSocialError(err, 'apple', idToken);
+        this.handleSocialError(err, 'apple', idToken, nonce);
       }
     });
   }
 
-  private handleSocialError(err: any, provider: 'google' | 'apple', idToken: string) {
+  private handleSocialError(err: any, provider: 'google' | 'apple', idToken: string, nonce: string) {
     const apiError = err?.error?.error;
     const code = String(apiError?.code || '');
 
     if (code === 'PROFILE_SETUP_REQUIRED') {
       this.socialPendingProvider = provider;
       this.socialTokenForSetup = idToken;
+      this.socialNonceForSetup = nonce;
       this.socialSuggestedUsername = String(err?.error?.profile?.suggestedUsername || '');
       this.socialSetupUsername = this.socialSuggestedUsername;
       this.socialSetupNotice = apiError?.message || 'Choose a username to finish social sign in.';
@@ -267,7 +272,7 @@ export class LoginComponent {
     });
   }
 
-  private promptGoogleIdToken(googleId: any): Promise<string> {
+  private promptGoogleIdToken(googleId: any, nonce: string): Promise<string> {
     return new Promise((resolve, reject) => {
       let settled = false;
       const finish = (fn: () => void) => {
@@ -279,6 +284,7 @@ export class LoginComponent {
       try {
         googleId.initialize({
           client_id: String(environment.googleClientId || '').trim(),
+          nonce,
           callback: (response: any) => {
             const credential = String(response?.credential || '');
             if (!credential) {
@@ -298,7 +304,7 @@ export class LoginComponent {
     });
   }
 
-  private async promptAppleIdToken(): Promise<string> {
+  private async promptAppleIdToken(nonce: string): Promise<string> {
     const win = window as any;
     if (!this.appleSignInEnabled) {
       throw new Error('Apple sign-in is not configured in this environment.');
@@ -307,20 +313,41 @@ export class LoginComponent {
       throw new Error('Apple sign-in SDK is not loaded.');
     }
 
+    const state = this.generateSocialNonce();
     win.AppleID.auth.init({
       clientId: String(environment.appleClientId || '').trim(),
       scope: 'name email',
       redirectURI: String(environment.appleRedirectUri || '').trim(),
+      nonce,
+      state,
       usePopup: true
     });
 
     const response = await win.AppleID.auth.signIn();
     const idToken = String(response?.authorization?.id_token || '');
+    const responseState = String(response?.authorization?.state || '');
     if (!idToken) throw new Error('Apple did not return an id token.');
+    if (!responseState || responseState !== state) {
+      throw new Error('Apple sign-in state validation failed.');
+    }
     return idToken;
   }
 
   goToRegister() {
     this.router.navigate(['/register']);
+  }
+
+  private generateSocialNonce(length = 32): string {
+    if (!globalThis.crypto?.getRandomValues) {
+      throw new Error('Secure random generator is not available in this browser.');
+    }
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const values = new Uint8Array(length);
+    globalThis.crypto.getRandomValues(values);
+    let nonce = '';
+    for (let i = 0; i < values.length; i += 1) {
+      nonce += chars[values[i] % chars.length];
+    }
+    return nonce;
   }
 }

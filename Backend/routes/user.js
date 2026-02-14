@@ -44,6 +44,7 @@ const SMTP_PASS = String(process.env.SMTP_PASS || '').trim();
 const MAIL_FROM = String(process.env.MAIL_FROM || SMTP_USER || 'no-reply@chatroom.local').trim();
 const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 let mailTransport = null;
+const NONCE_REGEX = /^[A-Za-z0-9_-]{20,256}$/;
 
 function normalizeUsername(value) {
   return String(value || '').trim().toLowerCase();
@@ -154,6 +155,22 @@ function getMailTransport() {
 
 function hashVerificationToken(rawToken) {
   return crypto.createHash('sha256').update(String(rawToken || '')).digest('hex');
+}
+
+function sha256Hex(value) {
+  return crypto.createHash('sha256').update(String(value || '')).digest('hex');
+}
+
+function isValidClientNonce(value) {
+  return NONCE_REGEX.test(String(value || '').trim());
+}
+
+function nonceMatches(expectedNonce, tokenNonce) {
+  const expected = String(expectedNonce || '').trim();
+  const provided = String(tokenNonce || '').trim();
+  if (!expected || !provided) return false;
+  if (provided === expected) return true;
+  return provided === sha256Hex(expected);
 }
 
 function createRefreshTokenRaw() {
@@ -308,7 +325,7 @@ function suggestedUsernameFromProfile(profile) {
   return (normalized || 'user').slice(0, 24);
 }
 
-async function verifyGoogleIdToken(idToken) {
+async function verifyGoogleIdToken(idToken, expectedNonce) {
   if (!GOOGLE_CLIENT_ID || !googleClient) {
     throw new Error('GOOGLE_NOT_CONFIGURED');
   }
@@ -316,6 +333,7 @@ async function verifyGoogleIdToken(idToken) {
   const ticket = await googleClient.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_ID });
   const payload = ticket.getPayload();
   if (!payload?.sub) throw new Error('GOOGLE_TOKEN_INVALID');
+  if (!nonceMatches(expectedNonce, payload.nonce)) throw new Error('GOOGLE_NONCE_INVALID');
 
   return {
     provider: 'google',
@@ -326,7 +344,7 @@ async function verifyGoogleIdToken(idToken) {
   };
 }
 
-async function verifyAppleIdToken(idToken) {
+async function verifyAppleIdToken(idToken, expectedNonce) {
   if (!APPLE_CLIENT_ID) {
     throw new Error('APPLE_NOT_CONFIGURED');
   }
@@ -336,6 +354,7 @@ async function verifyAppleIdToken(idToken) {
     ignoreExpiration: false
   });
   if (!payload?.sub) throw new Error('APPLE_TOKEN_INVALID');
+  if (!nonceMatches(expectedNonce, payload.nonce)) throw new Error('APPLE_NONCE_INVALID');
 
   return {
     provider: 'apple',
@@ -346,7 +365,7 @@ async function verifyAppleIdToken(idToken) {
   };
 }
 
-async function findOrCreateSocialUser(profile, requestedUsernameRaw) {
+async function findOrCreateSocialUser(profile, requestedUsernameRaw, req) {
   const providerSubField = profile.provider === 'google' ? 'googleSub' : 'appleSub';
   const providerSub = String(profile.sub || '').trim();
   if (!providerSub) {
@@ -963,6 +982,7 @@ router.post('/social/google', async (req, res) => {
   try {
     const idToken = String(req.body?.idToken || '').trim();
     const username = String(req.body?.username || '');
+    const nonce = String(req.body?.nonce || '').trim();
     if (!idToken) {
       return res.status(400).json({
         error: {
@@ -971,9 +991,17 @@ router.post('/social/google', async (req, res) => {
         }
       });
     }
+    if (!isValidClientNonce(nonce)) {
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_NONCE',
+          message: 'OAuth nonce is missing or invalid.'
+        }
+      });
+    }
 
-    const profile = await verifyGoogleIdToken(idToken);
-    const result = await findOrCreateSocialUser(profile, username);
+    const profile = await verifyGoogleIdToken(idToken, nonce);
+    const result = await findOrCreateSocialUser(profile, username, req);
     res.status(result.status).json(result.body);
   } catch (err) {
     const message = err?.message || '';
@@ -982,6 +1010,14 @@ router.post('/social/google', async (req, res) => {
         error: {
           code: 'SOCIAL_NOT_CONFIGURED',
           message: 'Google sign-in is not configured on server.'
+        }
+      });
+    }
+    if (message === 'GOOGLE_NONCE_INVALID') {
+      return res.status(401).json({
+        error: {
+          code: 'SOCIAL_NONCE_INVALID',
+          message: 'Google sign-in nonce validation failed.'
         }
       });
     }
@@ -1006,6 +1042,7 @@ router.post('/social/apple', async (req, res) => {
   try {
     const idToken = String(req.body?.idToken || '').trim();
     const username = String(req.body?.username || '');
+    const nonce = String(req.body?.nonce || '').trim();
     if (!idToken) {
       return res.status(400).json({
         error: {
@@ -1014,9 +1051,17 @@ router.post('/social/apple', async (req, res) => {
         }
       });
     }
+    if (!isValidClientNonce(nonce)) {
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_NONCE',
+          message: 'OAuth nonce is missing or invalid.'
+        }
+      });
+    }
 
-    const profile = await verifyAppleIdToken(idToken);
-    const result = await findOrCreateSocialUser(profile, username);
+    const profile = await verifyAppleIdToken(idToken, nonce);
+    const result = await findOrCreateSocialUser(profile, username, req);
     res.status(result.status).json(result.body);
   } catch (err) {
     const message = err?.message || '';
@@ -1025,6 +1070,14 @@ router.post('/social/apple', async (req, res) => {
         error: {
           code: 'SOCIAL_NOT_CONFIGURED',
           message: 'Apple sign-in is not configured on server.'
+        }
+      });
+    }
+    if (message === 'APPLE_NONCE_INVALID') {
+      return res.status(401).json({
+        error: {
+          code: 'SOCIAL_NONCE_INVALID',
+          message: 'Apple sign-in nonce validation failed.'
         }
       });
     }
@@ -1159,3 +1212,12 @@ router.post('/password/reset', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.__test = {
+  passwordPolicyIssues,
+  suggestedUsernameFromProfile,
+  isValidClientNonce,
+  nonceMatches,
+  normalizeIdentifier,
+  normalizeEmail,
+  normalizeUsername
+};

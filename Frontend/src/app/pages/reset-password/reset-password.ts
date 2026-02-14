@@ -19,6 +19,9 @@ export class ResetPasswordComponent {
   error = '';
   success = '';
   submitting = false;
+  showPassword = false;
+  showConfirmPassword = false;
+  tokenFromLink = false;
 
   constructor(
     private auth: AuthService,
@@ -28,6 +31,7 @@ export class ResetPasswordComponent {
     this.route.queryParamMap.subscribe((params) => {
       this.email = String(params.get('email') || '').trim().toLowerCase();
       this.token = String(params.get('token') || '').trim();
+      this.tokenFromLink = !!this.token;
     });
   }
 
@@ -36,8 +40,15 @@ export class ResetPasswordComponent {
     this.error = '';
     this.success = '';
 
+    this.email = String(this.email || '').trim().toLowerCase();
+    this.token = String(this.token || '').trim();
+
     if (!this.email || !this.token || !this.password || !this.confirmPassword) {
       this.error = 'All fields are required.';
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.email)) {
+      this.error = 'Please enter a valid email address.';
       return;
     }
     if (this.password !== this.confirmPassword) {
@@ -58,5 +69,45 @@ export class ResetPasswordComponent {
         this.submitting = false;
       }
     });
+  }
+
+  toggleShowPassword() {
+    this.showPassword = !this.showPassword;
+  }
+
+  toggleShowConfirmPassword() {
+    this.showConfirmPassword = !this.showConfirmPassword;
+  }
+
+  passwordPolicyHint(): string {
+    if (!this.password) {
+      return 'Use at least 8 characters with uppercase, lowercase, number, and symbol.';
+    }
+    const issues = this.passwordPolicyIssues(this.password);
+    return issues.length ? `Needs ${issues.join(', ')}.` : 'Strong password format.';
+  }
+
+  passwordMatchHint(): string {
+    const password = String(this.password || '');
+    const confirm = String(this.confirmPassword || '');
+    if (!password || !confirm) return '';
+    return password === confirm ? 'Passwords match.' : 'Passwords do not match yet.';
+  }
+
+  passwordsMatch(): boolean {
+    const password = String(this.password || '');
+    const confirm = String(this.confirmPassword || '');
+    return !!password && !!confirm && password === confirm;
+  }
+
+  private passwordPolicyIssues(passwordRaw: string): string[] {
+    const password = String(passwordRaw || '');
+    const issues: string[] = [];
+    if (password.length < 8) issues.push('at least 8 characters');
+    if (!/[A-Z]/.test(password)) issues.push('an uppercase letter');
+    if (!/[a-z]/.test(password)) issues.push('a lowercase letter');
+    if (!/[0-9]/.test(password)) issues.push('a number');
+    if (!/[^A-Za-z0-9]/.test(password)) issues.push('a symbol');
+    return issues;
   }
 }
