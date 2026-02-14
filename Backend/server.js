@@ -51,6 +51,21 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }
 });
 
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const ALLOWED_UPLOAD_MIME = [
+  /^image\//,
+  /^video\//,
+  /^audio\//,
+  /^text\//,
+  /^application\/pdf$/,
+  /^application\/msword$/,
+  /^application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document$/,
+  /^application\/vnd\.ms-excel$/,
+  /^application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet$/,
+  /^application\/vnd\.ms-powerpoint$/,
+  /^application\/vnd\.openxmlformats-officedocument\.presentationml\.presentation$/
+];
+
 app.use('/uploads', express.static(uploadsDir));
 
 app.use('/api/user', userRoutes);
@@ -73,6 +88,15 @@ app.post('/api/upload', auth, (req, res) => {
       if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
       const mimeType = req.file.mimetype || 'application/octet-stream';
+      const allowed = ALLOWED_UPLOAD_MIME.some((rx) => rx.test(mimeType));
+      if (!allowed) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch {
+          // no-op
+        }
+        return res.status(415).json({ error: `Unsupported file type: ${mimeType}` });
+      }
       const name = req.file.originalname || req.file.filename;
       const isImage = mimeType.startsWith('image/');
 
@@ -94,6 +118,13 @@ app.post('/api/upload', auth, (req, res) => {
 
 app.post('/api/upload/presign', auth, (_, res) => {
   res.status(501).json({ error: 'Presigned uploads are not configured yet' });
+});
+
+app.get('/api/upload/policy', auth, (_, res) => {
+  res.json({
+    maxBytes: MAX_UPLOAD_BYTES,
+    allowedMimePatterns: ALLOWED_UPLOAD_MIME.map((rx) => rx.source)
+  });
 });
 
 app.post('/api/attachments/report', auth, async (req, res) => {

@@ -53,6 +53,7 @@ export class ChatComponent implements AfterViewChecked {
     error?: string;
   }> = [];
   cancelUploadRequested = false;
+  uploadPolicy: { maxBytes: number; allowedMimePatterns: string[] } | null = null;
   hourglassTop = true;
   private hourglassTimer: ReturnType<typeof setInterval> | null = null;
   isDragAttachActive = false;
@@ -161,6 +162,7 @@ export class ChatComponent implements AfterViewChecked {
     }
 
     this.socket.connect();
+    this.loadUploadPolicy();
     this.loadDraftsFromStorage();
     this.message = this.draftForContext(null);
     this.loadUnreadCounts();
@@ -615,12 +617,18 @@ export class ChatComponent implements AfterViewChecked {
       return;
     }
 
+    const eligibleFiles = files.filter((file) => this.validateUploadFile(file));
+    if (!eligibleFiles.length) {
+      if (inputToClear) inputToClear.value = '';
+      return;
+    }
+
     this.cancelUploadRequested = false;
     this.uploadingAttachment = true;
-    this.uploadingAttachmentCount = files.length;
+    this.uploadingAttachmentCount = eligibleFiles.length;
     this.startHourglassAnimation();
 
-    for (const file of files) {
+    for (const file of eligibleFiles) {
       if (this.cancelUploadRequested) break;
 
       const itemId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -777,6 +785,55 @@ export class ChatComponent implements AfterViewChecked {
       this.hourglassTimer = null;
     }
     this.hourglassTop = true;
+  }
+
+  private loadUploadPolicy() {
+    const headers = this.getAuthHeaders();
+    if (!headers) return;
+
+    this.http
+      .get<{ maxBytes: number; allowedMimePatterns: string[] }>(`${environment.apiUrl}/api/upload/policy`, { headers })
+      .subscribe({
+        next: (policy) => {
+          if (!policy) return;
+          this.uploadPolicy = {
+            maxBytes: Number(policy.maxBytes || 0),
+            allowedMimePatterns: Array.isArray(policy.allowedMimePatterns) ? policy.allowedMimePatterns : []
+          };
+        },
+        error: () => {
+          this.uploadPolicy = null;
+        }
+      });
+  }
+
+  private validateUploadFile(file: File): boolean {
+    const policy = this.uploadPolicy;
+    if (!policy) return true;
+
+    const size = Number(file.size || 0);
+    if (policy.maxBytes > 0 && size > policy.maxBytes) {
+      this.pushUploadError(`${file.name}: file exceeds max size of ${this.attachmentSizeLabel(policy.maxBytes)}.`);
+      return false;
+    }
+
+    const mime = String(file.type || '').trim();
+    if (mime && policy.allowedMimePatterns.length) {
+      const allowed = policy.allowedMimePatterns.some((source) => {
+        try {
+          return new RegExp(source).test(mime);
+        } catch {
+          return false;
+        }
+      });
+
+      if (!allowed) {
+        this.pushUploadError(`${file.name}: unsupported type (${mime}).`);
+        return false;
+      }
+    }
+
+    return true;
   }
 
   replyToMessage(message: ChatMessage, scope: 'public' | 'private') {
