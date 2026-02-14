@@ -25,6 +25,8 @@ const EMAIL_VERIFY_RATE_WINDOW_MS = 10 * 60 * 1000;
 const EMAIL_VERIFY_RATE_MAX = 10;
 const EMAIL_VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const EMAIL_RESEND_MIN_INTERVAL_MS = 45 * 1000;
+const PASSWORD_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+const PASSWORD_RESET_RESEND_MIN_INTERVAL_MS = 45 * 1000;
 const rateLimitState = new Map();
 
 const GOOGLE_CLIENT_ID = String(process.env.GOOGLE_CLIENT_ID || '').trim();
@@ -130,6 +132,15 @@ function createEmailVerificationToken() {
   };
 }
 
+function createPasswordResetToken() {
+  const raw = crypto.randomBytes(24).toString('hex');
+  return {
+    raw,
+    hash: hashVerificationToken(raw),
+    expiresAt: new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MS)
+  };
+}
+
 function buildEmailVerificationLink(email, token) {
   const base = String(process.env.API_URL || '').trim();
   if (base) {
@@ -158,6 +169,35 @@ async function sendVerificationEmail(user, rawToken) {
     subject: 'Verify your ChatRoom email',
     text: `Hi ${user.username},\n\nVerify your email by opening this link:\n${link}\n\nThis link expires in 24 hours.`,
     html: `<p>Hi <b>${user.username}</b>,</p><p>Verify your email by clicking this link:</p><p><a href="${link}">Verify email</a></p><p>This link expires in 24 hours.</p>`
+  });
+
+  return { sent: true };
+}
+
+function buildPasswordResetLink(email, token) {
+  const clientUrl = CLIENT_URL.replace(/\/$/, '');
+  return `${clientUrl}/reset-password?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`;
+}
+
+async function sendPasswordResetEmail(user, rawToken) {
+  const email = normalizeEmail(user?.email);
+  if (!email || !rawToken) return { sent: false, reason: 'invalid-payload' };
+  const link = buildPasswordResetLink(email, rawToken);
+
+  const transporter = getMailTransport();
+  if (!transporter) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`Password reset link for ${email}: ${link}`);
+    }
+    return { sent: false, reason: 'smtp-not-configured' };
+  }
+
+  await transporter.sendMail({
+    from: MAIL_FROM,
+    to: email,
+    subject: 'Reset your ChatRoom password',
+    text: `Hi ${user.username},\n\nReset your password with this link:\n${link}\n\nThis link expires in 1 hour.`,
+    html: `<p>Hi <b>${user.username}</b>,</p><p>Reset your password with this link:</p><p><a href="${link}">Reset password</a></p><p>This link expires in 1 hour.</p>`
   });
 
   return { sent: true };
@@ -764,6 +804,121 @@ router.post('/social/apple', async (req, res) => {
       error: {
         code: 'SOCIAL_TOKEN_INVALID',
         message: 'Apple sign-in failed. Try again.'
+      }
+    });
+  }
+});
+
+router.post('/password/forgot', async (req, res) => {
+  maybeCleanupRateLimitMap();
+  if (!enforceRateLimit(req, res, 'password-forgot', EMAIL_VERIFY_RATE_WINDOW_MS, EMAIL_VERIFY_RATE_MAX)) return;
+
+  try {
+    const email = normalizeEmail(req.body?.email);
+    if (!email || !EMAIL_REGEX.test(email)) {
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_EMAIL',
+          message: 'Email address is invalid.'
+        }
+      });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user || !user.password) {
+      return res.json({ message: 'If this email exists, a reset link was sent.' });
+    }
+
+    const lastRequestedAt = Number(new Date(user.passwordResetRequestedAt || 0).getTime() || 0);
+    if (lastRequestedAt && Date.now() - lastRequestedAt < PASSWORD_RESET_RESEND_MIN_INTERVAL_MS) {
+      const waitSeconds = Math.max(1, Math.ceil((PASSWORD_RESET_RESEND_MIN_INTERVAL_MS - (Date.now() - lastRequestedAt)) / 1000));
+      return res.status(429).json({
+        error: {
+          code: 'PASSWORD_RESET_WAIT',
+          message: `Please wait ${waitSeconds}s before requesting another reset email.`
+        }
+      });
+    }
+
+    const reset = createPasswordResetToken();
+    user.passwordResetTokenHash = reset.hash;
+    user.passwordResetExpiresAt = reset.expiresAt;
+    user.passwordResetRequestedAt = new Date();
+    await user.save();
+
+    try {
+      await sendPasswordResetEmail(user, reset.raw);
+    } catch (mailErr) {
+      console.error('password/forgot mail error', mailErr);
+    }
+
+    return res.json({ message: 'If this email exists, a reset link was sent.' });
+  } catch (err) {
+    console.error('password/forgot error', err);
+    return res.status(500).json({
+      error: {
+        code: 'PASSWORD_FORGOT_FAILED',
+        message: 'Could not process forgot password request.'
+      }
+    });
+  }
+});
+
+router.post('/password/reset', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const token = String(req.body?.token || '').trim();
+    const password = String(req.body?.password || '');
+    if (!email || !token || !password) {
+      return res.status(400).json({
+        error: {
+          code: 'MISSING_FIELDS',
+          message: 'Email, token, and new password are required.'
+        }
+      });
+    }
+
+    const passwordIssues = passwordPolicyIssues(password);
+    if (passwordIssues.length) {
+      return res.status(400).json({
+        error: {
+          code: 'WEAK_PASSWORD',
+          message: `Password must include ${passwordIssues.join(', ')}.`
+        }
+      });
+    }
+
+    const tokenHash = hashVerificationToken(token);
+    const user = await User.findOne({
+      email,
+      passwordResetTokenHash: tokenHash,
+      passwordResetExpiresAt: { $gt: new Date() }
+    });
+    if (!user) {
+      return res.status(400).json({
+        error: {
+          code: 'PASSWORD_RESET_INVALID',
+          message: 'Password reset link is invalid or expired.'
+        }
+      });
+    }
+
+    user.password = await bcrypt.hash(password, 12);
+    user.passwordChangedAt = new Date();
+    user.passwordResetTokenHash = null;
+    user.passwordResetExpiresAt = null;
+    user.passwordResetRequestedAt = null;
+    user.loginFailures = 0;
+    user.lockUntil = null;
+    await user.save();
+
+    return res.json({ message: 'Password reset successful. You can sign in now.' });
+  } catch (err) {
+    console.error('password/reset error', err);
+    return res.status(500).json({
+      error: {
+        code: 'PASSWORD_RESET_FAILED',
+        message: 'Could not reset password.'
       }
     });
   }

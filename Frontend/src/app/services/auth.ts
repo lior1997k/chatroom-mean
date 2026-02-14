@@ -35,6 +35,14 @@ export class AuthService {
     return this.http.post(`${this.apiUrl}/verify-email/resend`, { email });
   }
 
+  forgotPassword(email: string) {
+    return this.http.post(`${this.apiUrl}/password/forgot`, { email });
+  }
+
+  resetPassword(email: string, token: string, password: string) {
+    return this.http.post(`${this.apiUrl}/password/reset`, { email, token, password });
+  }
+
   getUsername(): string | null {
     const payload = this.getTokenPayload();
     return payload?.username || null;
