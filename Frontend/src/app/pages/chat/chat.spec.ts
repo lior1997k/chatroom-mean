@@ -114,6 +114,26 @@ describe('Chat', () => {
     expect(component.resumableProgressPercent([0, 2, 2], 5)).toBe(40);
   });
 
+  it('should cycle voice playback speed per attachment', () => {
+    const attachment = { url: '/uploads/vn.webm', name: 'voice.webm', mimeType: 'audio/webm', size: 10, isImage: false } as any;
+    expect(component.voicePlaybackRateLabel(attachment)).toBe('1x');
+
+    component.toggleVoicePlaybackRate(attachment);
+    expect(component.voicePlaybackRateLabel(attachment)).toBe('1.5x');
+
+    component.toggleVoicePlaybackRate(attachment);
+    expect(component.voicePlaybackRateLabel(attachment)).toBe('2x');
+
+    component.toggleVoicePlaybackRate(attachment);
+    expect(component.voicePlaybackRateLabel(attachment)).toBe('1x');
+  });
+
+  it('should expose default waveform bars for audio attachments', () => {
+    const attachment = { url: '/uploads/vn.webm', name: 'voice.webm', mimeType: 'audio/webm', size: 10, isImage: false } as any;
+    const bars = component.voiceWaveformBars(attachment);
+    expect(bars.length).toBeGreaterThan(0);
+  });
+
   it('should group private media timeline by date buckets', () => {
     const now = new Date();
     const yesterday = new Date(now.getTime() - (24 * 60 * 60 * 1000));
