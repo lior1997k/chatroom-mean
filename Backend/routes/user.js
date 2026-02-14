@@ -6,6 +6,7 @@ const { OAuth2Client } = require('google-auth-library');
 const appleSignin = require('apple-signin-auth');
 const User = require('../models/User');
 const AuthSession = require('../models/AuthSession');
+const AuthAbuseEvent = require('../models/AuthAbuseEvent');
 const { signAccessToken, refreshTokenExpiresAt, refreshTokenTtlMs } = require('../utils/jwt');
 const auth = require('../middleware/auth');
 
@@ -30,6 +31,7 @@ const EMAIL_RESEND_MIN_INTERVAL_MS = 45 * 1000;
 const PASSWORD_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 const PASSWORD_RESET_RESEND_MIN_INTERVAL_MS = 45 * 1000;
 const rateLimitState = new Map();
+const RATE_LIMIT_BACKOFF_MS = 2 * 60 * 1000;
 
 const GOOGLE_CLIENT_ID = String(process.env.GOOGLE_CLIENT_ID || '').trim();
 const APPLE_CLIENT_ID = String(process.env.APPLE_CLIENT_ID || '').trim();
@@ -70,19 +72,34 @@ function passwordPolicyIssues(passwordRaw) {
   return issues;
 }
 
-function enforceRateLimit(req, res, scope, windowMs, maxHits) {
+function enforceRateLimit(req, res, scope, windowMs, maxHits, suffix = '') {
   const now = Date.now();
   const ip = String(req.ip || req.headers['x-forwarded-for'] || 'unknown');
-  const key = `${scope}:${ip}`;
+  const safeSuffix = String(suffix || '').trim().slice(0, 80).toLowerCase();
+  const key = `${scope}:${ip}:${safeSuffix}`;
   const current = rateLimitState.get(key);
 
   if (!current || current.resetAt <= now) {
-    rateLimitState.set(key, { count: 1, resetAt: now + windowMs });
+    rateLimitState.set(key, { count: 1, resetAt: now + windowMs, lockUntil: 0 });
     return true;
   }
 
+  if (Number(current.lockUntil || 0) > now) {
+    const waitSeconds = Math.max(1, Math.ceil((current.lockUntil - now) / 1000));
+    res.setHeader('Retry-After', String(waitSeconds));
+    res.status(429).json({
+      error: {
+        code: 'RATE_LIMITED',
+        message: `Too many attempts. Try again in ${waitSeconds}s.`
+      }
+    });
+    return false;
+  }
+
   if (current.count >= maxHits) {
-    const waitSeconds = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+    current.lockUntil = Math.max(current.resetAt, now + RATE_LIMIT_BACKOFF_MS);
+    rateLimitState.set(key, current);
+    const waitSeconds = Math.max(1, Math.ceil((current.lockUntil - now) / 1000));
     res.setHeader('Retry-After', String(waitSeconds));
     res.status(429).json({
       error: {
@@ -104,6 +121,20 @@ function maybeCleanupRateLimitMap() {
   for (const [key, entry] of rateLimitState.entries()) {
     if (!entry || Number(entry.resetAt || 0) <= now) rateLimitState.delete(key);
   }
+}
+
+function recordAbuseEvent(type, req, identifier = '', details = null, severity = 1) {
+  const ip = String(req.ip || req.headers['x-forwarded-for'] || '').slice(0, 120);
+  const normalizedIdentifier = String(identifier || '').trim().toLowerCase().slice(0, 120);
+  void AuthAbuseEvent.create({
+    type,
+    ip,
+    identifier: normalizedIdentifier,
+    details,
+    severity: Number.isFinite(Number(severity)) ? Number(severity) : 1
+  }).catch(() => {
+    // no-op
+  });
 }
 
 function getMailTransport() {
@@ -427,7 +458,11 @@ async function findOrCreateSocialUser(profile, requestedUsernameRaw) {
 
 router.post('/register', async (req, res) => {
   maybeCleanupRateLimitMap();
-  if (!enforceRateLimit(req, res, 'register', REGISTER_RATE_WINDOW_MS, REGISTER_RATE_MAX)) return;
+  const registerEmail = normalizeEmail(req.body?.email);
+  if (!enforceRateLimit(req, res, 'register', REGISTER_RATE_WINDOW_MS, REGISTER_RATE_MAX, registerEmail)) {
+    recordAbuseEvent('register-rate-limited', req, registerEmail);
+    return;
+  }
 
   try {
     const username = normalizeUsername(req.body?.username);
@@ -535,7 +570,11 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   maybeCleanupRateLimitMap();
-  if (!enforceRateLimit(req, res, 'login', LOGIN_RATE_WINDOW_MS, LOGIN_RATE_MAX)) return;
+  const loginIdentifier = normalizeIdentifier(req.body?.identifier || req.body?.username);
+  if (!enforceRateLimit(req, res, 'login', LOGIN_RATE_WINDOW_MS, LOGIN_RATE_MAX, loginIdentifier)) {
+    recordAbuseEvent('login-rate-limited', req, loginIdentifier);
+    return;
+  }
 
   try {
     const identifier = normalizeIdentifier(req.body?.identifier || req.body?.username);
@@ -554,6 +593,7 @@ router.post('/login', async (req, res) => {
       : { username: normalizeUsername(identifier) };
     const user = await User.findOne(query);
     if (!user) {
+      recordAbuseEvent('login-invalid-user', req, identifier);
       return res.status(401).json({
         error: {
           code: 'INVALID_CREDENTIALS',
@@ -594,6 +634,7 @@ router.post('/login', async (req, res) => {
 
     const ok = await bcrypt.compare(password, user.password);
     if (!ok) {
+      recordAbuseEvent('login-invalid-password', req, identifier, { userId: user._id }, 2);
       const failedCount = Math.max(0, Number(user.loginFailures || 0)) + 1;
       const shouldLock = failedCount >= LOGIN_MAX_ATTEMPTS_BEFORE_LOCK;
       user.loginFailures = shouldLock ? 0 : failedCount;
@@ -649,6 +690,7 @@ router.post('/refresh-token', async (req, res) => {
     const refreshTokenHash = hashRefreshToken(rawRefreshToken);
     const session = await AuthSession.findOne({ refreshTokenHash });
     if (!session || session.revokedAt || Number(new Date(session.expiresAt || 0).getTime() || 0) <= Date.now()) {
+      recordAbuseEvent('refresh-invalid-token', req, '', null, 2);
       return res.status(401).json({
         error: {
           code: 'REFRESH_TOKEN_INVALID',
@@ -763,7 +805,11 @@ router.get('/sessions', auth, async (req, res) => {
 
 router.post('/verify-email/resend', async (req, res) => {
   maybeCleanupRateLimitMap();
-  if (!enforceRateLimit(req, res, 'verify-email-resend', EMAIL_VERIFY_RATE_WINDOW_MS, EMAIL_VERIFY_RATE_MAX)) return;
+  const verifyEmail = normalizeEmail(req.body?.email);
+  if (!enforceRateLimit(req, res, 'verify-email-resend', EMAIL_VERIFY_RATE_WINDOW_MS, EMAIL_VERIFY_RATE_MAX, verifyEmail)) {
+    recordAbuseEvent('verify-email-rate-limited', req, verifyEmail);
+    return;
+  }
 
   try {
     const email = normalizeEmail(req.body?.email);
@@ -909,7 +955,10 @@ router.get('/verify-email', async (req, res) => {
 
 router.post('/social/google', async (req, res) => {
   maybeCleanupRateLimitMap();
-  if (!enforceRateLimit(req, res, 'social-google', SOCIAL_RATE_WINDOW_MS, SOCIAL_RATE_MAX)) return;
+  if (!enforceRateLimit(req, res, 'social-google', SOCIAL_RATE_WINDOW_MS, SOCIAL_RATE_MAX)) {
+    recordAbuseEvent('social-google-rate-limited', req);
+    return;
+  }
 
   try {
     const idToken = String(req.body?.idToken || '').trim();
@@ -949,7 +998,10 @@ router.post('/social/google', async (req, res) => {
 
 router.post('/social/apple', async (req, res) => {
   maybeCleanupRateLimitMap();
-  if (!enforceRateLimit(req, res, 'social-apple', SOCIAL_RATE_WINDOW_MS, SOCIAL_RATE_MAX)) return;
+  if (!enforceRateLimit(req, res, 'social-apple', SOCIAL_RATE_WINDOW_MS, SOCIAL_RATE_MAX)) {
+    recordAbuseEvent('social-apple-rate-limited', req);
+    return;
+  }
 
   try {
     const idToken = String(req.body?.idToken || '').trim();
@@ -989,7 +1041,11 @@ router.post('/social/apple', async (req, res) => {
 
 router.post('/password/forgot', async (req, res) => {
   maybeCleanupRateLimitMap();
-  if (!enforceRateLimit(req, res, 'password-forgot', EMAIL_VERIFY_RATE_WINDOW_MS, EMAIL_VERIFY_RATE_MAX)) return;
+  const forgotEmail = normalizeEmail(req.body?.email);
+  if (!enforceRateLimit(req, res, 'password-forgot', EMAIL_VERIFY_RATE_WINDOW_MS, EMAIL_VERIFY_RATE_MAX, forgotEmail)) {
+    recordAbuseEvent('password-forgot-rate-limited', req, forgotEmail);
+    return;
+  }
 
   try {
     const email = normalizeEmail(req.body?.email);
