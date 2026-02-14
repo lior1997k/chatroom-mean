@@ -24,6 +24,7 @@ const userSchema = new mongoose.Schema(
     },
     password: { type: String, default: null },
     avatarUrl: String,
+    role: { type: String, enum: ['user', 'support', 'admin'], default: 'user', index: true },
     googleSub: { type: String, unique: true, sparse: true, index: true, default: null },
     appleSub: { type: String, unique: true, sparse: true, index: true, default: null },
     emailVerified: { type: Boolean, default: false },

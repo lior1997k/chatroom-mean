@@ -21,6 +21,7 @@ const meRoutes = require('./routes/me');
 const privateRoutes = require('./routes/private');
 const publicRoutes = require('./routes/public');
 const searchRoutes = require('./routes/search');
+const adminAuthRoutes = require('./routes/admin-auth');
 const auth = require('./middleware/auth');
 const { verifyAccessToken } = require('./utils/jwt');
 
@@ -114,6 +115,7 @@ app.use('/api/me', meRoutes);
 app.use('/api/private', privateRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/search', searchRoutes);
+app.use('/api/admin/auth', adminAuthRoutes);
 
 app.post('/api/upload', auth, (req, res) => {
   upload.single('file')(req, res, (err) => {
