@@ -13,7 +13,8 @@ const privateMessageSchema = new Schema(
       name: { type: String, default: null },
       mimeType: { type: String, default: null },
       size: { type: Number, default: null },
-      isImage: { type: Boolean, default: false }
+      isImage: { type: Boolean, default: false },
+      durationSeconds: { type: Number, default: null }
     },
     attachments: {
       type: [
@@ -22,7 +23,8 @@ const privateMessageSchema = new Schema(
           name: { type: String, default: null },
           mimeType: { type: String, default: null },
           size: { type: Number, default: null },
-          isImage: { type: Boolean, default: false }
+          isImage: { type: Boolean, default: false },
+          durationSeconds: { type: Number, default: null }
         }
       ],
       default: []
@@ -37,7 +39,8 @@ const privateMessageSchema = new Schema(
         name: { type: String, default: null },
         mimeType: { type: String, default: null },
         size: { type: Number, default: null },
-        isImage: { type: Boolean, default: false }
+        isImage: { type: Boolean, default: false },
+        durationSeconds: { type: Number, default: null }
       }
     },
     forwardedFrom: {

@@ -99,6 +99,10 @@ app.post('/api/upload', auth, (req, res) => {
       }
       const name = req.file.originalname || req.file.filename;
       const isImage = mimeType.startsWith('image/');
+      const uploadedDuration = Number(req.body?.durationSeconds);
+      const durationSeconds = Number.isFinite(uploadedDuration) && uploadedDuration > 0
+        ? Math.round(uploadedDuration)
+        : undefined;
 
       return res.json({
         url: `/uploads/${req.file.filename}`,
@@ -106,6 +110,7 @@ app.post('/api/upload', auth, (req, res) => {
         mimeType,
         size: req.file.size || 0,
         isImage,
+        durationSeconds,
         storageProvider: 'local',
         objectKey: req.file.filename
       });
@@ -302,6 +307,7 @@ function normalizeAttachment(attachment) {
   const name = String(attachment.name || '').trim().slice(0, 120);
   const mimeType = String(attachment.mimeType || 'application/octet-stream').trim().slice(0, 100);
   const size = Number(attachment.size || 0);
+  const duration = Number(attachment.durationSeconds);
   const storageProvider = attachment.storageProvider === 's3' ? 's3' : 'local';
   const objectKey = String(attachment.objectKey || '').trim().slice(0, 300);
 
@@ -311,6 +317,7 @@ function normalizeAttachment(attachment) {
     mimeType,
     size: Number.isFinite(size) && size >= 0 ? size : 0,
     isImage: mimeType.startsWith('image/'),
+    durationSeconds: Number.isFinite(duration) && duration > 0 ? Math.round(duration) : undefined,
     storageProvider,
     objectKey: objectKey || undefined
   };

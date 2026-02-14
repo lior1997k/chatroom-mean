@@ -53,6 +53,8 @@ export class ChatComponent implements AfterViewChecked {
     error?: string;
   }> = [];
   cancelUploadRequested = false;
+  showPendingAttachmentsPanel = false;
+  showUploadQueuePanel = false;
   uploadPolicy: { maxBytes: number; allowedMimePatterns: string[] } | null = null;
   hourglassTop = true;
   private hourglassTimer: ReturnType<typeof setInterval> | null = null;
@@ -139,12 +141,19 @@ export class ChatComponent implements AfterViewChecked {
   @ViewChild('searchInput') searchInput?: ElementRef<HTMLInputElement>;
   @ViewChild('attachmentInput') attachmentInput?: ElementRef<HTMLInputElement>;
   deleteCandidate: { id: string; scope: 'public' | 'private'; preview: string } | null = null;
-  imageViewerTarget: { message: ChatMessage; scope: 'public' | 'private' } | null = null;
+  imageViewerTarget: {
+    message: ChatMessage;
+    scope: 'public' | 'private';
+    media: Attachment[];
+    index: number;
+  } | null = null;
   attachmentMenuTarget: ChatMessage['attachment'] | null = null;
   viewerNotice = '';
   private pausedPreviewVideoKey: string | null = null;
   private lastPreviewKickAt = 0;
   private hiddenAttachmentPreviewKeys = new Set<string>();
+  private temporaryExpandedAlbumKeys = new Set<string>();
+  private albumCollapseTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     private socket: SocketService,
@@ -181,7 +190,11 @@ export class ChatComponent implements AfterViewChecked {
     // === PUBLIC ===
     this.socket.getMessages().subscribe((messages: ChatMessage[]) => {
       const m = messages[messages.length - 1];
-      if (m) this.appendPublicMessage(this.normalizeMessage(m));
+      if (m) {
+        const normalized = this.normalizeMessage(m);
+        this.appendPublicMessage(normalized);
+        this.scheduleMediaAlbumCollapse(normalized, 'public');
+      }
     });
 
     // === PRIVATE (incoming only; your own sends use privateAck) ===
@@ -194,10 +207,12 @@ export class ChatComponent implements AfterViewChecked {
       if (!other) return;
 
       if (!this.privateChats[other]) this.privateChats[other] = [];
-      this.privateChats[other].push({
+      const normalized = {
         ...this.normalizeMessage(m),
         status: (m.from === me ? 'sent' : m.status) as ChatMessage['status']
-      });
+      };
+      this.privateChats[other].push(normalized);
+      this.scheduleMediaAlbumCollapse(normalized, 'private');
 
       if (!this.users.includes(other)) this.users.unshift(other);
 
@@ -316,6 +331,8 @@ export class ChatComponent implements AfterViewChecked {
     this.privateTypingTimeouts.forEach((timeout) => clearTimeout(timeout));
     this.publicTypingTimeouts.clear();
     this.privateTypingTimeouts.clear();
+    this.albumCollapseTimers.forEach((t) => clearTimeout(t));
+    this.albumCollapseTimers.clear();
     this.stopHourglassAnimation();
   }
 
@@ -518,6 +535,7 @@ export class ChatComponent implements AfterViewChecked {
 
     if (!this.privateChats[this.selectedUser]) this.privateChats[this.selectedUser] = [];
     this.privateChats[this.selectedUser].push(msg);
+    this.scheduleMediaAlbumCollapse(msg, 'private');
 
     this.socket.sendPrivateMessage(this.selectedUser, text, tempId, replyTo, forwardedFrom, attachments);
     this.message = '';
@@ -643,15 +661,17 @@ export class ChatComponent implements AfterViewChecked {
       this.uploadProgressItems.unshift(item);
 
       try {
-        const uploaded = await this.uploadSingleAttachment(file, headers, itemId);
+        const durationSeconds = await this.extractVideoDurationSeconds(file);
+        const uploaded = await this.uploadSingleAttachment(file, headers, itemId, durationSeconds);
 
         if (uploaded?.url) {
-            this.pendingAttachments.push({
+          this.pendingAttachments.push({
               url: uploaded.url,
               name: uploaded.name || file.name,
               mimeType: uploaded.mimeType || file.type || 'application/octet-stream',
               size: Number(uploaded.size || file.size || 0),
               isImage: !!uploaded.isImage,
+              durationSeconds: Number(uploaded.durationSeconds || durationSeconds || 0) || undefined,
               storageProvider: uploaded.storageProvider,
               objectKey: uploaded.objectKey
             });
@@ -692,9 +712,12 @@ export class ChatComponent implements AfterViewChecked {
     this.cancelUploadRequested = true;
   }
 
-  private uploadSingleAttachment(file: File, headers: HttpHeaders, itemId: string): Promise<Attachment> {
+  private uploadSingleAttachment(file: File, headers: HttpHeaders, itemId: string, durationSeconds?: number | null): Promise<Attachment> {
     const formData = new FormData();
     formData.append('file', file);
+    if (Number(durationSeconds) > 0) {
+      formData.append('durationSeconds', String(Math.round(Number(durationSeconds))));
+    }
 
     return new Promise((resolve, reject) => {
       const sub = this.http.post<Attachment>(`${environment.apiUrl}/api/upload`, formData, {
@@ -723,6 +746,36 @@ export class ChatComponent implements AfterViewChecked {
     });
   }
 
+  private extractVideoDurationSeconds(file: File): Promise<number | null> {
+    if (!file.type.startsWith('video/')) return Promise.resolve(null);
+
+    return new Promise((resolve) => {
+      const media = document.createElement('video');
+      const objectUrl = URL.createObjectURL(file);
+      const cleanup = () => {
+        URL.revokeObjectURL(objectUrl);
+        media.removeAttribute('src');
+        media.load();
+      };
+
+      media.preload = 'metadata';
+      media.onloadedmetadata = () => {
+        const value = Number(media.duration);
+        cleanup();
+        if (!Number.isFinite(value) || value <= 0) {
+          resolve(null);
+          return;
+        }
+        resolve(Math.round(value));
+      };
+      media.onerror = () => {
+        cleanup();
+        resolve(null);
+      };
+      media.src = objectUrl;
+    });
+  }
+
   private setUploadItemProgress(itemId: string, progress: number) {
     const item = this.uploadProgressItems.find((x) => x.id === itemId);
     if (!item) return;
@@ -734,6 +787,16 @@ export class ChatComponent implements AfterViewChecked {
     if (!item) return;
     item.status = status;
     item.error = error;
+
+    if (status === 'done') {
+      setTimeout(() => {
+        this.uploadProgressItems = this.uploadProgressItems.filter((x) => x.id !== itemId);
+      }, 900);
+    }
+
+    if (this.uploadProgressItems.length > 12) {
+      this.uploadProgressItems = this.uploadProgressItems.slice(0, 12);
+    }
   }
 
   private hasDraggedFiles(event: DragEvent): boolean {
@@ -744,6 +807,7 @@ export class ChatComponent implements AfterViewChecked {
 
   clearPendingAttachments() {
     this.pendingAttachments = [];
+    this.showPendingAttachmentsPanel = false;
     const input = this.attachmentInput?.nativeElement;
     if (input) input.value = '';
   }
@@ -751,6 +815,33 @@ export class ChatComponent implements AfterViewChecked {
   removePendingAttachment(index: number) {
     if (index < 0 || index >= this.pendingAttachments.length) return;
     this.pendingAttachments.splice(index, 1);
+    if (!this.pendingAttachments.length) this.showPendingAttachmentsPanel = false;
+  }
+
+  visibleUploadItems() {
+    return this.uploadProgressItems.filter((x) => x.status !== 'done');
+  }
+
+  failedUploadItems() {
+    return this.uploadProgressItems.filter((x) => x.status === 'failed');
+  }
+
+  uploadingItems() {
+    return this.uploadProgressItems.filter((x) => x.status === 'uploading');
+  }
+
+  compactPendingTitle(): string {
+    const count = this.pendingAttachments.length;
+    if (!count) return 'No attachments';
+    return `${count} attachment${count === 1 ? '' : 's'} ready`;
+  }
+
+  compactQueueTitle(): string {
+    const uploading = this.uploadingItems().length;
+    const failed = this.failedUploadItems().length;
+    if (uploading) return `Uploading ${uploading} file${uploading === 1 ? '' : 's'}`;
+    if (failed) return `${failed} failed upload${failed === 1 ? '' : 's'}`;
+    return 'Upload queue';
   }
 
   clearUploadErrors() {
@@ -925,6 +1016,7 @@ export class ChatComponent implements AfterViewChecked {
       };
 
       this.privateChats[to].push(msg);
+      this.scheduleMediaAlbumCollapse(msg, 'private');
 
       this.socket.sendPrivateMessage(to, text, tempId, null, {
         messageId: candidate.messageId,
@@ -996,8 +1088,12 @@ export class ChatComponent implements AfterViewChecked {
 
   messageAttachments(message: ChatMessage): Attachment[] {
     const fromArray = Array.isArray(message.attachments) ? message.attachments : [];
-    if (fromArray.length) return fromArray;
-    return message.attachment ? [message.attachment] : [];
+    const list = fromArray.length ? fromArray : (message.attachment ? [message.attachment] : []);
+    if (list.length < 2) return list;
+
+    const media = list.filter((a) => this.canPreviewMediaAttachment(a));
+    const other = list.filter((a) => !this.canPreviewMediaAttachment(a));
+    return [...media, ...other];
   }
 
   attachmentSizeLabel(size: number | null | undefined): string {
@@ -1006,6 +1102,18 @@ export class ChatComponent implements AfterViewChecked {
     if (value < 1024) return `${value} B`;
     if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
     return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  formatDuration(totalSeconds: number | null | undefined): string {
+    const value = Math.floor(Number(totalSeconds || 0));
+    if (!Number.isFinite(value) || value <= 0) return '0:00';
+    const mins = Math.floor(value / 60);
+    const secs = value % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  attachmentDurationLabel(attachment: ChatMessage['attachment']): string {
+    return this.formatDuration(attachment?.durationSeconds);
   }
 
   googleImageSearchUrl(attachment: ChatMessage['attachment']): string {
@@ -1076,6 +1184,79 @@ export class ChatComponent implements AfterViewChecked {
     return !!attachment?.isImage;
   }
 
+  viewerCurrentAttachment(): Attachment | null {
+    const v = this.imageViewerTarget;
+    if (!v) return null;
+    return v.media[v.index] || null;
+  }
+
+  viewerHasPrev(): boolean {
+    const v = this.imageViewerTarget;
+    return !!v && v.index > 0;
+  }
+
+  viewerHasNext(): boolean {
+    const v = this.imageViewerTarget;
+    return !!v && v.index < v.media.length - 1;
+  }
+
+  viewerPrev() {
+    if (!this.imageViewerTarget || !this.viewerHasPrev()) return;
+    this.imageViewerTarget = {
+      ...this.imageViewerTarget,
+      index: this.imageViewerTarget.index - 1,
+      message: { ...this.imageViewerTarget.message, attachment: this.imageViewerTarget.media[this.imageViewerTarget.index - 1] }
+    };
+  }
+
+  viewerNext() {
+    if (!this.imageViewerTarget || !this.viewerHasNext()) return;
+    this.imageViewerTarget = {
+      ...this.imageViewerTarget,
+      index: this.imageViewerTarget.index + 1,
+      message: { ...this.imageViewerTarget.message, attachment: this.imageViewerTarget.media[this.imageViewerTarget.index + 1] }
+    };
+  }
+
+  albumMediaAttachments(message: ChatMessage): Attachment[] {
+    return this.messageAttachments(message).filter((a) => this.canPreviewMediaAttachment(a));
+  }
+
+  nonAlbumAttachments(message: ChatMessage): Attachment[] {
+    return this.messageAttachments(message).filter((a) => !this.canPreviewMediaAttachment(a));
+  }
+
+  hasAlbumMedia(message: ChatMessage): boolean {
+    return this.albumMediaAttachments(message).length > 1;
+  }
+
+  albumCountLabel(message: ChatMessage): string {
+    const count = this.albumMediaAttachments(message).length;
+    return `+${Math.max(0, count - 1)} more`;
+  }
+
+  albumPreviewItems(message: ChatMessage): Attachment[] {
+    return this.albumMediaAttachments(message).slice(0, 4);
+  }
+
+  albumMoreCount(message: ChatMessage): number {
+    const count = this.albumMediaAttachments(message).length;
+    return count > 4 ? count - 4 : 0;
+  }
+
+  isMediaAlbumCollapsed(message: ChatMessage, scope: 'public' | 'private'): boolean {
+    if (!this.hasAlbumMedia(message)) return false;
+    const key = this.mediaAlbumKey(message, scope);
+    return !this.temporaryExpandedAlbumKeys.has(key);
+  }
+
+  expandMediaAlbum(message: ChatMessage, scope: 'public' | 'private', event?: Event) {
+    event?.stopPropagation();
+    const key = this.mediaAlbumKey(message, scope);
+    this.temporaryExpandedAlbumKeys.add(key);
+    this.scheduleMediaAlbumCollapse(message, scope, 5000);
+  }
+
   canPreviewMediaAttachment(attachment: ChatMessage['attachment']): boolean {
     return !!attachment && (attachment.isImage || this.isVideoAttachment(attachment));
   }
@@ -1128,7 +1309,11 @@ export class ChatComponent implements AfterViewChecked {
 
     this.pauseAttachmentPreviewVideo(this.attachmentPreviewKey(message, attachment, scope));
 
-    this.imageViewerTarget = { message: { ...message, attachment }, scope };
+    const media = this.albumMediaAttachments(message);
+    const mediaList = media.length ? media : [attachment];
+    const index = Math.max(0, mediaList.findIndex((m) => m.url === attachment.url));
+
+    this.imageViewerTarget = { message: { ...message, attachment }, scope, media: mediaList, index };
     const ref = this.dialog.open(this.imageViewerTpl, {
       width: 'min(920px, 96vw)',
       maxWidth: '96vw'
@@ -1143,6 +1328,25 @@ export class ChatComponent implements AfterViewChecked {
 
   attachmentPreviewKey(message: ChatMessage, attachment: Attachment, scope: 'public' | 'private'): string {
     return `${scope}|${message.id}|${attachment.url}`;
+  }
+
+  private mediaAlbumKey(message: ChatMessage, scope: 'public' | 'private'): string {
+    return `${scope}|${message.id || message.timestamp || message.text}`;
+  }
+
+  private scheduleMediaAlbumCollapse(message: ChatMessage, scope: 'public' | 'private', ms = 3500) {
+    if (!this.hasAlbumMedia(message)) return;
+    const key = this.mediaAlbumKey(message, scope);
+    this.temporaryExpandedAlbumKeys.add(key);
+
+    const prev = this.albumCollapseTimers.get(key);
+    if (prev) clearTimeout(prev);
+
+    const timer = setTimeout(() => {
+      this.temporaryExpandedAlbumKeys.delete(key);
+      this.albumCollapseTimers.delete(key);
+    }, ms);
+    this.albumCollapseTimers.set(key, timer);
   }
 
   isAttachmentPreviewHidden(message: ChatMessage, attachment: Attachment, scope: 'public' | 'private'): boolean {
@@ -1235,8 +1439,9 @@ export class ChatComponent implements AfterViewChecked {
 
   reportAttachmentFromViewer() {
     const target = this.imageViewerTarget;
+    const current = this.viewerCurrentAttachment();
     const messageId = target?.message?.id;
-    const attachmentUrl = this.attachmentUrl(target?.message?.attachment || null);
+    const attachmentUrl = this.attachmentUrl(current);
     if (!target || !messageId || !attachmentUrl) return;
 
     const headers = this.getAuthHeaders();
@@ -1648,6 +1853,19 @@ export class ChatComponent implements AfterViewChecked {
     }
   }
 
+  @HostListener('document:keydown', ['$event'])
+  onDocumentKeydown(event: KeyboardEvent) {
+    if (!this.imageViewerTarget) return;
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      this.viewerPrev();
+    }
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      this.viewerNext();
+    }
+  }
+
   private loadUnreadCounts() {
     const token = this.auth.getToken();
     if (!token) return;
@@ -1817,6 +2035,7 @@ export class ChatComponent implements AfterViewChecked {
               mimeType: message.replyTo.attachment.mimeType || 'application/octet-stream',
               size: Number(message.replyTo.attachment.size || 0),
               isImage: !!message.replyTo.attachment.isImage,
+              durationSeconds: Number(message.replyTo.attachment.durationSeconds || 0) || undefined,
               storageProvider: message.replyTo.attachment.storageProvider,
               objectKey: message.replyTo.attachment.objectKey
             }
@@ -1836,6 +2055,7 @@ export class ChatComponent implements AfterViewChecked {
               mimeType: message.forwardedFrom.attachment.mimeType || 'application/octet-stream',
               size: Number(message.forwardedFrom.attachment.size || 0),
               isImage: !!message.forwardedFrom.attachment.isImage,
+              durationSeconds: Number(message.forwardedFrom.attachment.durationSeconds || 0) || undefined,
               storageProvider: message.forwardedFrom.attachment.storageProvider,
               objectKey: message.forwardedFrom.attachment.objectKey
             }
@@ -1849,6 +2069,7 @@ export class ChatComponent implements AfterViewChecked {
           mimeType: message.attachment.mimeType || 'application/octet-stream',
           size: Number(message.attachment.size || 0),
           isImage: !!message.attachment.isImage,
+          durationSeconds: Number(message.attachment.durationSeconds || 0) || undefined,
           storageProvider: message.attachment.storageProvider,
           objectKey: message.attachment.objectKey
         }
@@ -1866,6 +2087,7 @@ export class ChatComponent implements AfterViewChecked {
             mimeType: a.mimeType || 'application/octet-stream',
             size: Number(a.size || 0),
             isImage: !!a.isImage,
+            durationSeconds: Number(a.durationSeconds || 0) || undefined,
             storageProvider: a.storageProvider,
             objectKey: a.objectKey
           });

@@ -4,6 +4,7 @@ export interface Attachment {
   mimeType: string;
   size: number;
   isImage: boolean;
+  durationSeconds?: number;
   storageProvider?: 'local' | 's3';
   objectKey?: string;
 }

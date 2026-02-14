@@ -12,6 +12,7 @@ function serializeAttachment(a) {
     mimeType: a.mimeType || 'application/octet-stream',
     size: a.size || 0,
     isImage: !!a.isImage,
+    durationSeconds: Number(a.durationSeconds) > 0 ? Math.round(Number(a.durationSeconds)) : undefined,
     storageProvider: a.storageProvider || 'local',
     objectKey: a.objectKey || undefined
   };
