@@ -132,6 +132,87 @@
   margin-right: 6px;
 }
 
+.smallRoleBadge {
+  margin-left: 6px;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #375370;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(50, 82, 116, 0.22);
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+.userProfileOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(13, 29, 44, 0.42);
+  display: grid;
+  place-items: center;
+  z-index: 1200;
+  padding: 20px;
+}
+
+.userProfileCard {
+  position: relative;
+  width: min(420px, 92vw);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff, #f3f8ff);
+  border: 1px solid #c8d9ed;
+  box-shadow: 0 14px 40px rgba(18, 39, 63, 0.24);
+  padding: 20px;
+  text-align: center;
+}
+
+.profileCardClose {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid #b9cde4;
+  background: #f4f9ff;
+  color: #315276;
+  cursor: pointer;
+}
+
+.profileCardAvatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 999px;
+  border: 2px solid #d7e5f4;
+  object-fit: cover;
+  margin: 0 auto 10px;
+}
+
+.profileCardAvatarFallback {
+  display: grid;
+  place-items: center;
+  color: #607894;
+  background: #edf4fc;
+}
+
+.profileCardUser {
+  margin: 4px 0;
+  color: #4a6581;
+  font-size: 0.9rem;
+}
+
+.profileCardRole {
+  margin: 4px 0 10px;
+  color: #1f3f5f;
+  font-weight: 600;
+}
+
+.profileCardStatus,
+.profileCardMeta {
+  margin: 6px 0;
+  color: #4c6783;
+  font-size: 0.9rem;
+}
+
 .messages {
   flex: 1;
   padding: 16px;

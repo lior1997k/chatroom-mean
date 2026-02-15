@@ -169,6 +169,13 @@ export class ChatComponent implements AfterViewChecked {
   private ignoreNextDocumentClick = false;
   private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private userChipStyleCache: Record<string, Record<string, string>> = {};
+  userAvatarUrlByUsername: Record<string, string> = {};
+  userPublicProfileByUsername: Record<string, any> = {};
+  private userProfileLookupBusy = new Set<string>();
+  userProfileCardOpen = false;
+  userProfileCardLoading = false;
+  userProfileCardUsername = '';
+  userProfileCardData: any = null;
   searchOpen = false;
   searchFilterMenuOpen = false;
 
@@ -318,6 +325,7 @@ export class ChatComponent implements AfterViewChecked {
     this.message = this.draftForContext(null);
     this.loadUnreadCounts();
     this.loadPublicMessages();
+    this.ensureUserProfile(this.myUsername);
 
     this.socket.onEvent('connect').subscribe(() => {
       if (!this.hasSocketConnected) {
@@ -336,6 +344,7 @@ export class ChatComponent implements AfterViewChecked {
         const normalized = this.normalizeMessage(m);
         this.appendPublicMessage(normalized);
         this.scheduleMediaAlbumCollapse(normalized, 'public');
+        this.ensureUserProfile(normalized.from);
       }
     });
 
@@ -355,6 +364,9 @@ export class ChatComponent implements AfterViewChecked {
       };
       this.privateChats[other].push(normalized);
       this.scheduleMediaAlbumCollapse(normalized, 'private');
+      this.ensureUserProfile(normalized.from);
+      this.ensureUserProfile(normalized.to);
+      this.ensureUserProfile(other);
 
       if (!this.users.includes(other)) this.users.unshift(other);
 
@@ -436,6 +448,7 @@ export class ChatComponent implements AfterViewChecked {
     this.socket.onOnlineUsers().subscribe((list) => {
       const me = this.myUsername;
       this.onlineUsers = (list || []).filter(u => u !== me);
+      this.onlineUsers.forEach((u) => this.ensureUserProfile(u));
       this.applyFilter();
     });
 
@@ -560,6 +573,7 @@ export class ChatComponent implements AfterViewChecked {
 
   // ===== Private Chat =====
   async openChat(username: string) {
+    this.ensureUserProfile(username);
     this.saveDraftForContext(this.selectedUser, this.message);
     this.clearPendingAttachments();
     const hadUnread = this.unreadCount(username) > 0;
@@ -614,6 +628,11 @@ export class ChatComponent implements AfterViewChecked {
             new Date(a.timestamp || 0).getTime() -
             new Date(b.timestamp || 0).getTime()
         );
+        this.privateChats[username].forEach((m) => {
+          this.ensureUserProfile(m.from);
+          this.ensureUserProfile(m.to);
+        });
+        this.ensureUserProfile(username);
         this.historyLoaded.add(username);
 
         if (!this.users.includes(username)) this.users.unshift(username);
@@ -2315,6 +2334,34 @@ export class ChatComponent implements AfterViewChecked {
     if (!attachment?.url) return '';
     if (/^https?:\/\//i.test(attachment.url)) return attachment.url;
     return `${environment.apiUrl}${attachment.url}`;
+  }
+
+  avatarUrl(username: string | null | undefined): string {
+    const key = String(username || '').trim().toLowerCase();
+    if (!key) return '';
+    const raw = String(this.userAvatarUrlByUsername[key] || '').trim();
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw)) return raw;
+    return `${environment.apiUrl}${raw}`;
+  }
+
+  userDisplayName(username: string | null | undefined): string {
+    const key = String(username || '').trim().toLowerCase();
+    if (!key) return '';
+    const displayName = String(this.userPublicProfileByUsername[key]?.displayName || '').trim();
+    return displayName || key;
+  }
+
+  userRole(username: string | null | undefined): string {
+    const key = String(username || '').trim().toLowerCase();
+    if (!key) return 'user';
+    return String(this.userPublicProfileByUsername[key]?.role || 'user');
+  }
+
+  userStatusText(username: string | null | undefined): string {
+    const key = String(username || '').trim().toLowerCase();
+    if (!key) return '';
+    return String(this.userPublicProfileByUsername[key]?.statusText || '').trim();
   }
 
   messageAttachments(message: ChatMessage): Attachment[] {
@@ -5011,6 +5058,47 @@ export class ChatComponent implements AfterViewChecked {
     this.router.navigate(['/profile']);
   }
 
+  openUserProfileCard(username: string | null | undefined) {
+    const key = String(username || '').trim().toLowerCase();
+    if (!key) return;
+    this.userProfileCardOpen = true;
+    this.userProfileCardLoading = true;
+    this.userProfileCardUsername = key;
+    this.userProfileCardData = this.userPublicProfileByUsername[key] || null;
+
+    this.auth.getPublicProfile(key).subscribe({
+      next: (res: any) => {
+        this.userPublicProfileByUsername[key] = {
+          username: String(res?.username || key),
+          displayName: String(res?.displayName || key),
+          avatarUrl: String(res?.avatarUrl || ''),
+          role: String(res?.role || 'user'),
+          statusText: String(res?.statusText || ''),
+          bio: String(res?.bio || ''),
+          timezone: String(res?.timezone || 'UTC'),
+          lastSeenAt: res?.lastSeenAt || null
+        };
+        this.userAvatarUrlByUsername[key] = String(res?.avatarUrl || '').trim();
+        this.userProfileCardData = this.userPublicProfileByUsername[key];
+      },
+      error: () => {
+        this.userProfileCardData = this.userPublicProfileByUsername[key] || {
+          username: key,
+          displayName: key,
+          role: 'user'
+        };
+      },
+      complete: () => {
+        this.userProfileCardLoading = false;
+      }
+    });
+  }
+
+  closeUserProfileCard() {
+    this.userProfileCardOpen = false;
+    this.userProfileCardLoading = false;
+  }
+
   toggleSearch() {
     this.searchOpen = !this.searchOpen;
     if (!this.searchOpen) {
@@ -5266,6 +5354,46 @@ export class ChatComponent implements AfterViewChecked {
   // Helpers
   get myUsername(): string | null {
     return this.auth.getUsername();
+  }
+
+  private ensureUserProfile(username: string | null | undefined) {
+    const key = String(username || '').trim().toLowerCase();
+    if (!key) return;
+    if (this.userAvatarUrlByUsername[key] !== undefined) return;
+    if (this.userProfileLookupBusy.has(key)) return;
+
+    this.userProfileLookupBusy.add(key);
+    this.auth.getPublicProfile(key).subscribe({
+      next: (res: any) => {
+        this.userAvatarUrlByUsername[key] = String(res?.avatarUrl || '').trim();
+        this.userPublicProfileByUsername[key] = {
+          username: String(res?.username || key),
+          displayName: String(res?.displayName || key),
+          avatarUrl: String(res?.avatarUrl || ''),
+          role: String(res?.role || 'user'),
+          statusText: String(res?.statusText || ''),
+          bio: String(res?.bio || ''),
+          timezone: String(res?.timezone || 'UTC'),
+          lastSeenAt: res?.lastSeenAt || null
+        };
+      },
+      error: () => {
+        this.userAvatarUrlByUsername[key] = '';
+        this.userPublicProfileByUsername[key] = {
+          username: key,
+          displayName: key,
+          avatarUrl: '',
+          role: 'user',
+          statusText: '',
+          bio: '',
+          timezone: 'UTC',
+          lastSeenAt: null
+        };
+      },
+      complete: () => {
+        this.userProfileLookupBusy.delete(key);
+      }
+    });
   }
 
   // Angular template can’t call Array.from directly; provide a getter
@@ -5698,6 +5826,7 @@ export class ChatComponent implements AfterViewChecked {
             (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
           );
           const normalizedPage = page.map((m) => this.normalizeMessage(m));
+          normalizedPage.forEach((m) => this.ensureUserProfile(m.from));
 
           if (before) {
             this.publicMessages = this.mergePublicMessages(normalizedPage, this.publicMessages);
@@ -5971,6 +6100,7 @@ export class ChatComponent implements AfterViewChecked {
       .subscribe({
         next: (res) => {
           const incoming = res?.messages || [];
+          incoming.forEach((m) => this.ensureUserProfile(String(m?.from || '')));
           this.publicMessages = this.mergePublicMessages(
             this.publicMessages,
             incoming.map((m) => this.normalizeMessage(m))
@@ -6007,6 +6137,12 @@ export class ChatComponent implements AfterViewChecked {
           this.privateChats[username] = Array.from(merged.values()).sort(
             (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
           );
+
+          this.privateChats[username].forEach((m) => {
+            this.ensureUserProfile(m.from);
+            this.ensureUserProfile(m.to);
+          });
+          this.ensureUserProfile(username);
 
           if (!this.users.includes(username)) this.users.unshift(username);
         },
