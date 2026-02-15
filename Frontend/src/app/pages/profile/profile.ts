@@ -82,6 +82,20 @@ export class ProfileComponent {
   reviewMessage: any = null;
   reviewAuthor: any = null;
 
+  socialLinks: { [key: string]: string } = {};
+  socialPlatforms = [
+    { id: 'facebook', name: 'Facebook', domain: 'facebook.com', placeholder: 'https://facebook.com/yourprofile' },
+    { id: 'instagram', name: 'Instagram', domain: 'instagram.com', placeholder: 'https://instagram.com/yourprofile' },
+    { id: 'tiktok', name: 'TikTok', domain: 'tiktok.com', placeholder: 'https://tiktok.com/@yourprofile' },
+    { id: 'twitter', name: 'X', domain: 'x.com', placeholder: 'https://x.com/yourprofile' },
+    { id: 'website', name: 'Your Site', domain: '', placeholder: 'https://yoursite.com' }
+  ];
+
+  showGender = true;
+  showOnlineStatus = true;
+
+  previewOpen = false;
+
   constructor(private auth: AuthService, private router: Router) {}
 
   ngOnInit() {
@@ -119,10 +133,22 @@ export class ProfileComponent {
         this.lastSeenVisibility = (['everyone', 'contacts', 'nobody'].includes(String(res?.lastSeenVisibility || ''))
           ? String(res?.lastSeenVisibility || 'everyone')
           : 'everyone') as 'everyone' | 'contacts' | 'nobody';
+        
+        this.socialLinks = {
+          facebook: String(res?.socialLinks?.facebook || ''),
+          instagram: String(res?.socialLinks?.instagram || ''),
+          tiktok: String(res?.socialLinks?.tiktok || ''),
+          twitter: String(res?.socialLinks?.twitter || ''),
+          website: String(res?.socialLinks?.website || '')
+        };
+        
+        this.showGender = res?.privacySettings?.showGender !== false;
+        this.showOnlineStatus = res?.privacySettings?.showOnlineStatus !== false;
+        
         this.loading = false;
         if (this.isModeratorOrHigher()) this.loadAdminData();
       },
-      error: (err) => {
+      error: (err: any) => {
         console.log(err?.error?.message || 'Could not load profile.');
         this.loading = false;
       }
@@ -144,7 +170,12 @@ export class ProfileComponent {
       statusText: this.statusText,
       showCountry: this.showCountry,
       showAge: this.showAge,
-      lastSeenVisibility: this.lastSeenVisibility
+      lastSeenVisibility: this.lastSeenVisibility,
+      socialLinks: this.socialLinks,
+      privacySettings: {
+        showGender: this.showGender,
+        showOnlineStatus: this.showOnlineStatus
+      }
     };
 
     if (!this.genderLocked && this.genderDirty) {
@@ -178,9 +209,24 @@ export class ProfileComponent {
           this.lastSeenVisibility = (['everyone', 'contacts', 'nobody'].includes(String(res?.user?.lastSeenVisibility || ''))
             ? String(res?.user?.lastSeenVisibility || 'everyone')
             : 'everyone') as 'everyone' | 'contacts' | 'nobody';
+          
+          if (res?.user?.socialLinks) {
+            this.socialLinks = {
+              facebook: String(res?.user?.socialLinks?.facebook || ''),
+              instagram: String(res?.user?.socialLinks?.instagram || ''),
+              tiktok: String(res?.user?.socialLinks?.tiktok || ''),
+              twitter: String(res?.user?.socialLinks?.twitter || ''),
+              website: String(res?.user?.socialLinks?.website || '')
+            };
+          }
+          
+          if (res?.user?.privacySettings) {
+            this.showGender = res?.user?.privacySettings?.showGender !== false;
+            this.showOnlineStatus = res?.user?.privacySettings?.showOnlineStatus !== false;
+          }
         }
       },
-      error: (err) => {
+      error: (err: any) => {
         console.log(err?.error?.error?.message || 'Could not update profile.');
       },
       complete: () => {
@@ -206,7 +252,7 @@ export class ProfileComponent {
         this.avatarUrl = nextUrl;
         this.saveProfile();
       },
-      error: (err) => {
+      error: (err: any) => {
         console.log(err?.error?.error || err?.error?.message || 'Could not upload avatar.');
       },
       complete: () => {
@@ -328,7 +374,7 @@ export class ProfileComponent {
         this.newPassword = '';
         this.confirmPassword = '';
       },
-      error: (err) => {
+      error: (err: any) => {
         console.log(err?.error?.error?.message || 'Could not change password.');
       },
       complete: () => {
@@ -458,7 +504,7 @@ export class ProfileComponent {
         this.adminMessage = String(res?.message || 'User role updated.');
         user.role = role;
       },
-      error: (err) => {
+      error: (err: any) => {
         this.adminMessage = err?.error?.error?.message || 'Role update failed.';
       }
     });
@@ -470,7 +516,7 @@ export class ProfileComponent {
         this.adminMessage = String(res?.message || 'Email marked as verified.');
         user.emailVerified = true;
       },
-      error: (err) => {
+      error: (err: any) => {
         this.adminMessage = err?.error?.error?.message || 'Verify email failed.';
       }
     });
@@ -483,7 +529,7 @@ export class ProfileComponent {
         user.loginFailures = 0;
         user.lockUntil = null;
       },
-      error: (err) => {
+      error: (err: any) => {
         this.adminMessage = err?.error?.error?.message || 'Unlock failed.';
       }
     });
@@ -494,7 +540,7 @@ export class ProfileComponent {
       next: (res: any) => {
         this.adminMessage = String(res?.message || 'Sessions revoked.');
       },
-      error: (err) => {
+      error: (err: any) => {
         this.adminMessage = err?.error?.error?.message || 'Session revoke failed.';
       }
     });
@@ -507,7 +553,7 @@ export class ProfileComponent {
         user.bannedUntil = res?.bannedUntil || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
         user.blockedAt = null;
       },
-      error: (err) => {
+      error: (err: any) => {
         this.adminMessage = err?.error?.error?.message || 'User ban failed.';
       }
     });
@@ -520,7 +566,7 @@ export class ProfileComponent {
         user.blockedAt = new Date().toISOString();
         user.bannedUntil = null;
       },
-      error: (err) => {
+      error: (err: any) => {
         this.adminMessage = err?.error?.error?.message || 'User block failed.';
       }
     });
@@ -533,7 +579,7 @@ export class ProfileComponent {
         user.blockedAt = null;
         user.bannedUntil = null;
       },
-      error: (err) => {
+      error: (err: any) => {
         this.adminMessage = err?.error?.error?.message || 'User unblock failed.';
       }
     });
@@ -557,7 +603,7 @@ export class ProfileComponent {
           report.status = status;
         }
       },
-      error: (err) => {
+      error: (err: any) => {
         this.adminMessage = err?.error?.error?.message || 'Report update failed.';
       }
     });
@@ -585,7 +631,7 @@ export class ProfileComponent {
         this.reviewMessage = res?.message || null;
         this.reviewAuthor = res?.messageAuthor || null;
       },
-      error: (err) => {
+      error: (err: any) => {
         this.adminMessage = err?.error?.error?.message || 'Could not load report detail.';
         this.closeReportReview();
       },
@@ -628,7 +674,7 @@ export class ProfileComponent {
         this.removeReportById(reportId);
         this.closeReportReview();
       },
-      error: (err) => {
+      error: (err: any) => {
         this.adminMessage = err?.error?.error?.message || 'Could not dismiss report.';
       },
       complete: () => {
@@ -663,7 +709,7 @@ export class ProfileComponent {
           }
         });
       },
-      error: (err) => {
+      error: (err: any) => {
         this.adminMessage = err?.error?.error?.message || 'Could not remove message.';
         this.reviewActionBusy = false;
       }
@@ -692,7 +738,7 @@ export class ProfileComponent {
           }
         });
       },
-      error: (err) => {
+      error: (err: any) => {
         this.adminMessage = err?.error?.error?.message || 'Could not ban user.';
         this.reviewActionBusy = false;
       }
@@ -721,7 +767,7 @@ export class ProfileComponent {
           }
         });
       },
-      error: (err) => {
+      error: (err: any) => {
         this.adminMessage = err?.error?.error?.message || 'Could not block user.';
         this.reviewActionBusy = false;
       }
@@ -837,5 +883,68 @@ export class ProfileComponent {
     
     // Update URL fragment for bookmarking/sharing
     window.history.pushState(null, '', `#${tab}`);
+  }
+
+  getSocialLink(platformId: string): string {
+    return this.socialLinks[platformId] || '';
+  }
+
+  setSocialLink(platformId: string, value: string): void {
+    this.socialLinks[platformId] = value;
+  }
+
+  isValidSocialLink(platformId: string): boolean {
+    const url = this.getSocialLink(platformId);
+    if (!url) return true;
+
+    const platform = this.socialPlatforms.find(p => p.id === platformId);
+    if (!platform || !platform.domain) return true;
+
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname.includes(platform.domain);
+    } catch {
+      return url.startsWith('http://') || url.startsWith('https://');
+    }
+  }
+
+  getPlatformIcon(platformId: string): string {
+    const icons: { [key: string]: string } = {
+      facebook: 'f',
+      instagram: 'IG',
+      tiktok: 'TT',
+      twitter: 'X',
+      website: '🌐'
+    };
+    return icons[platformId] || '?';
+  }
+
+  getProfileCompletionScore(): number {
+    let score = 0;
+    if (this.avatarUrl) score += 20;
+    if (this.displayName) score += 15;
+    if (this.bio) score += 15;
+    if (this.statusText) score += 10;
+    if (this.gender) score += 10;
+    if (this.birthDate) score += 10;
+    const socialCount = Object.values(this.socialLinks).filter(v => v && v.trim()).length;
+    if (socialCount > 0) score += Math.min(socialCount * 2, 10);
+    return score;
+  }
+
+  getCompletionLabel(score: number): string {
+    if (score >= 80) return 'Excellent';
+    if (score >= 60) return 'Good';
+    if (score >= 40) return 'Fair';
+    if (score >= 20) return 'Getting started';
+    return 'Just started';
+  }
+
+  openPreview(): void {
+    this.previewOpen = true;
+  }
+
+  closePreview(): void {
+    this.previewOpen = false;
   }
 }

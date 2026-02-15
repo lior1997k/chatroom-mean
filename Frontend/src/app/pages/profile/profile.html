@@ -70,6 +70,17 @@
         <p class="meta">Joined {{ me?.createdAt | date:'mediumDate' }}</p>
       </div>
 
+      <div class="completion-score">
+        <div class="completion-header">
+          <span>Profile completeness:</span>
+          <span class="completion-label">{{ getCompletionLabel(getProfileCompletionScore()) }}</span>
+        </div>
+        <div class="completion-bar">
+          <div class="completion-fill" [style.width.%]="getProfileCompletionScore()"></div>
+        </div>
+        <span class="small">{{ getProfileCompletionScore() }}%</span>
+      </div>
+
       <span class="small">Username and birth date are fixed after creation.</span>
     </aside>
 
@@ -119,9 +130,38 @@
           </select>
         </label>
       </div>
-      <button type="button" class="primary" [disabled]="savingProfile" (click)="saveProfile()">
-        {{ savingProfile ? 'Saving...' : 'Save profile' }}
-      </button>
+
+      <h3>Social Links</h3>
+      <div class="social-links-grid">
+        <div class="social-link-row" *ngFor="let platform of socialPlatforms">
+          <span class="social-icon">{{ getPlatformIcon(platform.id) }}</span>
+          <input type="url" 
+                 [placeholder]="platform.placeholder" 
+                 [ngModel]="getSocialLink(platform.id)"
+                 (ngModelChange)="setSocialLink(platform.id, $event)"
+                 [name]="platform.id" />
+          <span class="warn" *ngIf="!isValidSocialLink(platform.id)" title="Invalid URL format">⚠️</span>
+        </div>
+      </div>
+
+      <h3>Privacy</h3>
+      <div class="formGrid">
+        <label class="switchLabel full">
+          <input type="checkbox" [(ngModel)]="showGender" name="showGender" />
+          <span>Display gender on public profile</span>
+        </label>
+        <label class="switchLabel full">
+          <input type="checkbox" [(ngModel)]="showOnlineStatus" name="showOnlineStatus" />
+          <span>Display online status</span>
+        </label>
+      </div>
+
+      <div class="actionRow">
+        <button type="button" class="primary" [disabled]="savingProfile" (click)="saveProfile()">
+          {{ savingProfile ? 'Saving...' : 'Save profile' }}
+        </button>
+        <button type="button" class="ghost" (click)="openPreview()">Preview</button>
+      </div>
     </article>
   </div>
 
@@ -379,4 +419,39 @@
       </div>
     </article>
   </section>
+
+  <!-- Preview Modal -->
+  <div class="modal-overlay" *ngIf="previewOpen" (click)="closePreview()">
+    <div class="modal-content preview-card" (click)="$event.stopPropagation()">
+      <div class="preview-header">
+        <h2>Profile Preview</h2>
+        <button type="button" class="ghost" (click)="closePreview()">✕</button>
+      </div>
+      <div class="preview-body">
+        <div class="preview-avatar-section">
+          <div class="preview-avatar">
+            <img *ngIf="avatarPreviewUrl()" [src]="avatarPreviewUrl()" alt="avatar" />
+            <div *ngIf="!avatarPreviewUrl()" class="avatarPlaceholder">No avatar</div>
+          </div>
+          <div class="preview-status" *ngIf="statusText">{{ statusText }}</div>
+        </div>
+        <h3>{{ displayName || me?.username }}</h3>
+        <p class="username">@{{ me?.username }}</p>
+        <p class="preview-bio" *ngIf="bio">{{ bio }}</p>
+        <div class="preview-details">
+          <p *ngIf="showGender">Gender: {{ gender }}</p>
+          <p *ngIf="showAge">Age: {{ ageLabel() }}</p>
+          <p *ngIf="showCountry">Country: {{ countryLabel() }}</p>
+          <p>Joined {{ me?.createdAt | date:'mediumDate' }}</p>
+        </div>
+        <div class="preview-social" *ngIf="getSocialLink('facebook') || getSocialLink('instagram') || getSocialLink('tiktok') || getSocialLink('twitter') || getSocialLink('website')">
+          <span class="social-icon" *ngIf="getSocialLink('facebook')">f</span>
+          <span class="social-icon" *ngIf="getSocialLink('instagram')">IG</span>
+          <span class="social-icon" *ngIf="getSocialLink('tiktok')">TT</span>
+          <span class="social-icon" *ngIf="getSocialLink('twitter')">X</span>
+          <span class="social-icon" *ngIf="getSocialLink('website')">🌐</span>
+        </div>
+      </div>
+    </div>
+  </div>
 </ng-template>

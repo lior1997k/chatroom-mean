@@ -233,6 +233,35 @@ export class AuthService {
     });
   }
 
+  checkDisplayNameAvailability(displayName: string) {
+    const token = this.getToken();
+    return this.http.get(`${environment.apiUrl}/api/users/check-display-name`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      params: { displayName }
+    });
+  }
+
+  adminBanUserWeek(userId: string) {
+    const token = this.getToken();
+    return this.http.post(`${environment.apiUrl}/api/admin/auth/users/${encodeURIComponent(userId)}/ban-week`, {}, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  adminBlockUser(userId: string) {
+    const token = this.getToken();
+    return this.http.post(`${environment.apiUrl}/api/admin/auth/users/${encodeURIComponent(userId)}/block`, {}, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  adminUnblockUser(userId: string) {
+    const token = this.getToken();
+    return this.http.post(`${environment.apiUrl}/api/admin/auth/users/${encodeURIComponent(userId)}/unblock`, {}, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
   getUsername(): string | null {
     const payload = this.getTokenPayload();
     return payload?.username || null;
