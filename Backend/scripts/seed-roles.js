@@ -21,6 +21,8 @@ async function upsertUser({ username, email, role, password }) {
       email: normalizedEmail,
       password: passwordHash,
       role,
+      googleSub: undefined,
+      appleSub: undefined,
       emailVerified: true,
       loginFailures: 0,
       lockUntil: null,
@@ -33,6 +35,8 @@ async function upsertUser({ username, email, role, password }) {
   user.email = normalizedEmail;
   user.password = passwordHash;
   user.role = role;
+  user.googleSub = undefined;
+  user.appleSub = undefined;
   user.emailVerified = true;
   user.loginFailures = 0;
   user.lockUntil = null;
@@ -47,10 +51,7 @@ async function run() {
     throw new Error('MONGODB_URI is required to seed users.');
   }
 
-  await mongoose.connect(mongoUri, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-  });
+  await mongoose.connect(mongoUri);
 
   const users = [
     { username: 'admin', email: 'admin@chatroom.local', role: 'admin', password: DEFAULT_PASSWORD },
