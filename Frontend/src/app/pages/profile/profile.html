@@ -17,6 +17,29 @@
     </div>
   </header>
 
+  <!-- Tab Navigation -->
+  <nav class="tab-nav">
+    <button type="button" 
+            class="tab-button" 
+            [class.active]="activeTab === 'profile'"
+            (click)="selectTab('profile')">
+      Public Profile
+    </button>
+    <button type="button" 
+            class="tab-button" 
+            [class.active]="activeTab === 'security'"
+            (click)="selectTab('security')">
+      Security
+    </button>
+    <button type="button" 
+            class="tab-button" 
+            [class.active]="activeTab === 'admin'"
+            *ngIf="isModeratorOrHigher()"
+            (click)="selectTab('admin')">
+      Moderation
+    </button>
+  </nav>
+
   <div class="layoutGrid">
     <aside class="card profileHero">
       <div class="avatarRow">
@@ -51,7 +74,8 @@
       <span class="small">Username and birth date are fixed after creation.</span>
     </aside>
 
-    <article class="card">
+    <!-- Profile Tab Content -->
+    <article class="card" *ngIf="activeTab === 'profile'">
       <h2>Public profile</h2>
       <div class="formGrid">
         <label>
@@ -103,7 +127,8 @@
     </article>
   </div>
 
-  <article class="card">
+  <!-- Security Tab Content -->
+  <article class="card" *ngIf="activeTab === 'security'">
     <h2>Security</h2>
     <div class="formGrid">
       <label>
@@ -138,7 +163,8 @@
     <div class="small" *ngIf="!sessionsLoading && !sessions.length">No sessions found.</div>
   </article>
 
-  <section *ngIf="isModeratorOrHigher()" class="card">
+  <!-- Admin/Moderation Tab Content -->
+  <section *ngIf="activeTab === 'admin' && isModeratorOrHigher()" class="card">
     <h2>Moderation workspace</h2>
     <p *ngIf="adminMessage" class="notice info">{{ adminMessage }}</p>
 

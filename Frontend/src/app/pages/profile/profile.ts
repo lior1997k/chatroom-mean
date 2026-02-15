@@ -21,6 +21,9 @@ export class ProfileComponent {
   loading = true;
   currentTheme: 'light' | 'dark' = 'light';
   private readonly THEME_KEY = 'theme-preference';
+  
+  // Tab management
+  activeTab: 'profile' | 'security' | 'admin' = 'profile';
 
   username = '';
   avatarUrl = '';
@@ -83,6 +86,7 @@ export class ProfileComponent {
 
   ngOnInit() {
     this.initializeTheme();
+    this.initializeTab();
     this.loadMe();
     this.loadSessions();
   }
@@ -809,5 +813,29 @@ export class ProfileComponent {
       html.classList.remove('dark-theme');
       html.style.colorScheme = 'light';
     }
+  }
+
+  private initializeTab(): void {
+    // Read tab from URL fragment (e.g., #security, #admin)
+    const hash = window.location.hash.slice(1); // Remove '#' prefix
+    const validTabs: Array<'profile' | 'security' | 'admin'> = ['profile', 'security', 'admin'];
+    
+    if (hash && validTabs.includes(hash as any)) {
+      this.activeTab = hash as 'profile' | 'security' | 'admin';
+    } else {
+      this.activeTab = 'profile'; // Default to profile tab
+    }
+  }
+
+  selectTab(tab: 'profile' | 'security' | 'admin'): void {
+    // Don't show admin tab if user doesn't have permission
+    if (tab === 'admin' && !this.isModeratorOrHigher()) {
+      return;
+    }
+
+    this.activeTab = tab;
+    
+    // Update URL fragment for bookmarking/sharing
+    window.history.pushState(null, '', `#${tab}`);
   }
 }

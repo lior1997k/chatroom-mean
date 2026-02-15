@@ -136,6 +136,42 @@
   flex-shrink: 0;
 }
 
+/* Tab Navigation */
+.tab-nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--border-color);
+  overflow-x: auto;
+  animation: slideInLeft 0.6s ease-out 0.1s both;
+}
+
+.tab-button {
+  padding: 10px 16px;
+  border: none;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.tab-button:hover:not(.active) {
+  color: var(--text-primary);
+  transform: translateY(-2px);
+}
+
+.tab-button.active {
+  color: var(--text-primary);
+  border-bottom-color: #3d63b3;
+  background: rgba(61, 99, 179, 0.05);
+}
+
 .eyebrow {
   margin: 0;
   letter-spacing: 0.12em;
