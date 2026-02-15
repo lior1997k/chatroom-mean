@@ -10,20 +10,104 @@
   <article class="card">
     <h2>Account</h2>
     <p class="meta">Role: <strong>{{ me?.role }}</strong> · Email: {{ me?.email || 'none' }} · Verified: {{ me?.emailVerified ? 'yes' : 'no' }}</p>
+    <p class="meta">Joined: {{ me?.createdAt | date:'mediumDate' }} · Last login: {{ me?.lastLoginAt ? (me?.lastLoginAt | date:'short') : 'unknown' }}</p>
+
+    <div class="avatarBlock">
+      <img *ngIf="avatarPreviewUrl(); else noAvatar" [src]="avatarPreviewUrl()" alt="avatar preview" class="avatarPreview" />
+      <ng-template #noAvatar>
+        <div class="avatarPlaceholder">No avatar</div>
+      </ng-template>
+      <div class="avatarActions">
+        <label class="uploadBtn">
+          Upload avatar
+          <input type="file" accept="image/*" (change)="onAvatarSelected($event)" />
+        </label>
+        <span class="small" *ngIf="uploadingAvatar">Uploading and saving...</span>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <span class="small">Username</span>
+        <div><strong>{{ me?.username }}</strong></div>
+      </div>
+      <span class="small">Username is fixed after account creation.</span>
+    </div>
 
     <label>
-      <span>Username</span>
-      <input type="text" [(ngModel)]="username" name="username" />
+      <span>Display name</span>
+      <input type="text" [(ngModel)]="displayName" name="displayName" maxlength="60" />
     </label>
 
     <label>
-      <span>Avatar URL</span>
-      <input type="url" [(ngModel)]="avatarUrl" name="avatarUrl" />
+      <span>Status</span>
+      <input type="text" [(ngModel)]="statusText" name="statusText" maxlength="120" />
     </label>
+
+    <label>
+      <span>Bio</span>
+      <textarea [(ngModel)]="bio" name="bio" rows="3" maxlength="240"></textarea>
+    </label>
+
+    <div class="row">
+      <label>
+        <span>Timezone</span>
+        <input type="text" [(ngModel)]="timezone" name="timezone" maxlength="64" placeholder="e.g. Europe/Berlin" />
+      </label>
+      <label>
+        <span>Last seen visibility</span>
+        <select [(ngModel)]="lastSeenVisibility" name="lastSeenVisibility">
+          <option value="everyone">Everyone</option>
+          <option value="contacts">Contacts</option>
+          <option value="nobody">Nobody</option>
+        </select>
+      </label>
+    </div>
 
     <button type="button" class="primary" [disabled]="savingProfile" (click)="saveProfile()">
       {{ savingProfile ? 'Saving...' : 'Save profile' }}
     </button>
+  </article>
+
+  <article class="card">
+    <h2>Security</h2>
+    <p class="meta">Change your password and manage your logged-in sessions.</p>
+
+    <label>
+      <span>Current password</span>
+      <input type="password" [(ngModel)]="currentPassword" name="currentPassword" />
+    </label>
+
+    <label>
+      <span>New password</span>
+      <input type="password" [(ngModel)]="newPassword" name="newPassword" />
+    </label>
+
+    <label>
+      <span>Confirm new password</span>
+      <input type="password" [(ngModel)]="confirmPassword" name="confirmPassword" />
+    </label>
+
+    <button type="button" class="primary" [disabled]="changingPassword" (click)="changePassword()">
+      {{ changingPassword ? 'Updating...' : 'Change password' }}
+    </button>
+    <p *ngIf="passwordMessage" class="notice info">{{ passwordMessage }}</p>
+
+    <div class="row">
+      <h3>Active sessions</h3>
+      <button type="button" class="ghost" (click)="loadSessions()">Refresh sessions</button>
+      <button type="button" class="danger" (click)="logoutAllDevices()">Logout all devices</button>
+    </div>
+
+    <div class="table" *ngFor="let session of sessions">
+      <div>
+        <strong>{{ sessionStatus(session) }}</strong>
+        <div class="small">{{ session.userAgent || 'unknown device' }}</div>
+        <div class="small">IP: {{ session.ip || 'unknown' }}</div>
+      </div>
+      <div class="small">last used: {{ session.lastUsedAt ? (session.lastUsedAt | date:'short') : 'never' }}</div>
+    </div>
+    <div class="small" *ngIf="!sessionsLoading && !sessions.length">No sessions found.</div>
   </article>
 
   <section *ngIf="isModeratorOrHigher()" class="card">

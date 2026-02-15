@@ -81,11 +81,45 @@ export class AuthService {
     });
   }
 
-  updateProfile(username: string, avatarUrl: string) {
+  updateProfile(payload: {
+    avatarUrl?: string;
+    displayName?: string;
+    bio?: string;
+    statusText?: string;
+    timezone?: string;
+    lastSeenVisibility?: 'everyone' | 'contacts' | 'nobody';
+  }) {
     const token = this.getToken();
-    return this.http.patch(`${environment.apiUrl}/api/me/profile`, { username, avatarUrl }, {
+    return this.http.patch(`${environment.apiUrl}/api/me/profile`, payload, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined
     });
+  }
+
+  changePassword(currentPassword: string, newPassword: string) {
+    const token = this.getToken();
+    return this.http.patch(`${environment.apiUrl}/api/me/password`, { currentPassword, newPassword }, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  listSessions() {
+    const token = this.getToken();
+    return this.http.get(`${this.apiUrl}/sessions`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  uploadAvatar(file: File) {
+    const token = this.getToken();
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http.post(`${environment.apiUrl}/api/upload`, formData, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  getPublicProfile(username: string) {
+    return this.http.get(`${environment.apiUrl}/api/users/${encodeURIComponent(username)}/public-profile`);
   }
 
   adminListUsers(q = '', limit = 40) {

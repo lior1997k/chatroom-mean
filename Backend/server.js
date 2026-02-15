@@ -531,6 +531,36 @@ app.get('/api/users/:username/exists', async (req, res) => {
   }
 });
 
+app.get('/api/users/:username/public-profile', async (req, res) => {
+  try {
+    const username = String(req.params.username || '').trim().toLowerCase();
+    if (!username) {
+      return res.status(400).json({ error: 'Username is required' });
+    }
+
+    const user = await User.findOne({ username })
+      .select('_id username avatarUrl role displayName statusText bio timezone lastSeenVisibility lastLoginAt')
+      .lean();
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    return res.json({
+      username: user.username,
+      displayName: String(user.displayName || user.username || ''),
+      avatarUrl: user.avatarUrl || '',
+      role: user.role || 'user',
+      statusText: String(user.statusText || ''),
+      bio: String(user.bio || ''),
+      timezone: String(user.timezone || 'UTC'),
+      lastSeenAt: user.lastSeenVisibility === 'everyone' ? (user.lastLoginAt || null) : null
+    });
+  } catch (err) {
+    console.error('Error fetching public profile:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // userId -> Set<socketId>
 const socketsByUserId = new Map();
 const onlineUsernames = new Set();
