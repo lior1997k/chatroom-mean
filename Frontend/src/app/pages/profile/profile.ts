@@ -5,6 +5,7 @@ import { Router, RouterModule } from '@angular/router';
 import { AuthService } from '../../services/auth';
 import { ToastService } from '../../services/toast.service';
 import { ToastContainerComponent } from '../../components/toast-container.component';
+import { SkeletonLoaderComponent } from '../../components/skeleton-loader.component';
 import { environment } from '../../../environments/environment';
 
 type RoleValue = 'user' | 'moderator' | 'support' | 'admin';
@@ -13,7 +14,7 @@ type GenderValue = 'male' | 'female' | 'other';
 @Component({
   selector: 'app-profile',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, ToastContainerComponent],
+  imports: [CommonModule, FormsModule, RouterModule, ToastContainerComponent, SkeletonLoaderComponent],
   templateUrl: './profile.html',
   styleUrls: ['./profile.css']
 })

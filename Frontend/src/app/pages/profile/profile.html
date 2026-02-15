@@ -298,6 +298,53 @@
 
 <ng-template #loadingTpl>
   <section class="profile-page">
-    <div class="card">Loading profile...</div>
+    <header class="topbar">
+      <div style="flex: 1;">
+        <p class="eyebrow">Account center</p>
+        <app-skeleton-loader variant="text" style="width: 250px; height: 28px; margin-top: 8px;"></app-skeleton-loader>
+      </div>
+      <app-skeleton-loader variant="button"></app-skeleton-loader>
+    </header>
+
+    <div class="layoutGrid">
+      <aside class="card profileHero">
+        <div class="avatarRow">
+          <app-skeleton-loader variant="avatar"></app-skeleton-loader>
+          <app-skeleton-loader variant="button"></app-skeleton-loader>
+        </div>
+        <app-skeleton-loader variant="text" style="width: 150px; height: 20px; margin: 16px 0;"></app-skeleton-loader>
+        <app-skeleton-loader variant="text" style="width: 100px; height: 16px; margin-bottom: 16px;"></app-skeleton-loader>
+        <div style="margin-top: 16px;">
+          <app-skeleton-loader variant="text" style="height: 14px; margin-bottom: 8px;"></app-skeleton-loader>
+          <app-skeleton-loader variant="text" style="height: 14px; margin-bottom: 8px;"></app-skeleton-loader>
+          <app-skeleton-loader variant="text" style="height: 14px;"></app-skeleton-loader>
+        </div>
+      </aside>
+
+      <article class="card">
+        <app-skeleton-loader variant="text" style="width: 150px; height: 24px; margin-bottom: 16px;"></app-skeleton-loader>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <app-skeleton-loader variant="input"></app-skeleton-loader>
+          <app-skeleton-loader variant="input"></app-skeleton-loader>
+          <app-skeleton-loader variant="input"></app-skeleton-loader>
+          <app-skeleton-loader variant="input"></app-skeleton-loader>
+        </div>
+        <app-skeleton-loader variant="button" style="margin-top: 16px;"></app-skeleton-loader>
+      </article>
+    </div>
+
+    <article class="card" style="margin-top: 18px;">
+      <app-skeleton-loader variant="text" style="width: 150px; height: 24px; margin-bottom: 16px;"></app-skeleton-loader>
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
+        <app-skeleton-loader variant="input"></app-skeleton-loader>
+        <app-skeleton-loader variant="input"></app-skeleton-loader>
+        <app-skeleton-loader variant="input"></app-skeleton-loader>
+      </div>
+      <div style="display: flex; gap: 10px; margin-top: 16px;">
+        <app-skeleton-loader variant="button"></app-skeleton-loader>
+        <app-skeleton-loader variant="button"></app-skeleton-loader>
+        <app-skeleton-loader variant="button"></app-skeleton-loader>
+      </div>
+    </article>
   </section>
 </ng-template>
