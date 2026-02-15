@@ -129,10 +129,7 @@
   flex: 1;
 }
 
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.topbar > button {
   flex-shrink: 0;
 }
 

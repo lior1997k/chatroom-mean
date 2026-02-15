@@ -6,15 +6,13 @@
       <p class="eyebrow">Account center</p>
       <h1>Profile & security</h1>
     </div>
-    <div class="topbar-actions">
-      <button type="button" class="dark-mode-toggle" (click)="toggleTheme()" 
-              [title]="currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
-              aria-label="Toggle dark mode">
-        <span *ngIf="currentTheme === 'light'">🌙</span>
-        <span *ngIf="currentTheme === 'dark'">☀️</span>
-      </button>
-      <button type="button" class="ghost" (click)="goToChat()">Back to chat</button>
-    </div>
+    <button type="button" class="dark-mode-toggle" (click)="toggleTheme()" 
+            [title]="currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+            aria-label="Toggle dark mode">
+      <span *ngIf="currentTheme === 'light'">🌙</span>
+      <span *ngIf="currentTheme === 'dark'">☀️</span>
+    </button>
+    <button type="button" class="ghost" (click)="goToChat()">Back to chat</button>
   </header>
 
   <!-- Tab Navigation -->
