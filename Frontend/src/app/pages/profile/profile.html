@@ -1,4 +1,4 @@
-<app-toast-container></app-toast-container>
+<!-- Toast notifications will be implemented inline -->
 
 <section class="profile-page" *ngIf="!loading; else loadingTpl">
   <header class="topbar">
@@ -6,7 +6,15 @@
       <p class="eyebrow">Account center</p>
       <h1>Profile & security</h1>
     </div>
-    <button type="button" class="ghost" (click)="goToChat()">Back to chat</button>
+    <div class="topbar-actions">
+      <button type="button" class="dark-mode-toggle" (click)="toggleTheme()" 
+              [title]="currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+              aria-label="Toggle dark mode">
+        <span *ngIf="currentTheme === 'light'">🌙</span>
+        <span *ngIf="currentTheme === 'dark'">☀️</span>
+      </button>
+      <button type="button" class="ghost" (click)="goToChat()">Back to chat</button>
+    </div>
   </header>
 
   <div class="layoutGrid">

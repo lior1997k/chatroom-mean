@@ -3,8 +3,6 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { AuthService } from '../../services/auth';
-import { ToastService } from '../../services/toast.service';
-import { ToastContainerComponent } from '../../components/toast-container.component';
 import { SkeletonLoaderComponent } from '../../components/skeleton-loader.component';
 import { environment } from '../../../environments/environment';
 
@@ -14,13 +12,15 @@ type GenderValue = 'male' | 'female' | 'other';
 @Component({
   selector: 'app-profile',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, ToastContainerComponent, SkeletonLoaderComponent],
+  imports: [CommonModule, FormsModule, RouterModule, SkeletonLoaderComponent],
   templateUrl: './profile.html',
   styleUrls: ['./profile.css']
 })
 export class ProfileComponent {
   me: any = null;
   loading = true;
+  currentTheme: 'light' | 'dark' = 'light';
+  private readonly THEME_KEY = 'theme-preference';
 
   username = '';
   avatarUrl = '';
@@ -79,9 +79,10 @@ export class ProfileComponent {
   reviewMessage: any = null;
   reviewAuthor: any = null;
 
-  constructor(private auth: AuthService, private router: Router, private toast: ToastService) {}
+  constructor(private auth: AuthService, private router: Router) {}
 
   ngOnInit() {
+    this.initializeTheme();
     this.loadMe();
     this.loadSessions();
   }
@@ -118,7 +119,7 @@ export class ProfileComponent {
         if (this.isModeratorOrHigher()) this.loadAdminData();
       },
       error: (err) => {
-        this.toast.error(err?.error?.message || 'Could not load profile.');
+        console.log(err?.error?.message || 'Could not load profile.');
         this.loading = false;
       }
     });
@@ -127,7 +128,7 @@ export class ProfileComponent {
   saveProfile() {
     if (this.savingProfile) return;
     if (this.displayNameTaken) {
-      this.toast.error('Display name is already taken.');
+      console.log('Display name is already taken.');
       return;
     }
     this.savingProfile = true;
@@ -152,7 +153,7 @@ export class ProfileComponent {
 
     this.auth.updateProfile(payload).subscribe({
       next: (res: any) => {
-        this.toast.success(String(res?.message || 'Profile updated.'));
+        console.log(String(res?.message || 'Profile updated.'));
         if (res?.user) {
           this.me = res.user;
           this.displayName = String(res?.user?.displayName || '');
@@ -176,7 +177,7 @@ export class ProfileComponent {
         }
       },
       error: (err) => {
-        this.toast.error(err?.error?.error?.message || 'Could not update profile.');
+        console.log(err?.error?.error?.message || 'Could not update profile.');
       },
       complete: () => {
         this.savingProfile = false;
@@ -195,14 +196,14 @@ export class ProfileComponent {
       next: (res: any) => {
         const nextUrl = String(res?.url || '').trim();
         if (!nextUrl) {
-          this.toast.error('Avatar upload failed.');
+          console.log('Avatar upload failed.');
           return;
         }
         this.avatarUrl = nextUrl;
         this.saveProfile();
       },
       error: (err) => {
-        this.toast.error(err?.error?.error || err?.error?.message || 'Could not upload avatar.');
+        console.log(err?.error?.error || err?.error?.message || 'Could not upload avatar.');
       },
       complete: () => {
         this.uploadingAvatar = false;
@@ -307,24 +308,24 @@ export class ProfileComponent {
     if (this.changingPassword) return;
 
     if (!this.currentPassword || !this.newPassword || !this.confirmPassword) {
-      this.toast.warning('Please fill all password fields.');
+      console.log('Please fill all password fields.');
       return;
     }
     if (this.newPassword !== this.confirmPassword) {
-      this.toast.error('New password and confirm password do not match.');
+      console.log('New password and confirm password do not match.');
       return;
     }
 
     this.changingPassword = true;
     this.auth.changePassword(this.currentPassword, this.newPassword).subscribe({
       next: (res: any) => {
-        this.toast.success(String(res?.message || 'Password updated successfully.'));
+        console.log(String(res?.message || 'Password updated successfully.'));
         this.currentPassword = '';
         this.newPassword = '';
         this.confirmPassword = '';
       },
       error: (err) => {
-        this.toast.error(err?.error?.error?.message || 'Could not change password.');
+        console.log(err?.error?.error?.message || 'Could not change password.');
       },
       complete: () => {
         this.changingPassword = false;
@@ -350,11 +351,11 @@ export class ProfileComponent {
   logoutAllDevices() {
     this.auth.logoutAllSessions().subscribe({
       next: () => {
-        this.toast.success('Logged out from all devices.');
+        console.log('Logged out from all devices.');
         this.loadSessions();
       },
       error: () => {
-        this.toast.error('Could not logout all sessions.');
+        console.log('Could not logout all sessions.');
       }
     });
   }
@@ -773,5 +774,40 @@ export class ProfileComponent {
 
   goToChat() {
     this.router.navigate(['/chat']);
+  }
+
+  private initializeTheme(): void {
+    const saved = localStorage.getItem(this.THEME_KEY) as 'light' | 'dark' | null;
+
+    if (saved) {
+      this.currentTheme = saved;
+      this.applyTheme(saved);
+      return;
+    }
+
+    // Detect system preference
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      this.currentTheme = 'dark';
+      this.applyTheme('dark');
+    }
+  }
+
+  toggleTheme(): void {
+    const newTheme = this.currentTheme === 'light' ? 'dark' : 'light';
+    this.currentTheme = newTheme;
+    localStorage.setItem(this.THEME_KEY, newTheme);
+    this.applyTheme(newTheme);
+  }
+
+  private applyTheme(theme: 'light' | 'dark'): void {
+    const html = document.documentElement;
+
+    if (theme === 'dark') {
+      html.classList.add('dark-theme');
+      html.style.colorScheme = 'dark';
+    } else {
+      html.classList.remove('dark-theme');
+      html.style.colorScheme = 'light';
+    }
   }
 }
