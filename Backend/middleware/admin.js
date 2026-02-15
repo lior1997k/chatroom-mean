@@ -1,9 +1,10 @@
 const User = require('../models/User');
+const { hasCapability } = require('../utils/permissions');
 
 module.exports = async function requireAdmin(req, res, next) {
   try {
-    const currentUser = await User.findById(req.user?.id).select('_id role').lean();
-    if (!currentUser || !['admin', 'support', 'moderator'].includes(String(currentUser.role || ''))) {
+    const currentUser = await User.findById(req.user?.id).select('_id role username').lean();
+    if (!currentUser || !hasCapability(currentUser.role, 'access_admin_console')) {
       return res.status(403).json({
         error: {
           code: 'ADMIN_FORBIDDEN',

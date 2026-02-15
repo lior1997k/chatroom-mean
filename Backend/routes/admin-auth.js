@@ -6,6 +6,7 @@ const AttachmentReport = require('../models/AttachmentReport');
 const PublicMessage = require('../models/PublicMessage');
 const PrivateMessage = require('../models/PrivateMessage');
 const ModerationAction = require('../models/ModerationAction');
+const { hasCapability, canActOnTargetRole } = require('../utils/permissions');
 const auth = require('../middleware/auth');
 const requireAdmin = require('../middleware/admin');
 
@@ -13,7 +14,24 @@ const router = express.Router();
 const ALLOWED_ROLE_VALUES = new Set(['user', 'moderator', 'support', 'admin']);
 
 function canManageRoles(role) {
-  return String(role || '') === 'admin';
+  return hasCapability(role, 'manage_roles');
+}
+
+function deny(res, code, message) {
+  return res.status(403).json({
+    error: {
+      code,
+      message
+    }
+  });
+}
+
+function canAdminUserActOnTarget(req, targetUser) {
+  const actorId = String(req.adminUser?._id || '');
+  const targetId = String(targetUser?._id || '');
+  if (!targetId) return false;
+  if (actorId && actorId === targetId) return false;
+  return canActOnTargetRole(req.adminUser?.role, targetUser?.role);
 }
 
 function parsePaging(req, defaults = {}) {
@@ -103,11 +121,19 @@ router.get('/users', async (req, res) => {
 
 router.post('/users/:id/verify-email', async (req, res) => {
   try {
+    if (!hasCapability(req.adminUser?.role, 'manage_user_security')) {
+      return deny(res, 'ADMIN_PERMISSION_DENIED', 'You do not have permission to verify user email.');
+    }
+
     const user = await User.findById(req.params.id);
     if (!user) {
       return res.status(404).json({
         error: { code: 'USER_NOT_FOUND', message: 'User not found.' }
       });
+    }
+
+    if (!canAdminUserActOnTarget(req, user)) {
+      return deny(res, 'ADMIN_TARGET_FORBIDDEN', 'You cannot verify this account.');
     }
 
     user.emailVerified = true;
@@ -130,11 +156,19 @@ router.post('/users/:id/verify-email', async (req, res) => {
 
 router.post('/users/:id/unlock', async (req, res) => {
   try {
+    if (!hasCapability(req.adminUser?.role, 'manage_user_security')) {
+      return deny(res, 'ADMIN_PERMISSION_DENIED', 'You do not have permission to unlock users.');
+    }
+
     const user = await User.findById(req.params.id);
     if (!user) {
       return res.status(404).json({
         error: { code: 'USER_NOT_FOUND', message: 'User not found.' }
       });
+    }
+
+    if (!canAdminUserActOnTarget(req, user)) {
+      return deny(res, 'ADMIN_TARGET_FORBIDDEN', 'You cannot unlock this account.');
     }
 
     user.loginFailures = 0;
@@ -155,11 +189,19 @@ router.post('/users/:id/unlock', async (req, res) => {
 
 router.post('/users/:id/revoke-sessions', async (req, res) => {
   try {
+    if (!hasCapability(req.adminUser?.role, 'manage_user_security')) {
+      return deny(res, 'ADMIN_PERMISSION_DENIED', 'You do not have permission to revoke sessions.');
+    }
+
     const user = await User.findById(req.params.id).lean();
     if (!user) {
       return res.status(404).json({
         error: { code: 'USER_NOT_FOUND', message: 'User not found.' }
       });
+    }
+
+    if (!canAdminUserActOnTarget(req, user)) {
+      return deny(res, 'ADMIN_TARGET_FORBIDDEN', 'You cannot revoke sessions for this account.');
     }
 
     await AuthSession.updateMany({ userId: user._id, revokedAt: null }, { $set: { revokedAt: new Date() } });
@@ -233,6 +275,10 @@ router.patch('/users/:id/role', async (req, res) => {
       });
     }
 
+    if (String(user._id) === String(req.adminUser?._id)) {
+      return deny(res, 'ADMIN_SELF_ROLE_FORBIDDEN', 'You cannot change your own role.');
+    }
+
     user.role = role;
     await user.save();
     await logModerationAction(req, 'set-user-role', 'user', user._id, { role });
@@ -263,6 +309,10 @@ router.post('/users/:id/promote-support', async (req, res) => {
       return res.status(404).json({
         error: { code: 'USER_NOT_FOUND', message: 'User not found.' }
       });
+    }
+
+    if (String(user._id) === String(req.adminUser?._id)) {
+      return deny(res, 'ADMIN_SELF_ROLE_FORBIDDEN', 'You cannot change your own role.');
     }
 
     user.role = 'support';
@@ -348,6 +398,10 @@ router.get('/reports/attachments/:id', async (req, res) => {
 
 router.patch('/reports/attachments/:id', async (req, res) => {
   try {
+    if (!hasCapability(req.adminUser?.role, 'moderate_reports')) {
+      return deny(res, 'ADMIN_PERMISSION_DENIED', 'You do not have permission to update reports.');
+    }
+
     const status = String(req.body?.status || '').trim().toLowerCase();
     if (!['pending', 'in_review', 'resolved', 'dismissed'].includes(status)) {
       return res.status(400).json({
@@ -381,6 +435,10 @@ router.patch('/reports/attachments/:id', async (req, res) => {
 
 router.post('/messages/:scope/:id/remove', async (req, res) => {
   try {
+    if (!hasCapability(req.adminUser?.role, 'moderate_messages')) {
+      return deny(res, 'ADMIN_PERMISSION_DENIED', 'You do not have permission to remove messages.');
+    }
+
     const scope = String(req.params.scope || '').trim().toLowerCase();
     const MessageModel = scope === 'public' ? PublicMessage : scope === 'private' ? PrivateMessage : null;
     if (!MessageModel) {
@@ -397,6 +455,11 @@ router.post('/messages/:scope/:id/remove', async (req, res) => {
       return res.status(404).json({
         error: { code: 'MESSAGE_NOT_FOUND', message: 'Message not found.' }
       });
+    }
+
+    const author = await User.findOne({ username: String(message.from || '').trim().toLowerCase() }).select('_id role').lean();
+    if (author && !canAdminUserActOnTarget(req, author)) {
+      return deny(res, 'ADMIN_TARGET_FORBIDDEN', 'You cannot moderate this message author.');
     }
 
     message.text = 'Message removed by moderation';
