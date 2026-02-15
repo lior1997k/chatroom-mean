@@ -122,11 +122,27 @@ export class AuthService {
     return this.http.get(`${environment.apiUrl}/api/users/${encodeURIComponent(username)}/public-profile`);
   }
 
-  adminListUsers(q = '', limit = 40) {
+  adminListUsers(params: {
+    q?: string;
+    role?: string;
+    verified?: '' | 'true' | 'false';
+    page?: number;
+    limit?: number;
+    sortBy?: 'createdAt' | 'lastLoginAt' | 'username';
+    sortDir?: 'asc' | 'desc';
+  } = {}) {
     const token = this.getToken();
     return this.http.get(`${environment.apiUrl}/api/admin/auth/users`, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      params: { q, limit }
+      params: {
+        q: params.q || '',
+        role: params.role || '',
+        verified: params.verified || '',
+        page: Number(params.page || 1),
+        limit: Number(params.limit || 40),
+        sortBy: params.sortBy || 'createdAt',
+        sortDir: params.sortDir || 'desc'
+      }
     });
   }
 
@@ -158,19 +174,40 @@ export class AuthService {
     });
   }
 
-  adminListAbuseEvents(limit = 80) {
+  adminListAbuseEvents(page = 1, limit = 80) {
     const token = this.getToken();
     return this.http.get(`${environment.apiUrl}/api/admin/auth/abuse-events`, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      params: { limit }
+      params: { page, limit }
     });
   }
 
-  adminListAttachmentReports(status = '', limit = 80) {
+  adminListAttachmentReports(params: {
+    status?: string;
+    category?: string;
+    scope?: string;
+    severity?: string;
+    page?: number;
+    limit?: number;
+  } = {}) {
     const token = this.getToken();
     return this.http.get(`${environment.apiUrl}/api/admin/auth/reports/attachments`, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      params: { status, limit }
+      params: {
+        status: params.status || '',
+        category: params.category || '',
+        scope: params.scope || '',
+        severity: params.severity || '',
+        page: Number(params.page || 1),
+        limit: Number(params.limit || 80)
+      }
+    });
+  }
+
+  adminAttachmentReportDetail(reportId: string) {
+    const token = this.getToken();
+    return this.http.get(`${environment.apiUrl}/api/admin/auth/reports/attachments/${encodeURIComponent(reportId)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
     });
   }
 
@@ -185,6 +222,14 @@ export class AuthService {
     const token = this.getToken();
     return this.http.post(`${environment.apiUrl}/api/admin/auth/messages/${scope}/${encodeURIComponent(messageId)}/remove`, {}, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  adminAuditActions(page = 1, limit = 60) {
+    const token = this.getToken();
+    return this.http.get(`${environment.apiUrl}/api/admin/auth/audit-actions`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      params: { page, limit }
     });
   }
 

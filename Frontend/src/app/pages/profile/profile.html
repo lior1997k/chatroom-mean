@@ -116,6 +116,18 @@
 
     <div class="row">
       <input type="text" [(ngModel)]="adminSearch" placeholder="Search users" />
+      <select [(ngModel)]="adminUsersRole">
+        <option value="">all roles</option>
+        <option value="user">user</option>
+        <option value="moderator">moderator</option>
+        <option value="support">support</option>
+        <option value="admin">admin</option>
+      </select>
+      <select [(ngModel)]="adminUsersVerified">
+        <option value="">any verify state</option>
+        <option value="true">verified</option>
+        <option value="false">unverified</option>
+      </select>
       <button type="button" class="ghost" (click)="loadAdminData()">Refresh</button>
     </div>
 
@@ -134,19 +146,69 @@
         </select>
       </div>
     </div>
+    <div class="pagerRow">
+      <button type="button" class="ghost" (click)="prevUsersPage()" [disabled]="usersPage <= 1">Prev</button>
+      <span class="small">page {{ usersPage }} / {{ usersPages }}</span>
+      <button type="button" class="ghost" (click)="nextUsersPage()" [disabled]="usersPage >= usersPages">Next</button>
+    </div>
 
     <h3>Attachment reports</h3>
+    <div class="row">
+      <select [(ngModel)]="adminReportsStatus">
+        <option value="">all status</option>
+        <option value="pending">pending</option>
+        <option value="in_review">in_review</option>
+        <option value="resolved">resolved</option>
+        <option value="dismissed">dismissed</option>
+      </select>
+      <select [(ngModel)]="adminReportsCategory">
+        <option value="">all category</option>
+        <option value="spam">spam</option>
+        <option value="harassment">harassment</option>
+        <option value="violence">violence</option>
+        <option value="sexual">sexual</option>
+        <option value="copyright">copyright</option>
+        <option value="other">other</option>
+      </select>
+      <select [(ngModel)]="adminReportsScope">
+        <option value="">all scope</option>
+        <option value="public">public</option>
+        <option value="private">private</option>
+      </select>
+      <select [(ngModel)]="adminReportsSeverity">
+        <option value="">all severity</option>
+        <option value="low">low</option>
+        <option value="medium">medium</option>
+        <option value="high">high</option>
+      </select>
+      <button type="button" class="ghost" (click)="loadAdminData()">Apply</button>
+    </div>
     <div class="table" *ngFor="let report of adminReports">
       <div>
         <strong>{{ report.scope }} · {{ report.category }}</strong>
         <div class="small">status: {{ report.status }} · messageId: {{ report.messageId }}</div>
       </div>
       <div class="actions">
+        <button type="button" class="ghost" (click)="loadReportDetail(report)">Detail</button>
         <button type="button" class="ghost" (click)="updateReportStatus(report, 'in_review')">Review</button>
         <button type="button" class="ghost" (click)="updateReportStatus(report, 'resolved')">Resolve</button>
         <button type="button" class="ghost" (click)="updateReportStatus(report, 'dismissed')">Dismiss</button>
         <button type="button" class="danger" (click)="removeReportedMessage(report)">Remove message</button>
       </div>
+    </div>
+    <div class="pagerRow">
+      <button type="button" class="ghost" (click)="prevReportsPage()" [disabled]="reportsPage <= 1">Prev</button>
+      <span class="small">page {{ reportsPage }} / {{ reportsPages }}</span>
+      <button type="button" class="ghost" (click)="nextReportsPage()" [disabled]="reportsPage >= reportsPages">Next</button>
+    </div>
+
+    <div class="card reportDetail" *ngIf="reportDetail?.report">
+      <h3>Report detail</h3>
+      <div class="small">report id: {{ reportDetail.report?._id }}</div>
+      <div class="small">reported by: {{ reportDetail.report?.reportedBy }}</div>
+      <div class="small">reason: {{ reportDetail.report?.reason || '-' }}</div>
+      <div class="small">note: {{ reportDetail.report?.note || '-' }}</div>
+      <div class="small">message text: {{ reportDetail.message?.text || '-' }}</div>
     </div>
 
     <h3>Auth abuse events</h3>
@@ -156,6 +218,25 @@
         <div class="small">{{ event.identifier || event.ip || '-' }} · severity {{ event.severity }}</div>
       </div>
       <div class="small">{{ event.createdAt | date:'short' }}</div>
+    </div>
+    <div class="pagerRow">
+      <button type="button" class="ghost" (click)="prevAbusePage()" [disabled]="abusePage <= 1">Prev</button>
+      <span class="small">page {{ abusePage }} / {{ abusePages }}</span>
+      <button type="button" class="ghost" (click)="nextAbusePage()" [disabled]="abusePage >= abusePages">Next</button>
+    </div>
+
+    <h3>Moderation audit actions</h3>
+    <div class="table" *ngFor="let item of adminAuditActions">
+      <div>
+        <strong>{{ item.action }}</strong>
+        <div class="small">{{ item.actorUsername }} ({{ item.actorRole }}) -> {{ item.targetType }} {{ item.targetId || '-' }}</div>
+      </div>
+      <div class="small">{{ item.createdAt | date:'short' }}</div>
+    </div>
+    <div class="pagerRow">
+      <button type="button" class="ghost" (click)="prevAuditPage()" [disabled]="auditPage <= 1">Prev</button>
+      <span class="small">page {{ auditPage }} / {{ auditPages }}</span>
+      <button type="button" class="ghost" (click)="nextAuditPage()" [disabled]="auditPage >= auditPages">Next</button>
     </div>
   </section>
 </section>

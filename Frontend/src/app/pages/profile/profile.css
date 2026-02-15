@@ -139,6 +139,19 @@ button.danger {
   gap: 12px;
 }
 
+.pagerRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 8px 0 14px;
+}
+
+.reportDetail {
+  margin-top: 12px;
+  background: #f8fbff;
+}
+
 .actions {
   display: flex;
   gap: 6px;

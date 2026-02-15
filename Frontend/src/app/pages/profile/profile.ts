@@ -42,9 +42,25 @@ export class ProfileComponent {
   adminUsers: any[] = [];
   adminReports: any[] = [];
   abuseEvents: any[] = [];
+  adminAuditActions: any[] = [];
   adminSearch = '';
   adminBusy = false;
   adminMessage = '';
+  adminUsersRole = '';
+  adminUsersVerified: '' | 'true' | 'false' = '';
+  adminReportsStatus = '';
+  adminReportsCategory = '';
+  adminReportsScope = '';
+  adminReportsSeverity = '';
+  usersPage = 1;
+  usersPages = 1;
+  reportsPage = 1;
+  reportsPages = 1;
+  abusePage = 1;
+  abusePages = 1;
+  auditPage = 1;
+  auditPages = 1;
+  reportDetail: any = null;
 
   constructor(private auth: AuthService, private router: Router) {}
 
@@ -239,30 +255,62 @@ export class ProfileComponent {
     this.adminBusy = true;
     this.adminMessage = '';
 
-    this.auth.adminListUsers(this.adminSearch, 50).subscribe({
+    this.auth.adminListUsers({
+      q: this.adminSearch,
+      role: this.adminUsersRole,
+      verified: this.adminUsersVerified,
+      page: this.usersPage,
+      limit: 25,
+      sortBy: 'createdAt',
+      sortDir: 'desc'
+    }).subscribe({
       next: (res: any) => {
-        this.adminUsers = Array.isArray(res) ? res : [];
+        this.adminUsers = Array.isArray(res?.items) ? res.items : [];
+        this.usersPages = Number(res?.paging?.pages || 1);
+        this.usersPage = Number(res?.paging?.page || 1);
       },
       error: () => {
         this.adminUsers = [];
       }
     });
 
-    this.auth.adminListAttachmentReports('', 60).subscribe({
+    this.auth.adminListAttachmentReports({
+      status: this.adminReportsStatus,
+      category: this.adminReportsCategory,
+      scope: this.adminReportsScope,
+      severity: this.adminReportsSeverity,
+      page: this.reportsPage,
+      limit: 25
+    }).subscribe({
       next: (res: any) => {
-        this.adminReports = Array.isArray(res) ? res : [];
+        this.adminReports = Array.isArray(res?.items) ? res.items : [];
+        this.reportsPages = Number(res?.paging?.pages || 1);
+        this.reportsPage = Number(res?.paging?.page || 1);
       },
       error: () => {
         this.adminReports = [];
       }
     });
 
-    this.auth.adminListAbuseEvents(40).subscribe({
+    this.auth.adminListAbuseEvents(this.abusePage, 30).subscribe({
       next: (res: any) => {
-        this.abuseEvents = Array.isArray(res) ? res : [];
+        this.abuseEvents = Array.isArray(res?.items) ? res.items : [];
+        this.abusePages = Number(res?.paging?.pages || 1);
+        this.abusePage = Number(res?.paging?.page || 1);
       },
       error: () => {
         this.abuseEvents = [];
+      }
+    });
+
+    this.auth.adminAuditActions(this.auditPage, 30).subscribe({
+      next: (res: any) => {
+        this.adminAuditActions = Array.isArray(res?.items) ? res.items : [];
+        this.auditPages = Number(res?.paging?.pages || 1);
+        this.auditPage = Number(res?.paging?.page || 1);
+      },
+      error: () => {
+        this.adminAuditActions = [];
       },
       complete: () => {
         this.adminBusy = false;
@@ -333,6 +381,67 @@ export class ProfileComponent {
         this.adminMessage = err?.error?.error?.message || 'Report update failed.';
       }
     });
+  }
+
+  loadReportDetail(report: any) {
+    const id = String(report?._id || '').trim();
+    if (!id) return;
+    this.auth.adminAttachmentReportDetail(id).subscribe({
+      next: (res: any) => {
+        this.reportDetail = res || null;
+      },
+      error: (err) => {
+        this.adminMessage = err?.error?.error?.message || 'Could not load report detail.';
+      }
+    });
+  }
+
+  nextUsersPage() {
+    if (this.usersPage >= this.usersPages) return;
+    this.usersPage += 1;
+    this.loadAdminData();
+  }
+
+  prevUsersPage() {
+    if (this.usersPage <= 1) return;
+    this.usersPage -= 1;
+    this.loadAdminData();
+  }
+
+  nextReportsPage() {
+    if (this.reportsPage >= this.reportsPages) return;
+    this.reportsPage += 1;
+    this.loadAdminData();
+  }
+
+  prevReportsPage() {
+    if (this.reportsPage <= 1) return;
+    this.reportsPage -= 1;
+    this.loadAdminData();
+  }
+
+  nextAbusePage() {
+    if (this.abusePage >= this.abusePages) return;
+    this.abusePage += 1;
+    this.loadAdminData();
+  }
+
+  prevAbusePage() {
+    if (this.abusePage <= 1) return;
+    this.abusePage -= 1;
+    this.loadAdminData();
+  }
+
+  nextAuditPage() {
+    if (this.auditPage >= this.auditPages) return;
+    this.auditPage += 1;
+    this.loadAdminData();
+  }
+
+  prevAuditPage() {
+    if (this.auditPage <= 1) return;
+    this.auditPage -= 1;
+    this.loadAdminData();
   }
 
   removeReportedMessage(report: any) {
