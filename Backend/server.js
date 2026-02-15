@@ -80,6 +80,11 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }
 });
 
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 6 * 1024 * 1024 }
+});
+
 const chunkUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 }
@@ -107,6 +112,8 @@ const ALLOWED_UPLOAD_MIME = [
   /^application\/vnd\.ms-powerpoint$/,
   /^application\/vnd\.openxmlformats-officedocument\.presentationml\.presentation$/
 ];
+const ALLOWED_AVATAR_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const MAX_AVATAR_DIMENSION = 4096;
 
 app.use('/uploads', express.static(uploadsDir));
 
@@ -116,6 +123,138 @@ app.use('/api/private', privateRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/admin/auth', adminAuthRoutes);
+
+function detectImageType(buffer) {
+  if (!buffer || buffer.length < 12) return '';
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'image/png';
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return 'image/gif';
+  if (
+    buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46
+    && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
+  ) {
+    return 'image/webp';
+  }
+  return '';
+}
+
+function avatarExtForMime(mimeType) {
+  if (mimeType === 'image/png') return 'png';
+  if (mimeType === 'image/webp') return 'webp';
+  if (mimeType === 'image/gif') return 'gif';
+  return 'jpg';
+}
+
+function imageDimensions(buffer, mimeType) {
+  try {
+    if (mimeType === 'image/png' && buffer.length >= 24) {
+      return {
+        width: buffer.readUInt32BE(16),
+        height: buffer.readUInt32BE(20)
+      };
+    }
+
+    if (mimeType === 'image/gif' && buffer.length >= 10) {
+      return {
+        width: buffer.readUInt16LE(6),
+        height: buffer.readUInt16LE(8)
+      };
+    }
+
+    if (mimeType === 'image/webp' && buffer.length >= 30) {
+      const fourCC = buffer.toString('ascii', 12, 16);
+      if (fourCC === 'VP8X' && buffer.length >= 30) {
+        const widthMinusOne = buffer.readUIntLE(24, 3);
+        const heightMinusOne = buffer.readUIntLE(27, 3);
+        return { width: widthMinusOne + 1, height: heightMinusOne + 1 };
+      }
+      if (fourCC === 'VP8L' && buffer.length >= 25) {
+        const b0 = buffer[21];
+        const b1 = buffer[22];
+        const b2 = buffer[23];
+        const b3 = buffer[24];
+        const width = 1 + (((b1 & 0x3f) << 8) | b0);
+        const height = 1 + (((b3 & 0x0f) << 10) | (b2 << 2) | ((b1 & 0xc0) >> 6));
+        return { width, height };
+      }
+    }
+
+    if (mimeType === 'image/jpeg') {
+      let offset = 2;
+      while (offset + 9 < buffer.length) {
+        if (buffer[offset] !== 0xff) break;
+        const marker = buffer[offset + 1];
+        const size = buffer.readUInt16BE(offset + 2);
+        if (size < 2) break;
+        if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7) || (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf)) {
+          const height = buffer.readUInt16BE(offset + 5);
+          const width = buffer.readUInt16BE(offset + 7);
+          return { width, height };
+        }
+        offset += 2 + size;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+app.post('/api/upload/avatar', auth, (req, res) => {
+  avatarUpload.single('file')(req, res, async (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ error: 'Avatar too large (max 6MB)' });
+      }
+      return res.status(400).json({ error: 'Avatar upload failed' });
+    }
+
+    try {
+      if (!req.file?.buffer?.length) {
+        return res.status(400).json({ error: 'No avatar file uploaded' });
+      }
+
+      const sniffedMime = detectImageType(req.file.buffer);
+      const uploadMime = String(req.file.mimetype || '').trim().toLowerCase();
+      const mimeType = sniffedMime || uploadMime;
+      if (!ALLOWED_AVATAR_MIME.has(mimeType)) {
+        return res.status(415).json({ error: `Unsupported avatar type: ${uploadMime || 'unknown'}` });
+      }
+
+      if (sniffedMime && uploadMime && sniffedMime !== uploadMime) {
+        return res.status(415).json({ error: 'Avatar file content does not match mime type.' });
+      }
+
+      const dims = imageDimensions(req.file.buffer, mimeType);
+      if (!dims || !Number.isFinite(dims.width) || !Number.isFinite(dims.height) || dims.width < 1 || dims.height < 1) {
+        return res.status(400).json({ error: 'Could not read avatar dimensions.' });
+      }
+
+      if (dims.width > MAX_AVATAR_DIMENSION || dims.height > MAX_AVATAR_DIMENSION) {
+        return res.status(413).json({ error: `Avatar dimensions exceed ${MAX_AVATAR_DIMENSION}px.` });
+      }
+
+      const ext = avatarExtForMime(mimeType);
+      const filename = `avatar-${req.user.id}-${Date.now()}.${ext}`;
+      const absolutePath = path.join(uploadsDir, filename);
+      await fs.promises.writeFile(absolutePath, req.file.buffer);
+
+      return res.json({
+        url: `/uploads/${filename}`,
+        mimeType,
+        size: req.file.size || req.file.buffer.length,
+        width: dims.width,
+        height: dims.height,
+        variant: {
+          squarePreview: `/uploads/${filename}`
+        }
+      });
+    } catch (uploadErr) {
+      console.error('Avatar upload error', uploadErr);
+      return res.status(500).json({ error: 'Avatar upload failed' });
+    }
+  });
+});
 
 app.post('/api/upload', auth, (req, res) => {
   upload.single('file')(req, res, (err) => {

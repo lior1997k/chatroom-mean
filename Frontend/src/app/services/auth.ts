@@ -113,7 +113,7 @@ export class AuthService {
     const token = this.getToken();
     const formData = new FormData();
     formData.append('file', file);
-    return this.http.post(`${environment.apiUrl}/api/upload`, formData, {
+    return this.http.post(`${environment.apiUrl}/api/upload/avatar`, formData, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined
     });
   }
