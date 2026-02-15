@@ -3,29 +3,40 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { AuthService } from '../../services/auth';
+import { ToastService } from '../../services/toast.service';
+import { ToastContainerComponent } from '../../components/toast-container.component';
 import { environment } from '../../../environments/environment';
 
 type RoleValue = 'user' | 'moderator' | 'support' | 'admin';
+type GenderValue = 'male' | 'female' | 'other';
 
 @Component({
   selector: 'app-profile',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule],
+  imports: [CommonModule, FormsModule, RouterModule, ToastContainerComponent],
   templateUrl: './profile.html',
   styleUrls: ['./profile.css']
 })
 export class ProfileComponent {
   me: any = null;
   loading = true;
-  error = '';
-  success = '';
 
   username = '';
   avatarUrl = '';
   displayName = '';
   bio = '';
   statusText = '';
-  timezone = 'UTC';
+  countryCode = '';
+  showCountry = false;
+  showAge = true;
+  gender: GenderValue = 'other';
+  genderLocked = false;
+  genderDirty = false;
+  displayNameTaken = false;
+  private displayNameCheckTimer: ReturnType<typeof setTimeout> | null = null;
+  private displayNameBaseline = '';
+  birthDate = '';
+  birthDateLocked = false;
   lastSeenVisibility: 'everyone' | 'contacts' | 'nobody' = 'everyone';
   savingProfile = false;
   uploadingAvatar = false;
@@ -34,7 +45,6 @@ export class ProfileComponent {
   newPassword = '';
   confirmPassword = '';
   changingPassword = false;
-  passwordMessage = '';
 
   sessions: any[] = [];
   sessionsLoading = false;
@@ -48,7 +58,7 @@ export class ProfileComponent {
   adminMessage = '';
   adminUsersRole = '';
   adminUsersVerified: '' | 'true' | 'false' = '';
-  adminReportsStatus = '';
+  adminReportsStatus = 'pending';
   adminReportsCategory = '';
   adminReportsScope = '';
   adminReportsSeverity = '';
@@ -60,9 +70,15 @@ export class ProfileComponent {
   abusePages = 1;
   auditPage = 1;
   auditPages = 1;
-  reportDetail: any = null;
 
-  constructor(private auth: AuthService, private router: Router) {}
+  reviewOpen = false;
+  reviewLoading = false;
+  reviewActionBusy = false;
+  reviewReport: any = null;
+  reviewMessage: any = null;
+  reviewAuthor: any = null;
+
+  constructor(private auth: AuthService, private router: Router, private toast: ToastService) {}
 
   ngOnInit() {
     this.loadMe();
@@ -71,7 +87,6 @@ export class ProfileComponent {
 
   loadMe() {
     this.loading = true;
-    this.error = '';
     this.auth.getMe().subscribe({
       next: (res: any) => {
         this.me = res;
@@ -80,7 +95,21 @@ export class ProfileComponent {
         this.displayName = String(res?.displayName || '');
         this.bio = String(res?.bio || '');
         this.statusText = String(res?.statusText || '');
-        this.timezone = String(res?.timezone || 'UTC');
+        this.countryCode = String(res?.countryCode || '').toUpperCase();
+        if (!this.countryCode) {
+          this.countryCode = this.detectBrowserCountryCode();
+        }
+        this.showCountry = !!res?.showCountry;
+        this.showAge = res?.showAge !== false;
+        this.gender = (['male', 'female', 'other'].includes(String(res?.gender || ''))
+          ? String(res?.gender)
+          : 'other') as GenderValue;
+        this.genderLocked = !!res?.genderLocked;
+        this.genderDirty = false;
+        this.displayNameBaseline = String(res?.displayName || '').trim().toLowerCase();
+        this.displayNameTaken = false;
+        this.birthDate = this.birthDateInputValue(res?.birthDate);
+        this.birthDateLocked = !!this.birthDate;
         this.lastSeenVisibility = (['everyone', 'contacts', 'nobody'].includes(String(res?.lastSeenVisibility || ''))
           ? String(res?.lastSeenVisibility || 'everyone')
           : 'everyone') as 'everyone' | 'contacts' | 'nobody';
@@ -88,7 +117,7 @@ export class ProfileComponent {
         if (this.isModeratorOrHigher()) this.loadAdminData();
       },
       error: (err) => {
-        this.error = err?.error?.message || 'Could not load profile.';
+        this.toast.error(err?.error?.message || 'Could not load profile.');
         this.loading = false;
       }
     });
@@ -96,33 +125,57 @@ export class ProfileComponent {
 
   saveProfile() {
     if (this.savingProfile) return;
-    this.error = '';
-    this.success = '';
+    if (this.displayNameTaken) {
+      this.toast.error('Display name is already taken.');
+      return;
+    }
     this.savingProfile = true;
 
-    this.auth.updateProfile({
+    const payload: any = {
       avatarUrl: this.avatarUrl,
       displayName: this.displayName,
       bio: this.bio,
       statusText: this.statusText,
-      timezone: this.timezone,
+      showCountry: this.showCountry,
+      showAge: this.showAge,
       lastSeenVisibility: this.lastSeenVisibility
-    }).subscribe({
+    };
+
+    if (!this.genderLocked && this.genderDirty) {
+      payload.gender = this.gender;
+    }
+
+    if (!this.birthDateLocked && this.birthDate) {
+      payload.birthDate = this.birthDate;
+    }
+
+    this.auth.updateProfile(payload).subscribe({
       next: (res: any) => {
-        this.success = String(res?.message || 'Profile updated.');
+        this.toast.success(String(res?.message || 'Profile updated.'));
         if (res?.user) {
           this.me = res.user;
           this.displayName = String(res?.user?.displayName || '');
           this.bio = String(res?.user?.bio || '');
           this.statusText = String(res?.user?.statusText || '');
-          this.timezone = String(res?.user?.timezone || 'UTC');
+          this.countryCode = String(res?.user?.countryCode || '').toUpperCase();
+          this.showCountry = !!res?.user?.showCountry;
+          this.showAge = res?.user?.showAge !== false;
+          this.gender = (['male', 'female', 'other'].includes(String(res?.user?.gender || ''))
+            ? String(res?.user?.gender)
+            : 'other') as GenderValue;
+          this.genderLocked = !!res?.user?.genderLocked;
+          this.genderDirty = false;
+          this.displayNameBaseline = String(res?.user?.displayName || '').trim().toLowerCase();
+          this.displayNameTaken = false;
+          this.birthDate = this.birthDateInputValue(res?.user?.birthDate);
+          this.birthDateLocked = !!this.birthDate;
           this.lastSeenVisibility = (['everyone', 'contacts', 'nobody'].includes(String(res?.user?.lastSeenVisibility || ''))
             ? String(res?.user?.lastSeenVisibility || 'everyone')
             : 'everyone') as 'everyone' | 'contacts' | 'nobody';
         }
       },
       error: (err) => {
-        this.error = err?.error?.error?.message || 'Could not update profile.';
+        this.toast.error(err?.error?.error?.message || 'Could not update profile.');
       },
       complete: () => {
         this.savingProfile = false;
@@ -135,34 +188,20 @@ export class ProfileComponent {
     const file = input?.files?.[0];
     if (!file || this.uploadingAvatar) return;
 
-    if (!String(file.type || '').startsWith('image/')) {
-      this.error = 'Please select an image file for avatar.';
-      if (input) input.value = '';
-      return;
-    }
-
-    if (file.size > 6 * 1024 * 1024) {
-      this.error = 'Avatar image is too large (max 6MB).';
-      if (input) input.value = '';
-      return;
-    }
-
-    this.error = '';
-    this.success = '';
     this.uploadingAvatar = true;
 
     this.auth.uploadAvatar(file).subscribe({
       next: (res: any) => {
         const nextUrl = String(res?.url || '').trim();
         if (!nextUrl) {
-          this.error = 'Avatar upload failed.';
+          this.toast.error('Avatar upload failed.');
           return;
         }
         this.avatarUrl = nextUrl;
         this.saveProfile();
       },
       error: (err) => {
-        this.error = err?.error?.error || 'Could not upload avatar.';
+        this.toast.error(err?.error?.error || err?.error?.message || 'Could not upload avatar.');
       },
       complete: () => {
         this.uploadingAvatar = false;
@@ -178,29 +217,113 @@ export class ProfileComponent {
     return `${environment.apiUrl}${url}`;
   }
 
+  isBirthdayToday(): boolean {
+    return !!this.me?.isBirthdayToday;
+  }
+
+  ageLabel(): string {
+    const age = Number(this.me?.age);
+    if (!Number.isFinite(age) || age < 0) return 'Not set';
+    return `${age}`;
+  }
+
+  countryLabel(): string {
+    const code = String(this.countryCode || this.detectBrowserCountryCode()).toUpperCase();
+    if (!code) return 'Unknown';
+    try {
+      if ('DisplayNames' in Intl) {
+        const names = new Intl.DisplayNames(['en'], { type: 'region' });
+        return names.of(code) || code;
+      }
+    } catch {
+      // no-op
+    }
+    return code;
+  }
+
+  private detectBrowserCountryCode(): string {
+    try {
+      const timezone = String(Intl.DateTimeFormat().resolvedOptions().timeZone || '').trim();
+      if (timezone === 'Asia/Jerusalem') return 'IL';
+      if (timezone === 'Asia/Dubai') return 'AE';
+      if (timezone === 'Europe/London') return 'GB';
+      if (timezone === 'Europe/Berlin') return 'DE';
+      if (timezone === 'Europe/Paris') return 'FR';
+      if (timezone.startsWith('America/')) return 'US';
+      if (timezone.startsWith('Australia/')) return 'AU';
+    } catch {
+      // no-op
+    }
+    try {
+      const locale = String((globalThis.navigator as any)?.languages?.[0] || globalThis.navigator?.language || '').trim();
+      const region = (locale.split('-')[1] || locale.split('_')[1] || '').trim().toUpperCase();
+      return /^[A-Z]{2}$/.test(region) ? region : '';
+    } catch {
+      return '';
+    }
+  }
+
+  onDisplayNameInput(value: string) {
+    this.displayName = String(value || '');
+    this.displayNameTaken = false;
+
+    if (this.displayNameCheckTimer) {
+      clearTimeout(this.displayNameCheckTimer);
+      this.displayNameCheckTimer = null;
+    }
+
+    const normalized = this.displayName.trim().toLowerCase();
+    if (!normalized || normalized === this.displayNameBaseline) {
+      return;
+    }
+
+    this.displayNameCheckTimer = setTimeout(() => {
+      this.auth.checkDisplayNameAvailability(this.displayName).subscribe({
+        next: (res: any) => {
+          this.displayNameTaken = res?.available === false;
+        },
+        error: () => {
+          this.displayNameTaken = false;
+        }
+      });
+    }, 260);
+  }
+
+  onGenderChange(value: GenderValue) {
+    if (this.genderLocked) return;
+    this.gender = value;
+    this.genderDirty = true;
+  }
+
+  private birthDateInputValue(value: any): string {
+    if (!value) return '';
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return '';
+    return date.toISOString().slice(0, 10);
+  }
+
   changePassword() {
     if (this.changingPassword) return;
-    this.passwordMessage = '';
 
     if (!this.currentPassword || !this.newPassword || !this.confirmPassword) {
-      this.passwordMessage = 'Please fill all password fields.';
+      this.toast.warning('Please fill all password fields.');
       return;
     }
     if (this.newPassword !== this.confirmPassword) {
-      this.passwordMessage = 'New password and confirm password do not match.';
+      this.toast.error('New password and confirm password do not match.');
       return;
     }
 
     this.changingPassword = true;
     this.auth.changePassword(this.currentPassword, this.newPassword).subscribe({
       next: (res: any) => {
-        this.passwordMessage = String(res?.message || 'Password updated successfully.');
+        this.toast.success(String(res?.message || 'Password updated successfully.'));
         this.currentPassword = '';
         this.newPassword = '';
         this.confirmPassword = '';
       },
       error: (err) => {
-        this.passwordMessage = err?.error?.error?.message || 'Could not change password.';
+        this.toast.error(err?.error?.error?.message || 'Could not change password.');
       },
       complete: () => {
         this.changingPassword = false;
@@ -226,11 +349,11 @@ export class ProfileComponent {
   logoutAllDevices() {
     this.auth.logoutAllSessions().subscribe({
       next: () => {
-        this.success = 'Logged out from all devices.';
+        this.toast.success('Logged out from all devices.');
         this.loadSessions();
       },
       error: () => {
-        this.error = 'Could not logout all sessions.';
+        this.toast.error('Could not logout all sessions.');
       }
     });
   }
@@ -371,11 +494,62 @@ export class ProfileComponent {
     });
   }
 
+  banUserWeek(user: any) {
+    this.auth.adminBanUserWeek(String(user?._id || '')).subscribe({
+      next: (res: any) => {
+        this.adminMessage = String(res?.message || 'User banned.');
+        user.bannedUntil = res?.bannedUntil || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        user.blockedAt = null;
+      },
+      error: (err) => {
+        this.adminMessage = err?.error?.error?.message || 'User ban failed.';
+      }
+    });
+  }
+
+  blockUser(user: any) {
+    this.auth.adminBlockUser(String(user?._id || '')).subscribe({
+      next: (res: any) => {
+        this.adminMessage = String(res?.message || 'User blocked.');
+        user.blockedAt = new Date().toISOString();
+        user.bannedUntil = null;
+      },
+      error: (err) => {
+        this.adminMessage = err?.error?.error?.message || 'User block failed.';
+      }
+    });
+  }
+
+  unblockUser(user: any) {
+    this.auth.adminUnblockUser(String(user?._id || '')).subscribe({
+      next: (res: any) => {
+        this.adminMessage = String(res?.message || 'User unblocked.');
+        user.blockedAt = null;
+        user.bannedUntil = null;
+      },
+      error: (err) => {
+        this.adminMessage = err?.error?.error?.message || 'User unblock failed.';
+      }
+    });
+  }
+
+  userModerationState(user: any): string {
+    const blocked = !!user?.blockedAt;
+    const bannedUntilMs = Number(new Date(user?.bannedUntil || 0).getTime() || 0);
+    if (blocked) return 'blocked';
+    if (bannedUntilMs > Date.now()) return 'banned';
+    return 'active';
+  }
+
   updateReportStatus(report: any, status: 'pending' | 'in_review' | 'resolved' | 'dismissed') {
     this.auth.adminUpdateAttachmentReport(String(report?._id || ''), status).subscribe({
       next: (res: any) => {
         this.adminMessage = String(res?.message || 'Report updated.');
-        report.status = status;
+        if (status === 'dismissed' || status === 'resolved') {
+          this.removeReportById(String(report?._id || ''));
+        } else {
+          report.status = status;
+        }
       },
       error: (err) => {
         this.adminMessage = err?.error?.error?.message || 'Report update failed.';
@@ -383,15 +557,167 @@ export class ProfileComponent {
     });
   }
 
-  loadReportDetail(report: any) {
+  private removeReportById(reportId: string) {
+    const id = String(reportId || '').trim();
+    if (!id) return;
+    this.adminReports = this.adminReports.filter((report) => String(report?._id || '') !== id);
+  }
+
+  openReportReview(report: any) {
     const id = String(report?._id || '').trim();
     if (!id) return;
+    this.reviewOpen = true;
+    this.reviewLoading = true;
+    this.reviewActionBusy = false;
+    this.reviewReport = report;
+    this.reviewMessage = null;
+    this.reviewAuthor = null;
+
     this.auth.adminAttachmentReportDetail(id).subscribe({
       next: (res: any) => {
-        this.reportDetail = res || null;
+        this.reviewReport = res?.report || report;
+        this.reviewMessage = res?.message || null;
+        this.reviewAuthor = res?.messageAuthor || null;
       },
       error: (err) => {
         this.adminMessage = err?.error?.error?.message || 'Could not load report detail.';
+        this.closeReportReview();
+      },
+      complete: () => {
+        this.reviewLoading = false;
+      }
+    });
+  }
+
+  closeReportReview() {
+    this.reviewOpen = false;
+    this.reviewLoading = false;
+    this.reviewActionBusy = false;
+    this.reviewReport = null;
+    this.reviewMessage = null;
+    this.reviewAuthor = null;
+  }
+
+  reviewMessageAttachments(): any[] {
+    const list = Array.isArray(this.reviewMessage?.attachments) ? this.reviewMessage.attachments.filter((a: any) => !!a?.url) : [];
+    if (list.length) return list;
+    const single = this.reviewMessage?.attachment?.url ? [this.reviewMessage.attachment] : [];
+    return single;
+  }
+
+  reviewAttachmentUrl(attachment: any): string {
+    const raw = String(attachment?.url || '').trim();
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw)) return raw;
+    return `${environment.apiUrl}${raw}`;
+  }
+
+  reviewDismiss() {
+    if (!this.reviewReport || this.reviewActionBusy) return;
+    const reportId = String(this.reviewReport?._id || '');
+    this.reviewActionBusy = true;
+    this.auth.adminUpdateAttachmentReport(reportId, 'dismissed').subscribe({
+      next: (res: any) => {
+        this.adminMessage = String(res?.message || 'Report dismissed.');
+        this.removeReportById(reportId);
+        this.closeReportReview();
+      },
+      error: (err) => {
+        this.adminMessage = err?.error?.error?.message || 'Could not dismiss report.';
+      },
+      complete: () => {
+        this.reviewActionBusy = false;
+      }
+    });
+  }
+
+  reviewDeleteMessage() {
+    if (!this.reviewReport || !this.reviewMessage || this.reviewActionBusy) return;
+    const reportId = String(this.reviewReport?._id || '');
+    const scope = String(this.reviewReport?.scope || '') as 'public' | 'private';
+    const messageId = String(this.reviewMessage?._id || '').trim();
+    if (!messageId || (scope !== 'public' && scope !== 'private')) return;
+
+    this.reviewActionBusy = true;
+    this.auth.adminRemoveMessage(scope, messageId).subscribe({
+      next: () => {
+        this.auth.adminUpdateAttachmentReport(reportId, 'resolved').subscribe({
+          next: () => {
+            this.adminMessage = 'Message removed and report resolved.';
+            this.removeReportById(reportId);
+            this.closeReportReview();
+          },
+          error: () => {
+            this.adminMessage = 'Message removed.';
+            this.removeReportById(reportId);
+            this.closeReportReview();
+          },
+          complete: () => {
+            this.reviewActionBusy = false;
+          }
+        });
+      },
+      error: (err) => {
+        this.adminMessage = err?.error?.error?.message || 'Could not remove message.';
+        this.reviewActionBusy = false;
+      }
+    });
+  }
+
+  reviewBanUserWeek() {
+    if (!this.reviewAuthor?._id || this.reviewActionBusy) return;
+    const reportId = String(this.reviewReport?._id || '');
+    this.reviewActionBusy = true;
+    this.auth.adminBanUserWeek(String(this.reviewAuthor._id)).subscribe({
+      next: () => {
+        this.auth.adminUpdateAttachmentReport(reportId, 'resolved').subscribe({
+          next: () => {
+            this.adminMessage = 'User banned for 7 days and report resolved.';
+            this.removeReportById(reportId);
+            this.closeReportReview();
+          },
+          error: () => {
+            this.adminMessage = 'User banned for 7 days.';
+            this.removeReportById(reportId);
+            this.closeReportReview();
+          },
+          complete: () => {
+            this.reviewActionBusy = false;
+          }
+        });
+      },
+      error: (err) => {
+        this.adminMessage = err?.error?.error?.message || 'Could not ban user.';
+        this.reviewActionBusy = false;
+      }
+    });
+  }
+
+  reviewBlockUser() {
+    if (!this.reviewAuthor?._id || this.reviewActionBusy) return;
+    const reportId = String(this.reviewReport?._id || '');
+    this.reviewActionBusy = true;
+    this.auth.adminBlockUser(String(this.reviewAuthor._id)).subscribe({
+      next: () => {
+        this.auth.adminUpdateAttachmentReport(reportId, 'resolved').subscribe({
+          next: () => {
+            this.adminMessage = 'User blocked and report resolved.';
+            this.removeReportById(reportId);
+            this.closeReportReview();
+          },
+          error: () => {
+            this.adminMessage = 'User blocked.';
+            this.removeReportById(reportId);
+            this.closeReportReview();
+          },
+          complete: () => {
+            this.reviewActionBusy = false;
+          }
+        });
+      },
+      error: (err) => {
+        this.adminMessage = err?.error?.error?.message || 'Could not block user.';
+        this.reviewActionBusy = false;
       }
     });
   }
@@ -442,21 +768,6 @@ export class ProfileComponent {
     if (this.auditPage <= 1) return;
     this.auditPage -= 1;
     this.loadAdminData();
-  }
-
-  removeReportedMessage(report: any) {
-    const scope = String(report?.scope || '') as 'public' | 'private';
-    const messageId = String(report?.messageId || '').trim();
-    if (!messageId || (scope !== 'public' && scope !== 'private')) return;
-
-    this.auth.adminRemoveMessage(scope, messageId).subscribe({
-      next: (res: any) => {
-        this.adminMessage = String(res?.message || 'Message removed.');
-      },
-      error: (err) => {
-        this.adminMessage = err?.error?.error?.message || 'Message removal failed.';
-      }
-    });
   }
 
   goToChat() {

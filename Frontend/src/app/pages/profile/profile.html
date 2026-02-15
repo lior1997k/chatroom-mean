@@ -1,3 +1,5 @@
+<app-toast-container></app-toast-container>
+
 <section class="profile-page" *ngIf="!loading; else loadingTpl">
   <header class="topbar">
     <div>
@@ -7,28 +9,38 @@
     <button type="button" class="ghost" (click)="goToChat()">Back to chat</button>
   </header>
 
-  <p *ngIf="error" class="notice error">{{ error }}</p>
-  <p *ngIf="success" class="notice ok">{{ success }}</p>
-
   <div class="layoutGrid">
     <aside class="card profileHero">
-      <img *ngIf="avatarPreviewUrl(); else noAvatar" [src]="avatarPreviewUrl()" alt="avatar preview" class="avatarPreview" />
-      <ng-template #noAvatar>
-        <div class="avatarPlaceholder">No avatar</div>
-      </ng-template>
+      <div class="avatarRow">
+        <div class="avatarWrap">
+          <img *ngIf="avatarPreviewUrl(); else noAvatar" [src]="avatarPreviewUrl()" alt="avatar preview" class="avatarPreview" />
+          <ng-template #noAvatar>
+            <div class="avatarPlaceholder">No avatar</div>
+          </ng-template>
+          <span *ngIf="isBirthdayToday()" class="giftBadge" title="Happy birthday">🎁</span>
+        </div>
+
+        <div class="avatarActions">
+          <label class="uploadBtn">
+            Upload avatar
+            <input type="file" accept="image/*" (change)="onAvatarSelected($event)" />
+          </label>
+          <span class="small" *ngIf="uploadingAvatar">Uploading and saving...</span>
+        </div>
+      </div>
 
       <h2>{{ displayName || me?.username }}</h2>
-      <p class="meta">@{{ me?.username }}</p>
+      <p class="username">@{{ me?.username }}</p>
       <p class="meta">{{ me?.email || 'no email' }}</p>
-      <p class="meta">Role: <strong>{{ me?.role }}</strong> · {{ me?.emailVerified ? 'Verified' : 'Unverified' }}</p>
-      <p class="meta">Joined {{ me?.createdAt | date:'mediumDate' }}</p>
+      
+      <div class="details">
+        <p class="meta">Role: <strong>{{ me?.role }}</strong> · {{ me?.emailVerified ? 'Verified' : 'Unverified' }}</p>
+        <p class="meta">Gender: <strong>{{ gender }}</strong> · Age: <strong>{{ ageLabel() }}</strong> ({{ showAge ? 'visible' : 'hidden' }})</p>
+        <p class="meta">Country: <strong>{{ countryLabel() }}</strong> ({{ showCountry ? 'visible' : 'hidden' }})</p>
+        <p class="meta">Joined {{ me?.createdAt | date:'mediumDate' }}</p>
+      </div>
 
-      <label class="uploadBtn">
-        Upload avatar
-        <input type="file" accept="image/*" (change)="onAvatarSelected($event)" />
-      </label>
-      <span class="small" *ngIf="uploadingAvatar">Uploading and saving...</span>
-      <span class="small">Username is fixed after account creation.</span>
+      <span class="small">Username and birth date are fixed after creation.</span>
     </aside>
 
     <article class="card">
@@ -36,19 +48,37 @@
       <div class="formGrid">
         <label>
           <span>Display name</span>
-          <input type="text" [(ngModel)]="displayName" name="displayName" maxlength="60" />
+          <input type="text" [(ngModel)]="displayName" name="displayName" maxlength="60" (ngModelChange)="onDisplayNameInput($event)" />
+          <span class="small warn" *ngIf="displayNameTaken">Display name is already taken.</span>
         </label>
         <label>
           <span>Status</span>
           <input type="text" [(ngModel)]="statusText" name="statusText" maxlength="120" />
         </label>
+        <label>
+          <span>Gender</span>
+          <select [(ngModel)]="gender" name="gender" [disabled]="genderLocked" (ngModelChange)="onGenderChange($event)">
+            <option value="male">male</option>
+            <option value="female">female</option>
+            <option value="other">other</option>
+          </select>
+          <span class="small" *ngIf="genderLocked">Gender is locked after selection.</span>
+        </label>
+        <label>
+          <span>Birth date</span>
+          <input type="date" [(ngModel)]="birthDate" name="birthDate" [disabled]="birthDateLocked" />
+        </label>
         <label class="full">
           <span>Bio</span>
           <textarea [(ngModel)]="bio" name="bio" rows="3" maxlength="240"></textarea>
         </label>
-        <label>
-          <span>Timezone</span>
-          <input type="text" [(ngModel)]="timezone" name="timezone" maxlength="64" placeholder="e.g. Europe/Berlin" />
+        <label class="switchLabel full">
+          <input type="checkbox" [(ngModel)]="showCountry" name="showCountry" />
+          <span>Display detected country on public profile</span>
+        </label>
+        <label class="switchLabel full">
+          <input type="checkbox" [(ngModel)]="showAge" name="showAge" />
+          <span>Display age on public profile</span>
         </label>
         <label>
           <span>Last seen visibility</span>
@@ -88,7 +118,6 @@
       <button type="button" class="ghost" (click)="loadSessions()">Refresh sessions</button>
       <button type="button" class="danger" (click)="logoutAllDevices()">Logout all devices</button>
     </div>
-    <p *ngIf="passwordMessage" class="notice info">{{ passwordMessage }}</p>
 
     <div class="table" *ngFor="let session of sessions">
       <div>
@@ -104,6 +133,7 @@
   <section *ngIf="isModeratorOrHigher()" class="card">
     <h2>Moderation workspace</h2>
     <p *ngIf="adminMessage" class="notice info">{{ adminMessage }}</p>
+
     <div class="row">
       <input type="text" [(ngModel)]="adminSearch" placeholder="Search users" />
       <select [(ngModel)]="adminUsersRole">
@@ -125,12 +155,17 @@
     <div class="table" *ngFor="let user of adminUsers">
       <div>
         <strong>{{ user.username }}</strong>
-        <div class="small">{{ user.email || 'no email' }} · role: {{ user.role }}</div>
+        <div class="small">
+          {{ user.email || 'no email' }} · role: {{ user.role }} · state: {{ userModerationState(user) }}
+        </div>
       </div>
       <div class="actions">
         <button type="button" class="ghost" (click)="verifyEmail(user)">Verify</button>
         <button type="button" class="ghost" (click)="unlockUser(user)">Unlock</button>
         <button type="button" class="ghost" (click)="revokeSessions(user)">Revoke sessions</button>
+        <button type="button" class="ghost" (click)="banUserWeek(user)">Ban 1 week</button>
+        <button type="button" class="danger" (click)="blockUser(user)">Block</button>
+        <button type="button" class="ghost" *ngIf="userModerationState(user) !== 'active'" (click)="unblockUser(user)">Unblock</button>
         <select *ngIf="isAdmin()" [ngModel]="user.role" (ngModelChange)="setRole(user, $event)">
           <option *ngFor="let role of roleOptionsForCurrentUser()" [ngValue]="role">{{ role }}</option>
         </select>
@@ -142,6 +177,7 @@
       <button type="button" class="ghost" (click)="nextUsersPage()" [disabled]="usersPage >= usersPages">Next</button>
     </div>
 
+    <ng-container *ngIf="adminReports.length">
     <h3>Attachment reports</h3>
     <div class="row">
       <select [(ngModel)]="adminReportsStatus">
@@ -173,17 +209,15 @@
       </select>
       <button type="button" class="ghost" (click)="loadAdminData()">Apply</button>
     </div>
+
     <div class="table" *ngFor="let report of adminReports">
       <div>
         <strong>{{ report.scope }} · {{ report.category }}</strong>
         <div class="small">status: {{ report.status }} · messageId: {{ report.messageId }}</div>
       </div>
       <div class="actions">
-        <button type="button" class="ghost" (click)="loadReportDetail(report)">Detail</button>
-        <button type="button" class="ghost" (click)="updateReportStatus(report, 'in_review')">Review</button>
-        <button type="button" class="ghost" (click)="updateReportStatus(report, 'resolved')">Resolve</button>
+        <button type="button" class="ghost" (click)="openReportReview(report)">Review</button>
         <button type="button" class="ghost" (click)="updateReportStatus(report, 'dismissed')">Dismiss</button>
-        <button type="button" class="danger" (click)="removeReportedMessage(report)">Remove message</button>
       </div>
     </div>
     <div class="pagerRow">
@@ -191,16 +225,9 @@
       <span class="small">page {{ reportsPage }} / {{ reportsPages }}</span>
       <button type="button" class="ghost" (click)="nextReportsPage()" [disabled]="reportsPage >= reportsPages">Next</button>
     </div>
+    </ng-container>
 
-    <div class="card reportDetail" *ngIf="reportDetail?.report">
-      <h3>Report detail</h3>
-      <div class="small">report id: {{ reportDetail.report?._id }}</div>
-      <div class="small">reported by: {{ reportDetail.report?.reportedBy }}</div>
-      <div class="small">reason: {{ reportDetail.report?.reason || '-' }}</div>
-      <div class="small">note: {{ reportDetail.report?.note || '-' }}</div>
-      <div class="small">message text: {{ reportDetail.message?.text || '-' }}</div>
-    </div>
-
+    <ng-container *ngIf="abuseEvents.length">
     <h3>Auth abuse events</h3>
     <div class="table" *ngFor="let event of abuseEvents">
       <div>
@@ -214,6 +241,7 @@
       <span class="small">page {{ abusePage }} / {{ abusePages }}</span>
       <button type="button" class="ghost" (click)="nextAbusePage()" [disabled]="abusePage >= abusePages">Next</button>
     </div>
+    </ng-container>
 
     <h3>Moderation audit actions</h3>
     <div class="table" *ngFor="let item of adminAuditActions">
@@ -229,6 +257,43 @@
       <button type="button" class="ghost" (click)="nextAuditPage()" [disabled]="auditPage >= auditPages">Next</button>
     </div>
   </section>
+
+  <div class="reviewOverlay" *ngIf="reviewOpen" (click)="closeReportReview()">
+    <div class="reviewModal" (click)="$event.stopPropagation()">
+      <div class="reviewHeader">
+        <h3>Report review</h3>
+        <button type="button" class="ghost" (click)="closeReportReview()">Close</button>
+      </div>
+
+      <p class="small" *ngIf="reviewLoading">Loading report details...</p>
+
+      <ng-container *ngIf="!reviewLoading && reviewReport">
+        <p class="small">Category: {{ reviewReport.category }} · Scope: {{ reviewReport.scope }} · Status: {{ reviewReport.status }}</p>
+        <p class="small">Reported by: {{ reviewReport.reportedBy }}</p>
+        <p class="small">Message by: {{ reviewAuthor?.username || reviewMessage?.from || 'unknown' }}</p>
+        <p class="small">Message text:</p>
+        <div class="reviewMessageBox">{{ reviewMessage?.text || '(no text)' }}</div>
+
+        <div class="reviewAttachments" *ngIf="reviewMessageAttachments().length; else noAttachmentsTpl">
+          <h4>Attachments</h4>
+          <div class="reviewAttachmentItem" *ngFor="let attachment of reviewMessageAttachments()">
+            <a [href]="reviewAttachmentUrl(attachment)" target="_blank" rel="noreferrer">{{ attachment.name || attachment.url }}</a>
+            <span class="small">{{ attachment.mimeType || 'file' }}</span>
+          </div>
+        </div>
+        <ng-template #noAttachmentsTpl>
+          <p class="small">No attachments on this message.</p>
+        </ng-template>
+
+        <div class="reviewActions">
+          <button type="button" class="danger" (click)="reviewDeleteMessage()" [disabled]="reviewActionBusy">Delete message</button>
+          <button type="button" class="ghost" (click)="reviewDismiss()" [disabled]="reviewActionBusy">Dismiss report</button>
+          <button type="button" class="ghost" (click)="reviewBanUserWeek()" [disabled]="reviewActionBusy || !reviewAuthor?._id">Ban user 1 week</button>
+          <button type="button" class="danger" (click)="reviewBlockUser()" [disabled]="reviewActionBusy || !reviewAuthor?._id">Block user</button>
+        </div>
+      </ng-container>
+    </div>
+  </div>
 </section>
 
 <ng-template #loadingTpl>
