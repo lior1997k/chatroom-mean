@@ -40,7 +40,8 @@
     </button>
   </nav>
 
-  <div class="layoutGrid">
+  <!-- Profile Tab Content -->
+  <div class="layoutGrid" *ngIf="activeTab === 'profile'">
     <aside class="card profileHero">
       <div class="avatarRow">
         <div class="avatarWrap">
@@ -74,8 +75,7 @@
       <span class="small">Username and birth date are fixed after creation.</span>
     </aside>
 
-    <!-- Profile Tab Content -->
-    <article class="card" *ngIf="activeTab === 'profile'">
+    <article class="card">
       <h2>Public profile</h2>
       <div class="formGrid">
         <label>
