@@ -790,7 +790,14 @@
   align-items: center;
   width: 100%;
   gap: 6px;
-  padding: 2px 0;
+  background: rgba(255,255,255,0.4);
+  border-radius: 10px;
+  padding: 6px 10px;
+  margin: -4px -6px;
+}
+
+:host-context(.dark-theme) .editInline {
+  background: rgba(0,0,0,0.15);
 }
 
 .editInlineInput {
