@@ -949,7 +949,9 @@
 }
 
 .composerInput ::ng-deep .mat-mdc-form-field-flex {
-  align-items: center;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
 }
 
 .composerInput ::ng-deep .mat-mdc-form-field-infix {
@@ -967,7 +969,10 @@
 }
 
 .composerInput ::ng-deep .mat-mdc-form-field-suffix {
-  align-items: center;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
 }
 
 .composerInput ::ng-deep .mat-mdc-icon-button {
