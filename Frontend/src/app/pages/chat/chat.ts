@@ -51,6 +51,25 @@ export class ChatComponent implements AfterViewChecked {
   autoplayMediaPreviews = true;
   autoOpenPrivateMediaTimeline = false;
   hideMediaPreviewsByDefault = false;
+  dateFormat: 'MM/DD/YYYY' | 'DD/MM/YYYY' | 'YYYY-MM-DD' = 'MM/DD/YYYY';
+  
+  formatDate(date: Date | string | undefined): string {
+    if (!date) return '';
+    const d = new Date(date);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    
+    switch (this.dateFormat) {
+      case 'DD/MM/YYYY':
+        return `${day}/${month}/${year}`;
+      case 'YYYY-MM-DD':
+        return `${year}-${month}-${day}`;
+      default:
+        return `${month}/${day}/${year}`;
+    }
+  }
+  
   uploadingAttachment = false;
   uploadingAttachmentCount = 0;
   isRecordingVoice = false;
@@ -6580,6 +6599,9 @@ export class ChatComponent implements AfterViewChecked {
           // Apply preferences that affect chat behavior
           if (typeof prefs.autoplayMedia === 'boolean') {
             this.autoplayMediaPreviews = prefs.autoplayMedia;
+          }
+          if (prefs.dateFormat) {
+            this.dateFormat = prefs.dateFormat;
           }
         }
       },

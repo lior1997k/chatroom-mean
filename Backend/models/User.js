@@ -68,7 +68,8 @@ const userSchema = new mongoose.Schema(
       compactMode: { type: Boolean, default: false },
       showTyping: { type: Boolean, default: true },
       readReceipts: { type: Boolean, default: true },
-      whoCanMessage: { type: String, enum: ['everyone', 'contacts', 'nobody'], default: 'everyone' }
+      whoCanMessage: { type: String, enum: ['everyone', 'contacts', 'nobody'], default: 'everyone' },
+      dateFormat: { type: String, enum: ['MM/DD/YYYY', 'DD/MM/YYYY', 'YYYY-MM-DD'], default: 'MM/DD/YYYY' }
     },
     blockedPrivateSenders: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
   },

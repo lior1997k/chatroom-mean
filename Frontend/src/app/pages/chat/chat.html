@@ -1477,7 +1477,7 @@
     <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #d9e5f5;">
       <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
         <strong style="font-size: 0.9rem; color: #264363; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ viewerCurrentAttachment()?.name }}</strong>
-        <span style="font-size: 0.75rem; color: #4c6580;">Sent by {{ replyAuthorLabel(viewer.message.from) }} • {{ viewer.message.timestamp | date:'short' }}</span>
+        <span style="font-size: 0.75rem; color: #4c6580;">Sent by {{ replyAuthorLabel(viewer.message.from) }} • {{ formatDate(viewer.message.timestamp) }}</span>
         <span style="font-size: 0.72rem; color: #5b7390;">{{ attachmentSizeLabel(viewerCurrentAttachment()?.size) }} • {{ viewerCurrentAttachment()?.mimeType }}<ng-container *ngIf="isVideoAttachment(viewerCurrentAttachment())"> • {{ attachmentDurationLabel(viewerCurrentAttachment()) }}</ng-container></span>
         <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
           <span *ngFor="let chip of viewerMetadataChips()" style="font-size: 0.66rem; color: #365674; background: #ecf3fd; border: 1px solid #d2e1f4; border-radius: 999px; padding: 1px 7px;">{{ chip }}</span>

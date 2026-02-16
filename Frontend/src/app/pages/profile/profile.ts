@@ -38,7 +38,8 @@ export class ProfileComponent {
     compactMode: false,
     showTyping: true,
     readReceipts: true,
-    whoCanMessage: 'everyone' as 'everyone' | 'contacts' | 'nobody'
+    whoCanMessage: 'everyone' as 'everyone' | 'contacts' | 'nobody',
+    dateFormat: 'MM/DD/YYYY' as 'MM/DD/YYYY' | 'DD/MM/YYYY' | 'YYYY-MM-DD'
   };
   savingPreferences = false;
 
@@ -46,7 +47,9 @@ export class ProfileComponent {
   mediaSettings = {
     uploadQuality: 'balanced' as 'original' | 'balanced',
     autoOpenPrivateMediaTimeline: false,
-    hideMediaPreviewsByDefault: false
+    hideMediaPreviewsByDefault: false,
+    fontSize: 'medium' as 'small' | 'medium' | 'large',
+    highContrast: false
   };
 
   // Blocked users (private messages)
@@ -109,6 +112,26 @@ export class ProfileComponent {
 
   sessions: any[] = [];
   sessionsLoading = false;
+  sessionsPage = 1;
+  sessionsLimit = 5;
+  sessionsTotal = 0;
+
+  get paginatedSessions(): any[] {
+    const start = (this.sessionsPage - 1) * this.sessionsLimit;
+    return this.sessions.slice(start, start + this.sessionsLimit);
+  }
+
+  get sessionsPages(): number {
+    return Math.ceil(this.sessionsTotal / this.sessionsLimit);
+  }
+
+  prevSessionsPage() {
+    if (this.sessionsPage > 1) this.sessionsPage--;
+  }
+
+  nextSessionsPage() {
+    if (this.sessionsPage < this.sessionsPages) this.sessionsPage++;
+  }
 
   adminUsers: any[] = [];
   adminReports: any[] = [];
@@ -687,12 +710,15 @@ export class ProfileComponent {
 
   loadSessions() {
     this.sessionsLoading = true;
+    this.sessionsPage = 1;
     this.auth.listSessions().subscribe({
       next: (res: any) => {
         this.sessions = Array.isArray(res) ? res : [];
+        this.sessionsTotal = this.sessions.length;
       },
       error: () => {
         this.sessions = [];
+        this.sessionsTotal = 0;
       },
       complete: () => {
         this.sessionsLoading = false;
