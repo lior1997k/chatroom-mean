@@ -930,27 +930,56 @@
   display: none;
 }
 
+.composerInput {
+  flex: 1;
+}
+
 .composerInput ::ng-deep .mat-mdc-text-field-wrapper {
   background: white;
-  border-radius: 24px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  border-radius: 30px;
+  box-shadow: 0 3px 12px rgba(0,0,0,0.08);
 }
 
 :host-context(.dark-theme) .composerInput ::ng-deep .mat-mdc-text-field-wrapper {
   background: #2a3a50;
 }
 
+.composerInput ::ng-deep .mat-mdc-form-field-flex {
+  align-items: center;
+  height: 44px;
+}
+
+.composerInput ::ng-deep .mat-mdc-form-field-infix {
+  padding: 8px 0;
+  border-top: none;
+}
+
+.composerInput ::ng-deep input.mat-mdc-input-element {
+  font-size: 1rem;
+  color: #1a3a52;
+}
+
+:host-context(.dark-theme) .composerInput ::ng-deep input.mat-mdc-input-element {
+  color: #e8f0ff;
+}
+
 .emojiTrigger {
-  font-size: 1.1rem;
-  width: 36px;
-  height: 36px;
+  font-size: 1.2rem;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   transition: all 0.2s ease;
+  background: transparent;
+  border: none;
+  cursor: pointer;
 }
 
 .emojiTrigger:hover {
-  background: rgba(61, 99, 179, 0.1);
-  transform: scale(1.05);
+  background: rgba(61, 99, 179, 0.12);
+}
+
+.emojiTrigger:active {
+  transform: scale(0.95);
 }
 
 .emojiPicker {
@@ -985,20 +1014,36 @@
   box-shadow: 0 4px 12px rgba(61, 99, 179, 0.3);
 }
 
-button[type="submit"] {
-  border-radius: 24px;
-  font-weight: 600;
-  align-self: center;
-  height: 44px;
-  min-width: 70px;
-  padding: 0 20px;
-  transition: all 0.2s ease;
-  box-shadow: 0 2px 6px rgba(61, 99, 179, 0.25);
+button[type="submit"],
+.sendBtn {
+  border-radius: 50% !important;
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-shadow: 0 3px 10px rgba(61, 99, 179, 0.3) !important;
 }
 
-button[type="submit"]:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(61, 99, 179, 0.35);
+button[type="submit"]:hover,
+.sendBtn:hover {
+  transform: scale(1.08) !important;
+  box-shadow: 0 6px 20px rgba(61, 99, 179, 0.4) !important;
+}
+
+button[type="submit"]:active,
+.sendBtn:active {
+  transform: scale(0.95) !important;
+}
+
+.sendBtn mat-icon {
+  font-size: 24px;
+  width: 24px;
+  height: 24px;
+  margin-left: 2px;
 }
 
 .rightBody {
