@@ -22,9 +22,32 @@ function cleanText(value, max = 120) {
 
 router.get('/', auth, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).select('_id username email emailVerified role avatarUrl displayName bio statusText timezone lastSeenVisibility createdAt lastLoginAt');
+        const user = await User.findById(req.user.id);
         if (!user) return res.status(404).json({ message: 'User not found' });
-        res.json(user);
+        res.json({
+            _id: user._id,
+            username: user.username,
+            email: user.email || null,
+            emailVerified: !!user.emailVerified,
+            role: user.role,
+            avatarUrl: user.avatarUrl || '',
+            displayName: user.displayName || '',
+            bio: user.bio || '',
+            statusText: user.statusText || '',
+            timezone: user.timezone || 'UTC',
+            lastSeenVisibility: user.lastSeenVisibility || 'everyone',
+            gender: user.gender || 'other',
+            birthDate: user.birthDate,
+            showAge: user.showAge !== false,
+            showCountry: !!user.showCountry,
+            countryCode: user.countryCode || '',
+            socialLinks: user.socialLinks || { facebook: '', instagram: '', tiktok: '', twitter: '', website: '' },
+            privacySettings: user.privacySettings || { showGender: true, showOnlineStatus: true },
+            age: user.age,
+            isBirthdayToday: user.isBirthdayToday,
+            createdAt: user.createdAt,
+            lastLoginAt: user.lastLoginAt || null
+        });
     } catch (err) {
         console.error('Error fetching user:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -43,11 +66,25 @@ router.patch('/profile', auth, async (req, res) => {
     const hasStatusText = Object.prototype.hasOwnProperty.call(req.body || {}, 'statusText');
     const hasTimezone = Object.prototype.hasOwnProperty.call(req.body || {}, 'timezone');
     const hasLastSeenVisibility = Object.prototype.hasOwnProperty.call(req.body || {}, 'lastSeenVisibility');
+    const hasGender = Object.prototype.hasOwnProperty.call(req.body || {}, 'gender');
+    const hasBirthDate = Object.prototype.hasOwnProperty.call(req.body || {}, 'birthDate');
+    const hasShowAge = Object.prototype.hasOwnProperty.call(req.body || {}, 'showAge');
+    const hasShowCountry = Object.prototype.hasOwnProperty.call(req.body || {}, 'showCountry');
+    const hasCountryCode = Object.prototype.hasOwnProperty.call(req.body || {}, 'countryCode');
+    const hasSocialLinks = Object.prototype.hasOwnProperty.call(req.body || {}, 'socialLinks');
+    const hasPrivacySettings = Object.prototype.hasOwnProperty.call(req.body || {}, 'privacySettings');
     const displayName = hasDisplayName ? cleanText(req.body?.displayName, 60) : null;
     const bio = hasBio ? cleanText(req.body?.bio, 240) : null;
     const statusText = hasStatusText ? cleanText(req.body?.statusText, 120) : null;
     const timezone = hasTimezone ? cleanText(req.body?.timezone, 64) : null;
     const lastSeenVisibility = hasLastSeenVisibility ? String(req.body?.lastSeenVisibility || '').trim().toLowerCase() : null;
+    const gender = hasGender ? String(req.body?.gender || 'other').trim().toLowerCase() : null;
+    const birthDate = hasBirthDate ? req.body?.birthDate : null;
+    const showAge = hasShowAge ? Boolean(req.body?.showAge) : null;
+    const showCountry = hasShowCountry ? Boolean(req.body?.showCountry) : null;
+    const countryCode = hasCountryCode ? String(req.body?.countryCode || '').trim().toUpperCase() : null;
+    const socialLinks = hasSocialLinks ? req.body?.socialLinks : null;
+    const privacySettings = hasPrivacySettings ? req.body?.privacySettings : null;
 
     if (
       avatarUrl &&
@@ -58,6 +95,15 @@ router.patch('/profile', auth, async (req, res) => {
         error: {
           code: 'INVALID_AVATAR_URL',
           message: 'Avatar must be an uploaded file path or valid http(s) URL.'
+        }
+      });
+    }
+
+    if (gender && !['male', 'female', 'other'].includes(gender)) {
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_GENDER',
+          message: 'Gender must be male, female, or other.'
         }
       });
     }
@@ -97,6 +143,32 @@ router.patch('/profile', auth, async (req, res) => {
       }
       user.lastSeenVisibility = lastSeenVisibility;
     }
+    if (hasGender) user.gender = gender;
+    if (hasBirthDate) {
+      if (birthDate) {
+        user.birthDate = new Date(birthDate);
+      } else {
+        user.birthDate = null;
+      }
+    }
+    if (hasShowAge) user.showAge = showAge;
+    if (hasShowCountry) user.showCountry = showCountry;
+    if (hasCountryCode) user.countryCode = countryCode || '';
+    if (hasSocialLinks && socialLinks) {
+      user.socialLinks = {
+        facebook: String(socialLinks?.facebook || '').trim(),
+        instagram: String(socialLinks?.instagram || '').trim(),
+        tiktok: String(socialLinks?.tiktok || '').trim(),
+        twitter: String(socialLinks?.twitter || '').trim(),
+        website: String(socialLinks?.website || '').trim()
+      };
+    }
+    if (hasPrivacySettings && privacySettings) {
+      user.privacySettings = {
+        showGender: privacySettings?.showGender !== undefined ? Boolean(privacySettings.showGender) : true,
+        showOnlineStatus: privacySettings?.showOnlineStatus !== undefined ? Boolean(privacySettings.showOnlineStatus) : true
+      };
+    }
     await user.save();
 
     return res.json({
@@ -113,6 +185,15 @@ router.patch('/profile', auth, async (req, res) => {
         statusText: user.statusText || '',
         timezone: user.timezone || 'UTC',
         lastSeenVisibility: user.lastSeenVisibility || 'everyone',
+        gender: user.gender || 'other',
+        birthDate: user.birthDate,
+        showAge: user.showAge !== false,
+        showCountry: !!user.showCountry,
+        countryCode: user.countryCode || '',
+        socialLinks: user.socialLinks || { facebook: '', instagram: '', tiktok: '', twitter: '', website: '' },
+        privacySettings: user.privacySettings || { showGender: true, showOnlineStatus: true },
+        age: user.age,
+        isBirthdayToday: user.isBirthdayToday,
         createdAt: user.createdAt,
         lastLoginAt: user.lastLoginAt || null
       }

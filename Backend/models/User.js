@@ -43,8 +43,43 @@ const userSchema = new mongoose.Schema(
     lockUntil: { type: Date, default: null },
     lastLoginAt: { type: Date, default: null },
     passwordChangedAt: { type: Date, default: null },
+    gender: { type: String, enum: ['male', 'female', 'other'], default: 'other' },
+    birthDate: { type: Date, default: null },
+    showAge: { type: Boolean, default: true },
+    showCountry: { type: Boolean, default: false },
+    countryCode: { type: String, default: '' },
+    socialLinks: {
+      facebook: { type: String, default: '' },
+      instagram: { type: String, default: '' },
+      tiktok: { type: String, default: '' },
+      twitter: { type: String, default: '' },
+      website: { type: String, default: '' }
+    },
+    privacySettings: {
+      showGender: { type: Boolean, default: true },
+      showOnlineStatus: { type: Boolean, default: true }
+    }
   },
-  { timestamps: true }
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
+
+userSchema.virtual('age').get(function() {
+  if (!this.birthDate) return null;
+  const today = new Date();
+  const birth = new Date(this.birthDate);
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    age--;
+  }
+  return age >= 0 ? age : null;
+});
+
+userSchema.virtual('isBirthdayToday').get(function() {
+  if (!this.birthDate) return false;
+  const today = new Date();
+  const birth = new Date(this.birthDate);
+  return today.getDate() === birth.getDate() && today.getMonth() === birth.getMonth();
+});
 
 module.exports = mongoose.model('User', userSchema);

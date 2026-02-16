@@ -1392,23 +1392,45 @@
   </div>
 </ng-template>
 
-<div class="userProfileOverlay" *ngIf="userProfileCardOpen" (click)="closeUserProfileCard()">
+<div class="userProfileOverlay" *ngIf="userProfileCardOpen" (click)="closeUserProfileCard()" (keydown.escape)="closeUserProfileCard()">
   <div class="userProfileCard" (click)="$event.stopPropagation()">
     <button type="button" class="profileCardClose" (click)="closeUserProfileCard()" aria-label="Close profile card">×</button>
-    <img *ngIf="avatarUrl(userProfileCardUsername); else profileCardFallbackAvatar" [src]="avatarUrl(userProfileCardUsername)" alt="avatar" class="profileCardAvatar" />
-    <ng-template #profileCardFallbackAvatar>
-      <div class="profileCardAvatar profileCardAvatarFallback">
-        <mat-icon>account_circle</mat-icon>
+    <div class="profileCardHeader">
+      <div class="profileCardAvatarWrap">
+        <img *ngIf="avatarUrl(userProfileCardUsername); else profileCardFallbackAvatar" [src]="avatarUrl(userProfileCardUsername)" alt="avatar" class="profileCardAvatar" />
+        <ng-template #profileCardFallbackAvatar>
+          <div class="profileCardAvatar profileCardAvatarFallback">
+            <mat-icon>account_circle</mat-icon>
+          </div>
+        </ng-template>
+        <span class="online-indicator" *ngIf="userProfileCardData?.isOnline"></span>
       </div>
-    </ng-template>
-    <h3>{{ userDisplayName(userProfileCardUsername) }}</h3>
-    <p class="profileCardUser">@{{ userProfileCardUsername }}</p>
-    <p class="profileCardRole">Role: {{ userRole(userProfileCardUsername) }}</p>
-    <p class="profileCardStatus" *ngIf="userStatusText(userProfileCardUsername)">{{ userStatusText(userProfileCardUsername) }}</p>
-    <p class="profileCardStatus" *ngIf="!userStatusText(userProfileCardUsername)">No status set.</p>
-    <p class="profileCardMeta" *ngIf="userProfileCardData?.timezone">Timezone: {{ userProfileCardData.timezone }}</p>
-    <p class="profileCardMeta" *ngIf="userProfileCardData?.lastSeenAt">Last seen: {{ userProfileCardData.lastSeenAt | date:'short' }}</p>
-    <p class="profileCardMeta" *ngIf="userProfileCardLoading">Loading profile...</p>
+      <div class="profileCardInfo">
+        <div class="profileCardNameRow">
+          <h3>{{ userDisplayName(userProfileCardUsername) }}</h3>
+          <span class="profileCardBadge role">{{ userRole(userProfileCardUsername) }}</span>
+          <span class="profileCardBadge verified" *ngIf="userProfileCardData?.emailVerified">✓</span>
+        </div>
+        <p class="profileCardUser">@{{ userProfileCardUsername }}</p>
+        <p class="profileCardStatus" *ngIf="userStatusText(userProfileCardUsername)">{{ userStatusText(userProfileCardUsername) }}</p>
+        <p class="profileCardStatusEmpty" *ngIf="!userStatusText(userProfileCardUsername)">No status set</p>
+      </div>
+    </div>
+    <div class="profileCardDetails">
+      <p class="profileCardMeta" *ngIf="userProfileCardData?.timezone"><span class="label">Timezone:</span> {{ userProfileCardData.timezone }}</p>
+      <p class="profileCardMeta" *ngIf="userProfileCardData?.lastSeenAt"><span class="label">Last seen:</span> {{ userProfileCardData.lastSeenAt | date:'short' }}</p>
+      <p class="profileCardMeta" *ngIf="userProfileCardData?.age"><span class="label">Age:</span> {{ userProfileCardData.age }}</p>
+      <p class="profileCardMeta" *ngIf="userProfileCardData?.country"><span class="label">Country:</span> {{ userProfileCardData.country }}</p>
+      <p class="profileCardMeta" *ngIf="userProfileCardData?.joinedAt"><span class="label">Joined:</span> {{ userProfileCardData.joinedAt | date:'mediumDate' }}</p>
+    </div>
+    <div class="profileCardSocial" *ngIf="hasUserSocialLinks()">
+      <a *ngIf="userProfileCardData?.socialLinks?.facebook" [href]="userProfileCardData.socialLinks.facebook" target="_blank" rel="noopener noreferrer" [innerHTML]="getUserSocialSvgSafe('facebook')" class="socialIcon" title="Facebook"></a>
+      <a *ngIf="userProfileCardData?.socialLinks?.instagram" [href]="userProfileCardData.socialLinks.instagram" target="_blank" rel="noopener noreferrer" [innerHTML]="getUserSocialSvgSafe('instagram')" class="socialIcon" title="Instagram"></a>
+      <a *ngIf="userProfileCardData?.socialLinks?.tiktok" [href]="userProfileCardData.socialLinks.tiktok" target="_blank" rel="noopener noreferrer" [innerHTML]="getUserSocialSvgSafe('tiktok')" class="socialIcon" title="TikTok"></a>
+      <a *ngIf="userProfileCardData?.socialLinks?.twitter" [href]="userProfileCardData.socialLinks.twitter" target="_blank" rel="noopener noreferrer" [innerHTML]="getUserSocialSvgSafe('twitter')" class="socialIcon" title="X"></a>
+      <a *ngIf="userProfileCardData?.socialLinks?.website" [href]="userProfileCardData.socialLinks.website" target="_blank" rel="noopener noreferrer" [innerHTML]="getUserSocialSvgSafe('website')" class="socialIcon" title="Website"></a>
+    </div>
+    <p class="profileCardLoading" *ngIf="userProfileCardLoading">Loading profile...</p>
   </div>
 </div>
 
