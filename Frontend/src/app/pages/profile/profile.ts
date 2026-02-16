@@ -26,7 +26,37 @@ export class ProfileComponent {
   private readonly THEME_KEY = 'theme-preference';
   
   // Tab management
-  activeTab: 'profile' | 'security' | 'admin' = 'profile';
+  activeTab: 'profile' | 'security' | 'settings' | 'admin' = 'profile';
+
+  // Preferences / Settings
+  preferences = {
+    theme: 'system' as 'light' | 'dark' | 'system',
+    notificationsEnabled: true,
+    soundEnabled: true,
+    messagePreview: true,
+    autoplayMedia: true,
+    compactMode: false,
+    showTyping: true,
+    readReceipts: true,
+    whoCanMessage: 'everyone' as 'everyone' | 'contacts' | 'nobody'
+  };
+  savingPreferences = false;
+
+  // Blocked users (private messages)
+  blockedUsers: any[] = [];
+  loadingBlocked = false;
+  blockSearchQuery = '';
+  blockSearchResults: any[] = [];
+  searchingBlocks = false;
+
+  // Voice settings (localStorage)
+  voiceSettings = {
+    voiceAutoPlayNext: false,
+    voiceSilenceSkipEnabled: false,
+    voiceKeyboardControlsEnabled: false,
+    offlineVoiceCacheEnabled: false,
+    normalizeVoice: false
+  };
 
   username = '';
   avatarUrl = '';
@@ -125,6 +155,139 @@ export class ProfileComponent {
     this.initializeTab();
     this.loadMe();
     this.loadSessions();
+    this.loadPreferences();
+    this.loadVoiceSettings();
+    this.loadBlockedUsers();
+  }
+
+  loadPreferences() {
+    this.auth.getPreferences().subscribe({
+      next: (res: any) => {
+        this.preferences = { ...this.preferences, ...res };
+        this.applyThemePreference(this.preferences.theme);
+      },
+      error: () => {
+        // Use defaults
+      }
+    });
+  }
+
+  loadVoiceSettings() {
+    try {
+      const stored = localStorage.getItem('chat-voice-settings');
+      if (stored) {
+        this.voiceSettings = { ...this.voiceSettings, ...JSON.parse(stored) };
+      }
+    } catch {
+      // Use defaults
+    }
+  }
+
+  saveVoiceSettings() {
+    try {
+      localStorage.setItem('chat-voice-settings', JSON.stringify(this.voiceSettings));
+    } catch {
+      // Ignore
+    }
+  }
+
+  loadBlockedUsers() {
+    this.loadingBlocked = true;
+    this.auth.getBlockedPrivateList().subscribe({
+      next: (res: any) => {
+        this.blockedUsers = res || [];
+      },
+      error: () => {
+        this.blockedUsers = [];
+      },
+      complete: () => {
+        this.loadingBlocked = false;
+      }
+    });
+  }
+
+  applyThemePreference(theme: 'light' | 'dark' | 'system') {
+    const html = document.documentElement;
+    if (theme === 'dark') {
+      html.classList.add('dark-theme');
+    } else if (theme === 'light') {
+      html.classList.remove('dark-theme');
+    } else {
+      // System preference
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (prefersDark) {
+        html.classList.add('dark-theme');
+      } else {
+        html.classList.remove('dark-theme');
+      }
+    }
+  }
+
+  savePreferences() {
+    this.savingPreferences = true;
+    this.auth.updatePreferences(this.preferences).subscribe({
+      next: (res: any) => {
+        this.preferences = { ...this.preferences, ...res };
+        this.applyThemePreference(this.preferences.theme);
+      },
+      error: () => {
+        // Handle error
+      },
+      complete: () => {
+        this.savingPreferences = false;
+      }
+    });
+  }
+
+  unblockUserFromPrivate(user: any) {
+    this.auth.unblockPrivateUser(String(user._id)).subscribe({
+      next: () => {
+        this.blockedUsers = this.blockedUsers.filter(u => u._id !== user._id);
+      },
+      error: () => {
+        // Handle error
+      }
+    });
+  }
+
+  searchUsersToBlock() {
+    if (!this.blockSearchQuery || this.blockSearchQuery.length < 2) {
+      this.blockSearchResults = [];
+      return;
+    }
+    this.searchingBlocks = true;
+    this.auth.adminListUsers({ q: this.blockSearchQuery, limit: 10 }).subscribe({
+      next: (res: any) => {
+        const users = (res?.users || []).filter((u: any) => 
+          !this.blockedUsers.some(b => b._id === u._id) && u._id !== this.me?._id
+        );
+        this.blockSearchResults = users;
+      },
+      error: () => {
+        this.blockSearchResults = [];
+      },
+      complete: () => {
+        this.searchingBlocks = false;
+      }
+    });
+  }
+
+  blockUserFromPrivate(user: any) {
+    this.auth.blockPrivateUser(String(user._id)).subscribe({
+      next: () => {
+        this.blockedUsers = [...this.blockedUsers, {
+          _id: user._id,
+          username: user.username,
+          displayName: user.displayName,
+          avatarUrl: user.avatarUrl
+        }];
+        this.blockSearchResults = [];
+        this.blockSearchQuery = '';
+      },
+      error: () => {
+        // Handle error
+      }
+    });
   }
 
   loadMe() {
@@ -954,18 +1117,18 @@ export class ProfileComponent {
   }
 
   private initializeTab(): void {
-    // Read tab from URL fragment (e.g., #security, #admin)
+    // Read tab from URL fragment (e.g., #security, #admin, #settings)
     const hash = window.location.hash.slice(1); // Remove '#' prefix
-    const validTabs: Array<'profile' | 'security' | 'admin'> = ['profile', 'security', 'admin'];
+    const validTabs: Array<'profile' | 'security' | 'settings' | 'admin'> = ['profile', 'security', 'settings', 'admin'];
     
     if (hash && validTabs.includes(hash as any)) {
-      this.activeTab = hash as 'profile' | 'security' | 'admin';
+      this.activeTab = hash as 'profile' | 'security' | 'settings' | 'admin';
     } else {
       this.activeTab = 'profile'; // Default to profile tab
     }
   }
 
-  selectTab(tab: 'profile' | 'security' | 'admin'): void {
+  selectTab(tab: 'profile' | 'security' | 'settings' | 'admin'): void {
     // Don't show admin tab if user doesn't have permission
     if (tab === 'admin' && !this.isModeratorOrHigher()) {
       return;

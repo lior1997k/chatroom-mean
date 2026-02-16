@@ -58,7 +58,19 @@ const userSchema = new mongoose.Schema(
     privacySettings: {
       showGender: { type: Boolean, default: true },
       showOnlineStatus: { type: Boolean, default: true }
-    }
+    },
+    preferences: {
+      theme: { type: String, enum: ['light', 'dark', 'system'], default: 'system' },
+      notificationsEnabled: { type: Boolean, default: true },
+      soundEnabled: { type: Boolean, default: true },
+      messagePreview: { type: Boolean, default: true },
+      autoplayMedia: { type: Boolean, default: true },
+      compactMode: { type: Boolean, default: false },
+      showTyping: { type: Boolean, default: true },
+      readReceipts: { type: Boolean, default: true },
+      whoCanMessage: { type: String, enum: ['everyone', 'contacts', 'nobody'], default: 'everyone' }
+    },
+    blockedPrivateSenders: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );

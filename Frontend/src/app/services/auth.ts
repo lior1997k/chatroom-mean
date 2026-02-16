@@ -337,6 +337,43 @@ export class AuthService {
     sessionStorage.removeItem(this.refreshTokenKey);
   }
 
+  // User preferences
+  getPreferences() {
+    const token = this.getToken();
+    return this.http.get(`${environment.apiUrl}/api/me/preferences`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  updatePreferences(preferences: any) {
+    const token = this.getToken();
+    return this.http.patch(`${environment.apiUrl}/api/me/preferences`, preferences, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  // Blocked users (private messages)
+  getBlockedPrivateList() {
+    const token = this.getToken();
+    return this.http.get<any[]>(`${environment.apiUrl}/api/me/blocked-private`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  blockPrivateUser(userId: string) {
+    const token = this.getToken();
+    return this.http.post(`${environment.apiUrl}/api/me/block-private/${encodeURIComponent(userId)}`, {}, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
+  unblockPrivateUser(userId: string) {
+    const token = this.getToken();
+    return this.http.post(`${environment.apiUrl}/api/me/unblock-private/${encodeURIComponent(userId)}`, {}, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+  }
+
   private saveAuthSessionFromResponse(res: any) {
     const token = String(res?.token || '');
     const refreshToken = String(res?.refreshToken || '');

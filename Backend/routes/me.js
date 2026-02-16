@@ -43,6 +43,17 @@ router.get('/', auth, async (req, res) => {
             countryCode: user.countryCode || '',
             socialLinks: user.socialLinks || { facebook: '', instagram: '', tiktok: '', twitter: '', website: '' },
             privacySettings: user.privacySettings || { showGender: true, showOnlineStatus: true },
+            preferences: user.preferences || {
+                theme: 'system',
+                notificationsEnabled: true,
+                soundEnabled: true,
+                messagePreview: true,
+                autoplayMedia: true,
+                compactMode: false,
+                showTyping: true,
+                readReceipts: true,
+                whoCanMessage: 'everyone'
+            },
             age: user.age,
             isBirthdayToday: user.isBirthdayToday,
             createdAt: user.createdAt,
@@ -277,6 +288,130 @@ router.patch('/password', auth, async (req, res) => {
         message: 'Could not update password.'
       }
     });
+  }
+});
+
+// Get user preferences
+router.get('/preferences', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    res.json(user.preferences || {
+      theme: 'system',
+      notificationsEnabled: true,
+      soundEnabled: true,
+      messagePreview: true,
+      autoplayMedia: true,
+      compactMode: false,
+      showTyping: true,
+      readReceipts: true,
+      whoCanMessage: 'everyone'
+    });
+  } catch (err) {
+    console.error('Error fetching preferences:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update user preferences
+router.patch('/preferences', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const allowedFields = [
+      'theme', 'notificationsEnabled', 'soundEnabled', 'messagePreview',
+      'autoplayMedia', 'compactMode', 'showTyping', 'readReceipts', 'whoCanMessage'
+    ];
+
+    if (!user.preferences) {
+      user.preferences = {};
+    }
+
+    for (const field of allowedFields) {
+      if (Object.prototype.hasOwnProperty.call(req.body, field)) {
+        user.preferences[field] = req.body[field];
+      }
+    }
+
+    await user.save();
+    res.json(user.preferences);
+  } catch (err) {
+    console.error('Error updating preferences:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get blocked private senders
+router.get('/blocked-private', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).populate('blockedPrivateSenders', 'username displayName avatarUrl');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const blockedList = (user.blockedPrivateSenders || []).map(u => ({
+      _id: u._id,
+      username: u.username,
+      displayName: u.displayName,
+      avatarUrl: u.avatarUrl
+    }));
+
+    res.json(blockedList);
+  } catch (err) {
+    console.error('Error fetching blocked list:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Block user from private messages
+router.post('/block-private/:userId', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const targetUserId = req.params.userId;
+    if (targetUserId === String(user._id)) {
+      return res.status(400).json({ error: 'Cannot block yourself' });
+    }
+
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) return res.status(404).json({ error: 'User not found' });
+
+    if (!user.blockedPrivateSenders) {
+      user.blockedPrivateSenders = [];
+    }
+
+    if (!user.blockedPrivateSenders.some(id => String(id) === String(targetUserId))) {
+      user.blockedPrivateSenders.push(targetUserId);
+      await user.save();
+    }
+
+    res.json({ message: 'User blocked from private messages' });
+  } catch (err) {
+    console.error('Error blocking user:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Unblock user from private messages
+router.post('/unblock-private/:userId', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const targetUserId = req.params.userId;
+
+    if (user.blockedPrivateSenders) {
+      user.blockedPrivateSenders = user.blockedPrivateSenders.filter(
+        id => String(id) !== String(targetUserId)
+      );
+      await user.save();
+    }
+
+    res.json({ message: 'User unblocked from private messages' });
+  } catch (err) {
+    console.error('Error unblocking user:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

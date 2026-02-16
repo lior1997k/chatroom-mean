@@ -331,6 +331,7 @@ export class ChatComponent implements AfterViewChecked {
     this.loadUploadUiState();
     this.loadChunkRecoveryState();
     this.loadVoiceOfflineCacheIndex();
+    this.loadUserPreferences();
     this.message = this.draftForContext(null);
     this.loadUnreadCounts();
     this.loadPublicMessages();
@@ -6570,6 +6571,22 @@ export class ChatComponent implements AfterViewChecked {
     } catch {
       // no-op
     }
+  }
+
+  private loadUserPreferences() {
+    this.auth.getPreferences().subscribe({
+      next: (prefs: any) => {
+        if (prefs) {
+          // Apply preferences that affect chat behavior
+          if (typeof prefs.autoplayMedia === 'boolean') {
+            this.autoplayMediaPreviews = prefs.autoplayMedia;
+          }
+        }
+      },
+      error: () => {
+        // Use defaults from localStorage
+      }
+    });
   }
 
   private persistUploadUiState() {
