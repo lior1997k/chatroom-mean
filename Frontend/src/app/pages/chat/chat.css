@@ -946,7 +946,7 @@
 
 .composerInput ::ng-deep .mat-mdc-form-field-flex {
   align-items: center;
-  height: 44px;
+  height: 48px;
 }
 
 .composerInput ::ng-deep .mat-mdc-form-field-infix {
@@ -963,23 +963,34 @@
   color: #e8f0ff;
 }
 
-.emojiTrigger {
-  font-size: 1.2rem;
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  transition: all 0.2s ease;
-  background: transparent;
-  border: none;
-  cursor: pointer;
+.composerInput ::ng-deep .mat-mdc-form-field-suffix {
+  align-items: center;
 }
 
-.emojiTrigger:hover {
-  background: rgba(61, 99, 179, 0.12);
+.composerInput ::ng-deep .mat-mdc-icon-button {
+  width: 36px;
+  height: 36px;
+  line-height: 36px;
 }
 
-.emojiTrigger:active {
-  transform: scale(0.95);
+.composerInput ::ng-deep .mat-mdc-icon-button .mat-icon {
+  font-size: 20px;
+  width: 20px;
+  height: 20px;
+  color: #5a7a99;
+  transition: color 0.2s ease;
+}
+
+:host-context(.dark-theme) .composerInput ::ng-deep .mat-mdc-icon-button .mat-icon {
+  color: #a8c5e0;
+}
+
+.composerInput ::ng-deep .mat-mdc-icon-button:hover .mat-icon {
+  color: #3d63b3;
+}
+
+.composerInput ::ng-deep .mat-mdc-icon-button:disabled .mat-icon {
+  color: #b0bec5;
 }
 
 .emojiPicker {
