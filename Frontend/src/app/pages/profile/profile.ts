@@ -47,6 +47,23 @@ export class ProfileComponent {
   lastSeenVisibility: 'everyone' | 'contacts' | 'nobody' = 'everyone';
   savingProfile = false;
   uploadingAvatar = false;
+  avatarDragOver = false;
+  avatarPickerOpen = false;
+  
+  defaultAvatars = [
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=1',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=2',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=3',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=4',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=5',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=6',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=7',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=8',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=9',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=10',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=11',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=12'
+  ];
 
   currentPassword = '';
   newPassword = '';
@@ -268,6 +285,67 @@ export class ProfileComponent {
         if (input) input.value = '';
       }
     });
+  }
+
+  onAvatarDragOver(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.avatarDragOver = true;
+  }
+
+  onAvatarDragLeave(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.avatarDragOver = false;
+  }
+
+  onAvatarDrop(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.avatarDragOver = false;
+    
+    const files = event.dataTransfer?.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      if (file.type.startsWith('image/')) {
+        this.uploadAvatarFile(file);
+      }
+    }
+  }
+
+  private uploadAvatarFile(file: File) {
+    this.uploadingAvatar = true;
+    this.auth.uploadAvatar(file).subscribe({
+      next: (res: any) => {
+        const nextUrl = String(res?.url || '').trim();
+        if (!nextUrl) {
+          console.log('Avatar upload failed.');
+          return;
+        }
+        this.avatarUrl = nextUrl;
+        this.saveProfile();
+      },
+      error: (err: any) => {
+        console.log(err?.error?.error || err?.error?.message || 'Could not upload avatar.');
+      },
+      complete: () => {
+        this.uploadingAvatar = false;
+      }
+    });
+  }
+
+  openAvatarPicker() {
+    this.avatarPickerOpen = true;
+  }
+
+  closeAvatarPicker() {
+    this.avatarPickerOpen = false;
+  }
+
+  selectDefaultAvatar(url: string) {
+    this.avatarUrl = url;
+    this.saveProfile();
+    this.closeAvatarPicker();
   }
 
   avatarPreviewUrl(): string {

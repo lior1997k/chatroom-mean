@@ -47,19 +47,28 @@
     <aside class="card profileHero">
       <div class="profile-summary">
         <div class="avatarRow">
-          <div class="avatarWrap">
+          <div class="avatarWrap" 
+               (click)="openAvatarPicker()"
+               (dragover)="onAvatarDragOver($event)"
+               (dragleave)="onAvatarDragLeave($event)"
+               (drop)="onAvatarDrop($event)"
+               [class.drag-over]="avatarDragOver">
             <img *ngIf="avatarPreviewUrl(); else noAvatar" [src]="avatarPreviewUrl()" alt="avatar preview" class="avatarPreview" />
             <ng-template #noAvatar>
               <div class="avatarPlaceholder">No avatar</div>
             </ng-template>
             <span *ngIf="isBirthdayToday()" class="giftBadge" title="Happy birthday">🎁</span>
+            <div class="avatarOverlay" *ngIf="avatarDragOver">
+              <span>Drop to upload</span>
+            </div>
           </div>
           <div class="avatarActions">
             <label class="uploadBtn">
               Upload avatar
-              <input type="file" accept="image/*" (change)="onAvatarSelected($event)" />
+              <input type="file" accept="image/*" (change)="onAvatarSelected($event)" #fileInput />
             </label>
             <span class="small" *ngIf="uploadingAvatar">Uploading and saving...</span>
+            <button type="button" class="ghost" (click)="openAvatarPicker()" *ngIf="!uploadingAvatar">Choose default</button>
           </div>
         </div>
         <h2>{{ displayName || me?.username }}</h2>
@@ -75,10 +84,17 @@
         <div class="completion-score">
           <div class="completion-header">
             <span>Profile completeness</span>
-            <span class="completion-label">{{ getProfileCompletionScore() }}%</span>
+            <span class="completion-label">{{ getProfileCompletionScore() }}% - {{ getCompletionLabel(getProfileCompletionScore()) }}</span>
           </div>
           <div class="completion-bar">
             <div class="completion-fill" [style.width.%]="getProfileCompletionScore()"></div>
+          </div>
+          <div class="completion-tips" *ngIf="getProfileCompletionScore() < 100">
+            <span class="tip-item" *ngIf="!avatarUrl">📷 Add a profile picture</span>
+            <span class="tip-item" *ngIf="!displayName">✏️ Set a display name</span>
+            <span class="tip-item" *ngIf="!bio">📝 Add a bio</span>
+            <span class="tip-item" *ngIf="!birthDate">🎂 Add your birthday</span>
+            <span class="tip-item" *ngIf="!socialLinks['website']">🔗 Add your website</span>
           </div>
         </div>
 
@@ -481,5 +497,27 @@
       isOnline: true,
       socialLinks: socialLinks
     }"></app-profile-preview>
+  </div>
+</div>
+
+<!-- Avatar Picker Modal -->
+<div class="modal-overlay" *ngIf="avatarPickerOpen" (click)="closeAvatarPicker()" (keydown.escape)="closeAvatarPicker()" role="dialog" aria-label="Choose Avatar" aria-modal="true" tabindex="0">
+  <div class="modal-content avatar-picker-modal" (click)="$event.stopPropagation()" tabindex="-1">
+    <div class="picker-header">
+      <h2>Choose Avatar</h2>
+      <button type="button" class="ghost" (click)="closeAvatarPicker()">✕</button>
+    </div>
+    <div class="picker-subtitle">Select a default avatar or upload your own</div>
+    <div class="avatar-grid">
+      <div class="avatar-option" *ngFor="let avatar of defaultAvatars" (click)="selectDefaultAvatar(avatar)">
+        <img [src]="avatar" alt="Avatar option" />
+      </div>
+    </div>
+    <div class="picker-footer">
+      <label class="uploadBtn">
+        Upload custom avatar
+        <input type="file" accept="image/*" (change)="onAvatarSelected($event)" />
+      </label>
+    </div>
   </div>
 </div>
