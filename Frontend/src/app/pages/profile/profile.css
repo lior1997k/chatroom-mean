@@ -1883,12 +1883,15 @@ button.danger:hover:not(:disabled) {
 /* Settings Tab */
 .settings-section {
   padding: 24px;
+  display: block;
+  width: 100%;
 }
 
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 20px;
+  width: 100%;
 }
 
 .settings-card {
