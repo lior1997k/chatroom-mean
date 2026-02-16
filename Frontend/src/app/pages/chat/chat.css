@@ -4,6 +4,7 @@
   --chat-bg-secondary: #f8f9ff;
   --chat-text-primary: #1a3a52;
   --chat-text-secondary: #5a7a99;
+  --chat-text-muted: #8a9bb0;
   --chat-border-color: rgba(175, 195, 215, 0.4);
   --card-bg: linear-gradient(145deg, rgba(255,255,255,0.98), rgba(248,252,255,0.95));
   --card-border: rgba(255,255,255,0.6);
@@ -21,6 +22,7 @@
   --chat-bg-secondary: #243447;
   --chat-text-primary: #e8f0ff;
   --chat-text-secondary: #a8c5e0;
+  --chat-text-muted: #6a8599;
   --chat-border-color: rgba(100, 150, 200, 0.3);
   --card-bg: linear-gradient(145deg, rgba(35,50,75,0.98), rgba(22,35,55,0.97));
   --card-border: rgba(100,150,200,0.12);
@@ -41,28 +43,8 @@
     linear-gradient(180deg, var(--chat-bg-primary) 0%, var(--chat-bg-secondary) 100%);
 }
 
-:host-context(.dark-theme) {
-  --chat-bg-primary: #1a2332;
-  --chat-bg-secondary: #243447;
-  --chat-text-primary: #e8f0ff;
-  --chat-text-secondary: #a8c5e0;
-  --chat-border-color: rgba(100, 150, 200, 0.2);
-  --card-bg: linear-gradient(145deg, rgba(35,50,75,0.98), rgba(22,35,55,0.97));
-  --card-border: rgba(100,150,200,0.12);
-  --card-shadow: 0 0 0 1px rgba(100,150,200,0.12), 0 25px 60px rgba(0,0,0,0.5), 0 35px 70px rgba(0,0,0,0.4), 0 0 100px rgba(61,99,179,0.08);
-  --close-btn-bg: rgba(100,150,200,0.15);
-  --close-btn-color: #a8c5e0;
-  --close-btn-hover-bg: rgba(200,100,100,0.2);
-  --close-btn-hover-color: #ff8888;
-}
-
-.shell {
-  height: 100vh;
-  background: var(--chat-bg-primary);
-}
-
 .leftPane, .rightPane {
-  width: 240px;
+  width: 260px;
   background: var(--chat-bg-secondary);
   display: flex;
   flex-direction: column;
@@ -125,28 +107,29 @@
 .toolbarSearch {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  background: #ffffff;
-  border: 1px solid #d8e3f0;
-  border-radius: 999px;
-  padding: 2px 4px 2px 10px;
+  gap: 6px;
+  background: linear-gradient(145deg, #ffffff 0%, #f8faff 100%);
+  border: 1px solid rgba(175, 195, 215, 0.4);
+  border-radius: 24px;
+  padding: 4px 6px 4px 14px;
   min-width: 0;
   width: min(420px, 50vw);
   font-size: 0.92rem;
   font-weight: 500;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
 .toolbarSearch input {
   border: 0;
   background: transparent;
-  color: #25384d;
+  color: var(--chat-text-primary);
   width: 170px;
   font: inherit;
   font-weight: 500;
 }
 
 .toolbarSearch input::placeholder {
-  color: #7d8ea4;
+  color: var(--chat-text-muted);
 }
 
 .toolbarSearch input:focus {
@@ -156,9 +139,12 @@
 .searchCount {
   min-width: 44px;
   text-align: center;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-weight: 600;
-  color: #5a6f85;
+  color: var(--accent-color);
+  background: rgba(61, 99, 179, 0.1);
+  border-radius: 999px;
+  padding: 2px 8px;
 }
 
 .mat-nav-list a {
@@ -666,32 +652,41 @@
 }
 
 .msg.me .bubble {
-  background: #c5e1a5;
-  border-bottom-right-radius: 4px;
+  background: linear-gradient(135deg, #d4e8c3 0%, #c5e0b4 100%);
+  border-bottom-right-radius: 6px;
 }
 
 .msg:not(.me) .bubble {
-  background: #fff;
-  border-bottom-left-radius: 4px;
+  background: linear-gradient(145deg, #ffffff 0%, #f8faff 100%);
+  border-bottom-left-radius: 6px;
+  border: 1px solid rgba(200, 215, 235, 0.4);
 }
 
 .text {
   word-break: break-word;
+  line-height: 1.5;
+  color: var(--chat-text-primary);
 }
 
 .replySnippet {
   border: 0;
-  background: rgba(58, 78, 106, 0.08);
-  border-left: 3px solid #5d7fa5;
-  border-radius: 8px;
+  background: rgba(61, 99, 179, 0.06);
+  border-left: 3px solid var(--accent-color);
+  border-radius: 10px;
   width: 100%;
   text-align: left;
-  padding: 6px 8px;
-  margin: 0 0 7px;
-  color: #30465e;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  color: var(--chat-text-secondary);
   display: flex;
   flex-direction: column;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.replySnippet:hover {
+  background: rgba(61, 99, 179, 0.1);
+  transform: translateX(2px);
 }
 
 .text mark {
@@ -703,11 +698,12 @@
 
 .time {
   font-size: 0.7rem;
-  color: #777;
+  color: var(--chat-text-muted);
+  font-weight: 500;
 }
 
 .meta {
-  margin-top: 7px;
+  margin-top: 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -723,12 +719,16 @@
 
 .deletedText {
   font-style: italic;
-  color: #7c8794;
+  color: var(--chat-text-muted);
 }
 
 .editedTag {
-  font-size: 0.68rem;
-  color: #60758f;
+  font-size: 0.65rem;
+  color: var(--chat-text-muted);
+  font-weight: 500;
+  background: rgba(61, 99, 179, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 .messageActions {
@@ -881,11 +881,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #eaf0ff;
-  border: 1px solid #cad8f4;
-  border-radius: 10px;
-  padding: 5px 8px;
-  margin-bottom: 6px;
+  background: rgba(61, 99, 179, 0.06);
+  border: 1px solid rgba(61, 99, 179, 0.15);
+  border-radius: 12px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
 }
 
 .composerReplyText {
@@ -912,30 +912,32 @@
 
 .emojiPicker {
   position: absolute;
-  bottom: 56px;
+  bottom: 58px;
   right: 0;
-  width: 220px;
-  background: #fff;
-  border: 1px solid #d8deea;
-  border-radius: 12px;
-  padding: 10px;
+  width: 240px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  padding: 12px;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
-  box-shadow: 0 10px 28px rgba(20, 31, 51, 0.16);
+  gap: 8px;
+  box-shadow: var(--card-shadow);
   z-index: 5;
 }
 
 .emojiBtn {
   border: 0;
-  background: #f4f7ff;
-  border-radius: 8px;
-  height: 30px;
+  background: rgba(61, 99, 179, 0.08);
+  border-radius: 10px;
+  height: 36px;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .emojiBtn:hover {
-  background: #e3ebff;
+  background: var(--accent-gradient);
+  transform: scale(1.1);
 }
 
 button[type="submit"] {
@@ -1041,75 +1043,90 @@ button[type="submit"]:hover {
 }
 
 .status-icon {
-  font-size: 16px;
+  font-size: 14px;
   vertical-align: middle;
-  margin-left: 4px;
+  margin-left: 3px;
 }
 
 .status-icon.sent,
 .status-icon.delivered {
-  color: gray;
+  color: var(--chat-text-muted);
 }
 
 .status-icon.read {
-  color: #2196f3; /* Blue ticks */
+  color: #4a9eff;
+  filter: drop-shadow(0 0 2px rgba(74, 158, 255, 0.3));
 }
 
 .typingHint {
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   margin-left: 12px;
-  opacity: 0.85;
+  opacity: 0.8;
+  color: var(--chat-text-secondary);
+  font-weight: 500;
 }
 
 .reactionsSummary {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 4px;
   margin-top: 8px;
 }
 
 .reactionPill {
-  border: 1px solid #d6dce8;
-  background: #eef3ff;
+  border: 1px solid rgba(61, 99, 179, 0.15);
+  background: rgba(61, 99, 179, 0.08);
   border-radius: 999px;
-  padding: 2px 7px;
-  font-size: 0.76rem;
-  color: #324455;
+  padding: 2px 8px;
+  font-size: 0.74rem;
+  color: var(--chat-text-secondary);
+  transition: all 0.2s ease;
+}
+
+.reactionPill:hover {
+  background: rgba(61, 99, 179, 0.15);
+  transform: scale(1.05);
 }
 
 .reactionPicker {
-  margin-top: 8px;
-  background: linear-gradient(180deg, #ffffff, #f7faff);
-  border: 1px solid #d9e2f2;
-  border-radius: 14px;
-  padding: 8px;
+  margin-top: 10px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  padding: 10px;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  box-shadow: 0 8px 18px rgba(25, 39, 64, 0.12);
+  gap: 8px;
+  box-shadow: var(--card-shadow);
 }
 
 .reactionOption {
   border: 1px solid transparent;
-  background: #f4f7ff;
-  border-radius: 999px;
-  min-width: 34px;
-  height: 32px;
+  background: rgba(61, 99, 179, 0.08);
+  border-radius: 12px;
+  min-width: 36px;
+  height: 34px;
   padding: 0 8px;
-  font-size: 0.95rem;
+  font-size: 1rem;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.reactionOption:hover {
+  background: var(--accent-gradient);
+  transform: scale(1.1);
 }
 
 .reactionOption.active {
-  border-color: #3e56b4;
-  background: #e8ecff;
+  border-color: var(--accent-color);
+  background: rgba(61, 99, 179, 0.15);
 }
 
 .reactionOption span {
-  color: #3d4a5a;
+  color: var(--chat-text-secondary);
   font-weight: 600;
   font-size: 0.72rem;
 }
