@@ -457,12 +457,11 @@
             <img *ngIf="avatarPreviewUrl()" [src]="avatarPreviewUrl()" alt="avatar" />
             <div *ngIf="!avatarPreviewUrl()" class="avatarPlaceholder">No avatar</div>
           </div>
+          <span class="preview-badge verified" *ngIf="me?.emailVerified">✓ Verified</span>
         </div>
         <div class="preview-info-section">
           <div class="preview-name-row">
             <h3>{{ displayName || me?.username }}</h3>
-            <span class="preview-badge role">{{ me?.role || 'user' }}</span>
-            <span class="preview-badge verified" *ngIf="me?.emailVerified">✓ Verified</span>
             <span class="preview-badge online" *ngIf="showOnlineStatus" title="Online">
               <span class="online-dot"></span> Online
             </span>
