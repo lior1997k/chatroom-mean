@@ -678,10 +678,22 @@ app.get('/api/users/:username/public-profile', async (req, res) => {
     }
 
     const user = await User.findOne({ username })
-      .select('_id username avatarUrl role displayName statusText bio timezone lastSeenVisibility lastLoginAt')
+      .select('_id username avatarUrl role displayName statusText bio timezone lastSeenVisibility lastLoginAt createdAt emailVerified gender birthDate countryCode showGender showAge showCountry socialLinks')
       .lean();
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Calculate age if birthDate exists
+    let age = null;
+    if (user.birthDate) {
+      const today = new Date();
+      const birth = new Date(user.birthDate);
+      age = today.getFullYear() - birth.getFullYear();
+      const monthDiff = today.getMonth() - birth.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+        age--;
+      }
     }
 
     return res.json({
@@ -692,7 +704,13 @@ app.get('/api/users/:username/public-profile', async (req, res) => {
       statusText: String(user.statusText || ''),
       bio: String(user.bio || ''),
       timezone: String(user.timezone || 'UTC'),
-      lastSeenAt: user.lastSeenVisibility === 'everyone' ? (user.lastLoginAt || null) : null
+      lastSeenAt: user.lastSeenVisibility === 'everyone' ? (user.lastLoginAt || null) : null,
+      emailVerified: !!user.emailVerified,
+      gender: user.showGender !== false ? (user.gender || 'other') : null,
+      age: user.showAge !== false ? age : null,
+      country: user.showCountry ? (user.countryCode || null) : null,
+      joinedAt: user.createdAt,
+      socialLinks: user.socialLinks || {}
     });
   } catch (err) {
     console.error('Error fetching public profile:', err);

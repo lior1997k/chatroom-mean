@@ -1414,7 +1414,9 @@
             </span>
           </div>
           <p class="username">@{{ userProfileCardUsername }}</p>
-          <p class="profileCardStatus" *ngIf="userProfileCardData?.statusText">{{ userProfileCardData.statusText }}</p>
+          <div class="profileCardStatus" *ngIf="userProfileCardData?.statusText">
+            <span>📝</span> {{ userProfileCardData.statusText }}
+          </div>
         </div>
       </div>
       <p class="profileCardBio" *ngIf="userProfileCardData?.bio">{{ userProfileCardData.bio }}</p>

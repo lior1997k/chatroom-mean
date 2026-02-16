@@ -5101,7 +5101,14 @@ export class ChatComponent implements AfterViewChecked {
           statusText: String(res?.statusText || ''),
           bio: String(res?.bio || ''),
           timezone: String(res?.timezone || 'UTC'),
-          lastSeenAt: res?.lastSeenAt || null
+          lastSeenAt: res?.lastSeenAt || null,
+          emailVerified: !!res?.emailVerified,
+          gender: res?.gender || null,
+          age: res?.age || null,
+          country: res?.country || null,
+          joinedAt: res?.joinedAt || null,
+          socialLinks: res?.socialLinks || {},
+          isOnline: this.onlineUsers.includes(key)
         };
         this.userAvatarUrlByUsername[key] = String(res?.avatarUrl || '').trim();
         this.userProfileCardData = this.userPublicProfileByUsername[key];
