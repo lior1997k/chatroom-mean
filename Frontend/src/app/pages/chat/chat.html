@@ -1397,7 +1397,7 @@
     <app-profile-preview [profile]="{
       username: userProfileCardData?.username || userProfileCardUsername,
       displayName: userProfileCardData?.displayName || userProfileCardData?.username || userProfileCardUsername,
-      avatarUrl: userProfileCardData?.avatarUrl || '',
+      avatarUrl: avatarUrl(userProfileCardUsername),
       bio: userProfileCardData?.bio || '',
       statusText: userProfileCardData?.statusText || '',
       emailVerified: userProfileCardData?.emailVerified,
