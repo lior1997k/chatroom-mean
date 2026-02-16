@@ -25,7 +25,10 @@ describe('Chat', () => {
 
   const authMock = {
     getToken: () => 'fake-token',
-    getUsername: () => 'test-user'
+    getUsername: () => 'test-user',
+    getPreferences: () => of({}),
+    ensureUserProfile: () => of(null),
+    getPublicProfile: () => of(null)
   };
 
   beforeEach(async () => {
