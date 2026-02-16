@@ -1408,7 +1408,6 @@
       <div class="profileCardInfo">
         <div class="profileCardNameRow">
           <h3>{{ userDisplayName(userProfileCardUsername) }}</h3>
-          <span class="profileCardBadge role">{{ userRole(userProfileCardUsername) }}</span>
           <span class="profileCardBadge verified" *ngIf="userProfileCardData?.emailVerified">✓</span>
         </div>
         <p class="profileCardUser">@{{ userProfileCardUsername }}</p>
