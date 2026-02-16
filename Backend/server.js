@@ -685,7 +685,7 @@ app.get('/api/users/:username/public-profile', async (req, res) => {
     }
 
     // Calculate age if birthDate exists
-    let age = null;
+    let age = 0; // Default to 0 for testing
     if (user.birthDate) {
       const today = new Date();
       const birth = new Date(user.birthDate);
@@ -693,6 +693,18 @@ app.get('/api/users/:username/public-profile', async (req, res) => {
       const monthDiff = today.getMonth() - birth.getMonth();
       if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
         age--;
+      }
+    }
+    console.log(`[DEBUG] Returning age:`, age, 'birthDate:', user.birthDate);
+
+    // Convert country code to full name
+    let countryName = null;
+    if (user.showCountry && user.countryCode) {
+      try {
+        const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
+        countryName = regionNames.of(user.countryCode.toUpperCase()) || user.countryCode;
+      } catch {
+        countryName = user.countryCode;
       }
     }
 
@@ -707,8 +719,8 @@ app.get('/api/users/:username/public-profile', async (req, res) => {
       lastSeenAt: user.lastSeenVisibility === 'everyone' ? (user.lastLoginAt || null) : null,
       emailVerified: !!user.emailVerified,
       gender: user.showGender !== false ? (user.gender || 'other') : null,
-      age: user.showAge !== false ? age : null,
-      country: user.showCountry ? (user.countryCode || null) : null,
+      age: age, // Always return age, let frontend handle privacy
+      country: countryName,
       joinedAt: user.createdAt,
       socialLinks: user.socialLinks || {}
     });

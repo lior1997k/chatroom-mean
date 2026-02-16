@@ -1393,7 +1393,13 @@
 
 <div class="userProfileOverlay" *ngIf="userProfileCardOpen" (click)="closeUserProfileCard()" (keydown.escape)="closeUserProfileCard()">
   <div class="userProfileCard" (click)="$event.stopPropagation()">
-    <button type="button" class="profileCardClose" (click)="closeUserProfileCard()" aria-label="Close profile card">×</button>
+    <div class="preview-header">
+      <div>
+        <h2>Profile</h2>
+        <div class="subtitle">User profile information</div>
+      </div>
+      <button type="button" class="ghost" (click)="closeUserProfileCard()" aria-label="Close profile card">✕</button>
+    </div>
     <app-profile-preview [profile]="{
       username: userProfileCardData?.username || userProfileCardUsername,
       displayName: userProfileCardData?.displayName || userProfileCardData?.username || userProfileCardUsername,
@@ -1406,9 +1412,9 @@
       country: userProfileCardData?.country,
       joinedAt: userProfileCardData?.joinedAt,
       isOnline: userProfileCardData?.isOnline,
-      socialLinks: userProfileCardData?.socialLinks
+      socialLinks: userProfileCardData?.socialLinks,
+      loading: userProfileCardLoading
     }"></app-profile-preview>
-    <p class="profileCardLoading" *ngIf="userProfileCardLoading">Loading profile...</p>
   </div>
 
 <ng-template #confirmDeleteTpl let-dialogRef="dialogRef">

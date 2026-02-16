@@ -5091,10 +5091,12 @@ export class ChatComponent implements AfterViewChecked {
     this.userProfileCardOpen = true;
     this.userProfileCardLoading = true;
     this.userProfileCardUsername = key;
-    this.userProfileCardData = this.userPublicProfileByUsername[key] || null;
+    // Don't use cached data that might be incomplete (from ensureUserProfile)
+    this.userProfileCardData = null;
 
     this.auth.getPublicProfile(key).subscribe({
       next: (res: any) => {
+        console.log('[DEBUG] API response age:', res?.age, 'birthDate:', res?.birthDate);
         this.userPublicProfileByUsername[key] = {
           username: String(res?.username || key),
           displayName: String(res?.displayName || key),
@@ -5106,7 +5108,7 @@ export class ChatComponent implements AfterViewChecked {
           lastSeenAt: res?.lastSeenAt || null,
           emailVerified: !!res?.emailVerified,
           gender: res?.gender || null,
-          age: res?.age || null,
+          age: typeof res?.age === 'number' ? res.age : 0,
           country: res?.country || null,
           joinedAt: res?.joinedAt || null,
           socialLinks: res?.socialLinks || {},
@@ -5116,11 +5118,17 @@ export class ChatComponent implements AfterViewChecked {
         this.userProfileCardData = this.userPublicProfileByUsername[key];
       },
       error: () => {
-        this.userProfileCardData = this.userPublicProfileByUsername[key] || {
-          username: key,
-          displayName: key,
-          role: 'user'
-        };
+        // Only use cached data if it has age field (meaning it was loaded by openUserProfileCard before)
+        const cached = this.userPublicProfileByUsername[key];
+        if (cached && cached.age !== undefined) {
+          this.userProfileCardData = cached;
+        } else {
+          this.userProfileCardData = {
+            username: key,
+            displayName: key,
+            role: 'user'
+          };
+        }
       },
       complete: () => {
         this.userProfileCardLoading = false;
