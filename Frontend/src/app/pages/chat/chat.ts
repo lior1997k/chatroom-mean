@@ -5613,6 +5613,11 @@ export class ChatComponent implements AfterViewChecked {
       this.searchOpen = false;
       this.clearMessageSearch();
     }
+
+    // Cancel edit when clicking outside the edit area
+    if (this.editingMessage && !target.closest('.editInline') && !target.closest('.messageActions')) {
+      this.cancelMessageEdit();
+    }
   }
 
   @HostListener('document:keydown', ['$event'])
