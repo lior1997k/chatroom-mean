@@ -931,39 +931,13 @@
 }
 
 .composerInput ::ng-deep .mat-mdc-text-field-wrapper {
-  background: linear-gradient(145deg, #ffffff 0%, #f8faff 100%);
+  background: white;
   border-radius: 24px;
-  border: 1px solid rgba(175, 195, 215, 0.4);
-  box-shadow: 0 2px 8px rgba(20, 50, 80, 0.06), inset 0 1px 0 rgba(255,255,255,0.8);
-  padding: 0 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 
 :host-context(.dark-theme) .composerInput ::ng-deep .mat-mdc-text-field-wrapper {
-  background: linear-gradient(145deg, rgba(35,50,75,0.95) 0%, rgba(25,38,55,0.92) 100%);
-  border-color: rgba(80, 120, 160, 0.25);
-}
-
-.composerInput ::ng-deep .mat-mdc-form-field-flex {
-  align-items: center;
-}
-
-.composerInput ::ng-deep .mat-mdc-form-field-infix {
-  padding: 12px 0;
-  min-height: 48px;
-}
-
-.composerInput ::ng-deep input.mat-mdc-input-element {
-  font-size: 0.95rem;
-  color: var(--chat-text-primary);
-}
-
-.composerInput ::ng-deep .mat-mdc-form-field-label-wrapper {
-  top: -6px;
-}
-
-.composerInput ::ng-deep .mat-mdc-form-field-label {
-  color: var(--chat-text-muted);
-  font-size: 0.9rem;
+  background: #2a3a50;
 }
 
 .emojiTrigger {
@@ -1014,27 +988,17 @@
 button[type="submit"] {
   border-radius: 24px;
   font-weight: 600;
-  align-self: flex-end;
-  height: 48px;
-  min-width: 80px;
-  padding: 0 24px;
+  align-self: center;
+  height: 44px;
+  min-width: 70px;
+  padding: 0 20px;
   transition: all 0.2s ease;
-  background: var(--accent-gradient);
-  border: none;
-  color: white;
-  box-shadow: 0 2px 8px rgba(61, 99, 179, 0.3);
-  text-transform: none;
-  letter-spacing: 0.3px;
+  box-shadow: 0 2px 6px rgba(61, 99, 179, 0.25);
 }
 
 button[type="submit"]:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(61, 99, 179, 0.4);
-}
-
-button[type="submit"]:active {
-  transform: translateY(0);
-  box-shadow: 0 2px 8px rgba(61, 99, 179, 0.3);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(61, 99, 179, 0.35);
 }
 
 .rightBody {
