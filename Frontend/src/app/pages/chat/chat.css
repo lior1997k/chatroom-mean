@@ -997,8 +997,10 @@
 }
 
 .composerInput .emojiTrigger {
-  font-size: 1.25rem;
-  line-height: 1;
+  font-size: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .emojiPicker {
