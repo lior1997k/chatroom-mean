@@ -1394,47 +1394,21 @@
 <div class="userProfileOverlay" *ngIf="userProfileCardOpen" (click)="closeUserProfileCard()" (keydown.escape)="closeUserProfileCard()">
   <div class="userProfileCard" (click)="$event.stopPropagation()">
     <button type="button" class="profileCardClose" (click)="closeUserProfileCard()" aria-label="Close profile card">×</button>
-      <div class="profileCardHeader">
-        <div class="profileCardAvatarWrap">
-          <div class="profileCardAvatar">
-            <img *ngIf="userProfileCardData?.avatarUrl; else profileCardFallbackAvatar" [src]="userProfileCardData.avatarUrl" alt="avatar" />
-            <ng-template #profileCardFallbackAvatar>
-              <div class="profileCardAvatarFallback">
-                <mat-icon>account_circle</mat-icon>
-              </div>
-            </ng-template>
-          </div>
-          <span class="profileCardVerified" *ngIf="userProfileCardData?.emailVerified">✓ Verified</span>
-        </div>
-        <div class="profileCardInfo">
-          <div class="profileCardNameRow">
-            <h3>{{ userDisplayName(userProfileCardUsername) }}</h3>
-            <span class="profileCardOnline" *ngIf="userProfileCardData?.isOnline">
-              <span class="online-dot"></span> Online
-            </span>
-          </div>
-          <p class="username">@{{ userProfileCardUsername }}</p>
-          <div class="profileCardStatus" *ngIf="userProfileCardData?.statusText">
-            <span>📝</span> {{ userProfileCardData.statusText }}
-          </div>
-        </div>
-      </div>
-      <p class="profileCardBio" *ngIf="userProfileCardData?.bio">{{ userProfileCardData.bio }}</p>
-      <div class="profileCardDetailsGrid">
-        <p *ngIf="userProfileCardData?.gender"><span class="label">Gender:</span> {{ userProfileCardData.gender }}</p>
-        <p *ngIf="userProfileCardData?.age"><span class="label">Age:</span> {{ userProfileCardData.age }}</p>
-        <p *ngIf="userProfileCardData?.country"><span class="label">Country:</span> {{ userProfileCardData.country }}</p>
-        <p><span class="label">Joined:</span> {{ userProfileCardData?.joinedAt | date:'mediumDate' }}</p>
-      </div>
-      <div class="profileCardSocial" *ngIf="hasUserSocialLinks()">
-        <a *ngIf="userProfileCardData?.socialLinks?.facebook" [href]="userProfileCardData.socialLinks.facebook" target="_blank" rel="noopener noreferrer" [innerHTML]="getUserSocialSvgSafe('facebook')" class="socialIcon" title="Facebook"></a>
-        <a *ngIf="userProfileCardData?.socialLinks?.instagram" [href]="userProfileCardData.socialLinks.instagram" target="_blank" rel="noopener noreferrer" [innerHTML]="getUserSocialSvgSafe('instagram')" class="socialIcon" title="Instagram"></a>
-        <a *ngIf="userProfileCardData?.socialLinks?.tiktok" [href]="userProfileCardData.socialLinks.tiktok" target="_blank" rel="noopener noreferrer" [innerHTML]="getUserSocialSvgSafe('tiktok')" class="socialIcon" title="TikTok"></a>
-        <a *ngIf="userProfileCardData?.socialLinks?.twitter" [href]="userProfileCardData.socialLinks.twitter" target="_blank" rel="noopener noreferrer" [innerHTML]="getUserSocialSvgSafe('twitter')" class="socialIcon" title="X"></a>
-        <a *ngIf="userProfileCardData?.socialLinks?.website" [href]="userProfileCardData.socialLinks.website" target="_blank" rel="noopener noreferrer" [innerHTML]="getUserSocialSvgSafe('website')" class="socialIcon" title="Website"></a>
-      </div>
-      <p class="profileCardLoading" *ngIf="userProfileCardLoading">Loading profile...</p>
-    </div>
+    <app-profile-preview [profile]="{
+      username: userProfileCardData?.username || userProfileCardUsername,
+      displayName: userProfileCardData?.displayName || userProfileCardData?.username || userProfileCardUsername,
+      avatarUrl: userProfileCardData?.avatarUrl || '',
+      bio: userProfileCardData?.bio || '',
+      statusText: userProfileCardData?.statusText || '',
+      emailVerified: userProfileCardData?.emailVerified,
+      gender: userProfileCardData?.gender,
+      age: userProfileCardData?.age,
+      country: userProfileCardData?.country,
+      joinedAt: userProfileCardData?.joinedAt,
+      isOnline: userProfileCardData?.isOnline,
+      socialLinks: userProfileCardData?.socialLinks
+    }"></app-profile-preview>
+    <p class="profileCardLoading" *ngIf="userProfileCardLoading">Loading profile...</p>
   </div>
 
 <ng-template #confirmDeleteTpl let-dialogRef="dialogRef">

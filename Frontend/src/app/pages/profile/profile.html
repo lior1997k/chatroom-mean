@@ -467,42 +467,19 @@
       </div>
       <button type="button" class="ghost" (click)="closePreview()">✕</button>
     </div>
-    <div class="preview-body">
-      <div class="preview-profile-row">
-        <div class="preview-avatar-section">
-          <div class="preview-avatar">
-            <img *ngIf="avatarPreviewUrl()" [src]="avatarPreviewUrl()" alt="avatar" />
-            <div *ngIf="!avatarPreviewUrl()" class="avatarPlaceholder">No avatar</div>
-          </div>
-          <span class="preview-badge verified" *ngIf="me?.emailVerified">✓ Verified</span>
-        </div>
-        <div class="preview-info-section">
-          <div class="preview-name-row">
-            <h3>{{ displayName || me?.username }}</h3>
-            <span class="preview-badge online" *ngIf="showOnlineStatus" title="Online">
-              <span class="online-dot"></span> Online
-            </span>
-          </div>
-          <p class="username">@{{ me?.username }}</p>
-          <div class="preview-status" *ngIf="statusText">
-            <span>📝</span> {{ statusText }}
-          </div>
-        </div>
-      </div>
-      <p class="preview-bio" *ngIf="bio">{{ bio }}</p>
-      <div class="preview-details">
-        <p *ngIf="showGender"><span class="label">Gender:</span> {{ gender }}</p>
-        <p *ngIf="showAge"><span class="label">Age:</span> {{ ageLabel() }}</p>
-        <p *ngIf="showCountry"><span class="label">Country:</span> {{ countryLabel() }}</p>
-        <p><span class="label">Joined:</span> {{ me?.createdAt | date:'mediumDate' }}</p>
-      </div>
-      <div class="preview-social" *ngIf="hasAnySocialLink()">
-        <ng-container *ngFor="let p of socialPlatforms">
-          <a *ngIf="hasSocialLink(p.id)" [href]="getSocialLink(p.id)" target="_blank" rel="noopener noreferrer" 
-             class="social-icon-img" [title]="p.name + ': ' + getSocialLink(p.id)"
-             [innerHTML]="getPlatformSvgSafe(p.id)"></a>
-        </ng-container>
-      </div>
-    </div>
+    <app-profile-preview [profile]="{
+      username: me?.username || '',
+      displayName: displayName || me?.username,
+      avatarUrl: avatarPreviewUrl() || '',
+      bio: bio || '',
+      statusText: statusText || '',
+      emailVerified: me?.emailVerified,
+      gender: showGender ? gender : null,
+      age: showAge ? ageLabelAsNumber() : null,
+      country: showCountry ? countryLabel() : null,
+      joinedAt: me?.createdAt,
+      isOnline: true,
+      socialLinks: socialLinks
+    }"></app-profile-preview>
   </div>
 </div>

@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { AuthService } from '../../services/auth';
 import { SkeletonLoaderComponent } from '../../components/skeleton-loader.component';
+import { ProfilePreviewComponent } from '../../components/profile-preview.component';
 import { environment } from '../../../environments/environment';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 
@@ -13,7 +14,7 @@ type GenderValue = 'male' | 'female' | 'other';
 @Component({
   selector: 'app-profile',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, SkeletonLoaderComponent],
+  imports: [CommonModule, FormsModule, RouterModule, SkeletonLoaderComponent, ProfilePreviewComponent],
   templateUrl: './profile.html',
   styleUrls: ['./profile.css']
 })
@@ -284,6 +285,12 @@ export class ProfileComponent {
     const age = Number(this.me?.age);
     if (!Number.isFinite(age) || age < 0) return 'Not set';
     return `${age}`;
+  }
+
+  ageLabelAsNumber(): number | null {
+    const age = Number(this.me?.age);
+    if (!Number.isFinite(age) || age < 0) return null;
+    return age;
   }
 
   countryLabel(): string {

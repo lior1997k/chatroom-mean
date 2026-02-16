@@ -9,6 +9,7 @@ import { SocketService } from '../../services/socket';
 import { AuthService } from '../../services/auth';
 import { environment } from '../../../environments/environment';
 import { Attachment, ChatMessage } from '../../models/message.model';
+import { ProfilePreviewComponent } from '../../components/profile-preview.component';
 
 import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatListModule } from '@angular/material/list';
@@ -36,7 +37,8 @@ const VOICE_CACHE_INDEX_STORAGE_KEY = 'chatroom:voiceCacheIndex';
     MatSidenavModule, MatListModule, MatIconModule,
     MatButtonModule, MatInputModule, MatFormFieldModule,
     MatToolbarModule, MatMenuModule, MatDialogModule,
-    MatDividerModule, MatCardModule, MatTooltipModule
+    MatDividerModule, MatCardModule, MatTooltipModule,
+    ProfilePreviewComponent
   ],
   templateUrl: './chat.html',
   styleUrls: ['./chat.css'],
