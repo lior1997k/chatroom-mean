@@ -1535,15 +1535,18 @@ button.danger:hover:not(:disabled) {
 
 /* Form Sections - Premium Styling */
 .form-section {
-  margin-bottom: 28px;
-  padding-bottom: 24px;
+  margin-bottom: 0;
+  padding: 20px 0;
   border-bottom: 1px solid var(--border-color);
   animation: fadeInUp 0.5s ease-out both;
 }
 
+.form-section:first-of-type {
+  padding-top: 0;
+}
+
 .form-section:last-of-type {
   border-bottom: none;
-  margin-bottom: 20px;
 }
 
 .form-section h3 {
