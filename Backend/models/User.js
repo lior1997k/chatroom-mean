@@ -60,7 +60,7 @@ const userSchema = new mongoose.Schema(
       showOnlineStatus: { type: Boolean, default: true }
     },
     preferences: {
-      theme: { type: String, enum: ['light', 'dark', 'system'], default: 'system' },
+      theme: { type: String, enum: ['light', 'dark', 'system'], default: 'light' },
       notificationsEnabled: { type: Boolean, default: true },
       soundEnabled: { type: Boolean, default: true },
       messagePreview: { type: Boolean, default: true },

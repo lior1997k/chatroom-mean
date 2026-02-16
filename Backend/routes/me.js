@@ -44,7 +44,7 @@ router.get('/', auth, async (req, res) => {
             socialLinks: user.socialLinks || { facebook: '', instagram: '', tiktok: '', twitter: '', website: '' },
             privacySettings: user.privacySettings || { showGender: true, showOnlineStatus: true },
             preferences: user.preferences || {
-                theme: 'system',
+                theme: 'light',
                 notificationsEnabled: true,
                 soundEnabled: true,
                 messagePreview: true,

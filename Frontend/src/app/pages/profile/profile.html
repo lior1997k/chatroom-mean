@@ -483,43 +483,30 @@
         </div>
       </div>
 
-      <!-- Blocked Users -->
-      <div class="card settings-card full-width">
+      <!-- Media & Upload Settings -->
+      <div class="card settings-card">
         <div class="settings-header">
           <div class="settings-icon">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9C4.63 15.55 4 13.85 4 12zm8 8c-1.85 0-3.55-.63-4.9-18.31 1.69L7.1C19.37 8.45 20 10.15 20 12c0 4.42-3.58 8-8 8z"/></svg>
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
           </div>
-          <h3>Blocked from Private Messages</h3>
+          <h3>Media & Upload (stored locally)</h3>
         </div>
         <div class="settings-content">
-          <div class="block-search">
-            <input type="text" [(ngModel)]="blockSearchQuery" (input)="searchUsersToBlock()" placeholder="Search users to block..." />
-            <div class="search-results" *ngIf="blockSearchResults.length > 0">
-              <div class="search-result-item" *ngFor="let user of blockSearchResults" (click)="blockUserFromPrivate(user)">
-                <img *ngIf="user.avatarUrl" [src]="user.avatarUrl" alt="" class="result-avatar" />
-                <span class="result-name">{{ user.displayName || user.username }}</span>
-              </div>
-            </div>
-          </div>
-          <div class="blocked-list" *ngIf="loadingBlocked">
-            <div class="blocked-item" *ngFor="let i of [1,2,3]">
-              <app-skeleton-loader variant="avatar"></app-skeleton-loader>
-              <app-skeleton-loader variant="text"></app-skeleton-loader>
-            </div>
-          </div>
-          <div class="blocked-list" *ngIf="!loadingBlocked && blockedUsers.length === 0">
-            <p class="empty-state">No users blocked from private messages</p>
-          </div>
-          <div class="blocked-list" *ngIf="!loadingBlocked && blockedUsers.length > 0">
-            <div class="blocked-item" *ngFor="let user of blockedUsers">
-              <img *ngIf="user.avatarUrl" [src]="user.avatarUrl" alt="" class="blocked-avatar" />
-              <div class="blocked-info">
-                <span class="blocked-name">{{ user.displayName || user.username }}</span>
-                <span class="blocked-username">@{{ user.username }}</span>
-              </div>
-              <button type="button" class="ghost small" (click)="unblockUserFromPrivate(user)">Unblock</button>
-            </div>
-          </div>
+          <label class="setting-item">
+            <span>Upload quality</span>
+            <select [(ngModel)]="mediaSettings.uploadQuality" (change)="saveMediaSettings()">
+              <option value="original">Original</option>
+              <option value="balanced">Balanced</option>
+            </select>
+          </label>
+          <label class="setting-item toggle">
+            <input type="checkbox" [(ngModel)]="mediaSettings.autoOpenPrivateMediaTimeline" (change)="saveMediaSettings()" />
+            <span>Auto-open private media timeline</span>
+          </label>
+          <label class="setting-item toggle">
+            <input type="checkbox" [(ngModel)]="mediaSettings.hideMediaPreviewsByDefault" (change)="saveMediaSettings()" />
+            <span>Hide media previews by default</span>
+          </label>
         </div>
       </div>
 

@@ -30,7 +30,7 @@ export class ProfileComponent {
 
   // Preferences / Settings
   preferences = {
-    theme: 'system' as 'light' | 'dark' | 'system',
+    theme: 'light' as 'light' | 'dark' | 'system',
     notificationsEnabled: true,
     soundEnabled: true,
     messagePreview: true,
@@ -41,6 +41,13 @@ export class ProfileComponent {
     whoCanMessage: 'everyone' as 'everyone' | 'contacts' | 'nobody'
   };
   savingPreferences = false;
+
+  // Media & Upload settings (localStorage)
+  mediaSettings = {
+    uploadQuality: 'balanced' as 'original' | 'balanced',
+    autoOpenPrivateMediaTimeline: false,
+    hideMediaPreviewsByDefault: false
+  };
 
   // Blocked users (private messages)
   blockedUsers: any[] = [];
@@ -157,6 +164,7 @@ export class ProfileComponent {
     this.loadSessions();
     this.loadPreferences();
     this.loadVoiceSettings();
+    this.loadMediaSettings();
     this.loadBlockedUsers();
   }
 
@@ -186,6 +194,25 @@ export class ProfileComponent {
   saveVoiceSettings() {
     try {
       localStorage.setItem('chat-voice-settings', JSON.stringify(this.voiceSettings));
+    } catch {
+      // Ignore
+    }
+  }
+
+  loadMediaSettings() {
+    try {
+      const stored = localStorage.getItem('chat-media-settings');
+      if (stored) {
+        this.mediaSettings = { ...this.mediaSettings, ...JSON.parse(stored) };
+      }
+    } catch {
+      // Use defaults
+    }
+  }
+
+  saveMediaSettings() {
+    try {
+      localStorage.setItem('chat-media-settings', JSON.stringify(this.mediaSettings));
     } catch {
       // Ignore
     }

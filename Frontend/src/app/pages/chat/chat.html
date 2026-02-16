@@ -1315,6 +1315,8 @@
         <input matInput [(ngModel)]="searchTerm" (input)="applyFilter()" />
       </mat-form-field>
 
+      <!-- Media & Upload Settings - MOVED TO ACCOUNT CENTER SETTINGS -->
+      <!--
       <div style="border: 1px solid #d8e3f2; border-radius: 10px; background: #f8fbff; padding: 8px; margin: 0 0 10px;">
         <strong style="font-size: 0.78rem; color: #355271;">Media & Upload Settings</strong>
         <div style="margin-top: 6px; display: flex; flex-direction: column; gap: 7px;">
@@ -1358,6 +1360,7 @@
           </div>
         </div>
       </div>
+      -->
 
       <mat-nav-list *ngIf="filteredOnlineUsers.length; else nobody">
         <a mat-list-item *ngFor="let u of filteredOnlineUsers" (click)="openDmFromSidebar(u)">
