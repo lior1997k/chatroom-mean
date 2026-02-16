@@ -206,20 +206,35 @@ export class ProfileComponent {
     });
   }
 
+  private systemThemeListener: ((e: MediaQueryListEvent) => void) | null = null;
+
   applyThemePreference(theme: 'light' | 'dark' | 'system') {
+    // Remove existing system theme listener
+    if (this.systemThemeListener) {
+      window.matchMedia('(prefers-color-scheme: dark)').removeEventListener('change', this.systemThemeListener);
+      this.systemThemeListener = null;
+    }
+
     const html = document.documentElement;
     if (theme === 'dark') {
       html.classList.add('dark-theme');
     } else if (theme === 'light') {
       html.classList.remove('dark-theme');
     } else {
-      // System preference
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      if (prefersDark) {
-        html.classList.add('dark-theme');
-      } else {
-        html.classList.remove('dark-theme');
-      }
+      // System preference - listen for changes
+      const applySystemTheme = (e: MediaQueryListEvent | MediaQueryList) => {
+        if (e.matches) {
+          html.classList.add('dark-theme');
+        } else {
+          html.classList.remove('dark-theme');
+        }
+      };
+      
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      applySystemTheme(mediaQuery);
+      
+      this.systemThemeListener = (e: MediaQueryListEvent) => applySystemTheme(e);
+      mediaQuery.addEventListener('change', this.systemThemeListener);
     }
   }
 
