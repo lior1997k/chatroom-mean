@@ -1238,7 +1238,7 @@
           Recording voice note {{ voiceRecordingLabel() }}
           <button mat-stroked-button type="button" style="height: 22px; min-width: 50px; line-height: 20px; padding: 0 8px;" (click)="stopVoiceRecording(false)">Stop</button>
         </div>
-        <mat-form-field appearance="outline" class="composerInput">
+        <mat-form-field appearance="fill" class="composerInput">
           <mat-label>{{ selectedUser ? 'Type a private message' : 'Type a public message' }}</mat-label>
           <input
             matInput
