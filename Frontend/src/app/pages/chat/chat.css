@@ -982,9 +982,6 @@
   height: 20px;
   color: #5a7a99;
   transition: color 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 :host-context(.dark-theme) .composerInput ::ng-deep .mat-mdc-icon-button .mat-icon {
@@ -1000,10 +997,8 @@
 }
 
 .composerInput .emojiTrigger {
-  font-size: 1.3rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  font-size: 1.25rem;
+  line-height: 1;
 }
 
 .emojiPicker {
