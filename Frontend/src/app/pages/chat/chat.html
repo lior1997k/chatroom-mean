@@ -135,13 +135,12 @@
             [ngStyle]="userChipStyle(m.from)"
             [matMenuTriggerFor]="m.from !== myUsername ? userMenu : null"
             (click)="$event.stopPropagation(); m.from !== myUsername && (menuUser=m.from); m.from !== myUsername && (menuPublicMessage=m)"
-          >
+            >
             <img *ngIf="avatarUrl(m.from); else fallbackMsgUserIcon" [src]="avatarUrl(m.from)" alt="avatar" style="width: 18px; height: 18px; border-radius: 50%; object-fit: cover; border: 1px solid rgba(26,49,77,0.2);" />
             <ng-template #fallbackMsgUserIcon>
               <mat-icon>account_circle</mat-icon>
             </ng-template>
             <span>{{ userDisplayName(m.from) }}</span>
-            <span class="smallRoleBadge">{{ userRole(m.from) }}</span>
           </button>
           <mat-card
             class="bubble"
