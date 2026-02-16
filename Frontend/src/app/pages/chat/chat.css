@@ -788,12 +788,12 @@
 .editInline {
   display: flex;
   align-items: center;
-  width: calc(100% - 16px);
+  width: calc(100% - 20px);
   gap: 6px;
   background: rgba(255,255,255,0.4);
   border-radius: 10px;
-  padding: 6px 12px;
-  margin: -4px 8px;
+  padding: 6px 10px;
+  margin: -4px auto;
 }
 
 :host-context(.dark-theme) .editInline {
@@ -846,12 +846,12 @@
 
 .iconMini.primary {
   color: white;
-  background: linear-gradient(135deg, #6b9bd0 0%, #5a8add 100%);
-  box-shadow: 0 1px 4px rgba(90, 138, 221, 0.25);
+  background: linear-gradient(135deg, #8fb3d9 0%, #7aa3d0 100%);
+  box-shadow: 0 1px 3px rgba(122, 163, 208, 0.2);
 }
 
 .iconMini.primary:hover {
-  box-shadow: 0 2px 8px rgba(90, 138, 221, 0.35);
+  box-shadow: 0 2px 6px rgba(122, 163, 208, 0.3);
 }
 
 .msg.me .iconMini:hover {
