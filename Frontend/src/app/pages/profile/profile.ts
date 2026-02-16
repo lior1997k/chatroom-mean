@@ -172,6 +172,11 @@ export class ProfileComponent {
     this.auth.getPreferences().subscribe({
       next: (res: any) => {
         this.preferences = { ...this.preferences, ...res };
+        // Sync with localStorage for toggle button
+        if (this.preferences.theme) {
+          localStorage.setItem(this.THEME_KEY, this.preferences.theme);
+          this.currentTheme = this.preferences.theme === 'system' ? 'dark' : this.preferences.theme;
+        }
         this.applyThemePreference(this.preferences.theme);
       },
       error: () => {
@@ -1144,6 +1149,9 @@ export class ProfileComponent {
     this.currentTheme = newTheme;
     localStorage.setItem(this.THEME_KEY, newTheme);
     this.applyTheme(newTheme);
+    // Also save to preferences
+    this.preferences.theme = newTheme;
+    this.savePreferences();
   }
 
   private applyTheme(theme: 'light' | 'dark'): void {
