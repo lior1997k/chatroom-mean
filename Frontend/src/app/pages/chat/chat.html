@@ -135,13 +135,24 @@
     </mat-toolbar>
 
     <!-- Messages -->
-    <div class="messages">
+    <div class="messages" (scroll)="onMessagesScroll($event)">
+      <!-- Scroll to Bottom Button -->
+      <button class="scrollToBottom" *ngIf="showScrollButton" (click)="scrollToBottom()" matTooltip="Scroll to bottom">
+        <mat-icon>keyboard_arrow_down</mat-icon>
+      </button>
+      
       <ng-container *ngIf="!selectedUser; else privateView">
+        <div class="emptyChat" *ngIf="publicMessages.length === 0">
+          <mat-icon>forum</mat-icon>
+          <h3>Welcome to Public Chat</h3>
+          <p>Start a conversation with everyone in the room.</p>
+        </div>
+        
         <button
           class="loadOlderBtn"
           mat-stroked-button
           type="button"
-          *ngIf="publicHasMore"
+          *ngIf="publicHasMore && publicMessages.length > 0"
           [disabled]="publicLoading"
           (click)="loadOlderPublicMessages()"
         >

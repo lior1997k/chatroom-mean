@@ -203,6 +203,7 @@ export class ChatComponent implements AfterViewChecked {
   userProfileCardData: any = null;
   searchOpen = false;
   searchFilterMenuOpen = false;
+  showScrollButton = false;
 
   // Dialog
   newUser = '';
@@ -5614,6 +5615,48 @@ export class ChatComponent implements AfterViewChecked {
 
   onlineUserCount(): number {
     return this.onlineUsers.length;
+  }
+
+  onMessagesScroll(event: Event): void {
+    const target = event.target as HTMLElement;
+    const threshold = 150;
+    this.showScrollButton = target.scrollTop + target.clientHeight < target.scrollHeight - threshold;
+  }
+
+  scrollToBottom(): void {
+    const messagesEl = document.querySelector('.messages');
+    if (messagesEl) {
+      messagesEl.scrollTo({
+        top: messagesEl.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+  }
+
+  formatDateHeader(timestamp: string | undefined): string {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    } else {
+      return date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+    }
+  }
+
+  shouldShowDateSeparator(messages: ChatMessage[], index: number): boolean {
+    if (index === 0) return true;
+    const current = messages[index];
+    const previous = messages[index - 1];
+    if (!current?.timestamp || !previous?.timestamp) return false;
+    const currentDate = new Date(current.timestamp).toDateString();
+    const previousDate = new Date(previous.timestamp).toDateString();
+    return currentDate !== previousDate;
   }
 
   shouldShowUnreadDivider(message: ChatMessage): boolean {
