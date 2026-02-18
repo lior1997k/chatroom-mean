@@ -5543,6 +5543,32 @@ export class ChatComponent implements AfterViewChecked {
     return this.unreadCounts[u] || 0;
   }
 
+  lastMessageTime(u: string): string {
+    const arr = this.privateChats[u] || [];
+    if (!arr.length) return '';
+    const last = arr[arr.length - 1];
+    if (!last?.timestamp) return '';
+    const date = new Date(last.timestamp);
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const mins = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    if (mins < 1) return 'now';
+    if (mins < 60) return `${mins}m`;
+    if (hours < 24) return `${hours}h`;
+    if (days < 7) return `${days}d`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  isUserOnline(username: string): boolean {
+    return this.onlineUsers.includes(username);
+  }
+
+  onlineUserCount(): number {
+    return this.onlineUsers.length;
+  }
+
   shouldShowUnreadDivider(message: ChatMessage): boolean {
     if (!this.selectedUser || !message?.id) return false;
     return this.unreadMarkerByUser[this.selectedUser] === message.id;

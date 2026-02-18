@@ -2,26 +2,47 @@
 
   <!-- LEFT: Private chats -->
   <mat-sidenav mode="side" opened class="leftPane">
-    <mat-toolbar color="primary" class="paneHeader">Private</mat-toolbar>
+    <div class="paneHeader">
+      <span class="paneTitle">Messages</span>
+      <span class="onlineCount" *ngIf="onlineUserCount() > 0">{{ onlineUserCount() }} online</span>
+    </div>
 
-    <mat-nav-list>
-        <a mat-list-item *ngFor="let u of users" [class.active]="u === selectedUser" (click)="openChat(u)">
-          <img *ngIf="avatarUrl(u); else fallbackUserIcon" matListItemIcon [src]="avatarUrl(u)" alt="avatar" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover; border: 1px solid #d4ddea;" (click)="$event.stopPropagation(); openUserProfileCard(u)" />
+    <div class="privateChatsList">
+      <div class="chatItem" *ngFor="let u of users" [class.active]="u === selectedUser" (click)="openChat(u)">
+        <div class="chatAvatar">
+          <img *ngIf="avatarUrl(u); else fallbackUserIcon" [src]="avatarUrl(u)" alt="avatar" (click)="$event.stopPropagation(); openUserProfileCard(u)" />
           <ng-template #fallbackUserIcon>
-            <mat-icon matListItemIcon (click)="$event.stopPropagation(); openUserProfileCard(u)">person</mat-icon>
+            <div class="avatarFallback" (click)="$event.stopPropagation(); openUserProfileCard(u)">
+              <mat-icon>person</mat-icon>
+            </div>
           </ng-template>
-          <div matListItemTitle>{{ userDisplayName(u) }}</div>
-          <div matListItemLine *ngIf="draftPreview(u); else lastMsgLine"><strong>Draft:</strong> {{ draftPreview(u) }}</div>
-          <ng-template #lastMsgLine>
-            <div matListItemLine>{{ lastText(u) }}</div>
-          </ng-template>
+          <span class="onlineDot" *ngIf="isUserOnline(u)"></span>
+        </div>
+        <div class="chatContent">
+          <div class="chatHeader">
+            <span class="chatName">{{ userDisplayName(u) }}</span>
+            <span class="chatTime">{{ lastMessageTime(u) }}</span>
+          </div>
+          <div class="chatPreview">
+            <span *ngIf="draftPreview(u)" class="draftLabel">Draft:</span>
+            {{ draftPreview(u) || lastText(u) }}
+          </div>
+        </div>
+        <div class="chatMeta">
           <span class="unreadBadge" *ngIf="unreadCount(u) > 0">{{ unreadCount(u) }}</span>
-        <button mat-icon-button color="warn" (click)="$event.stopPropagation(); removePrivateChat(u)" matTooltip="Remove chat">
-          <mat-icon>delete</mat-icon>
-        </button>
-      </a>
-    </mat-nav-list>
+          <button class="deleteChatBtn" (click)="$event.stopPropagation(); removePrivateChat(u)" matTooltip="Remove chat">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+      </div>
+      <div class="emptyState" *ngIf="!users?.length">
+        <mat-icon>chat_bubble_outline</mat-icon>
+        <p>No conversations yet</p>
+        <span>Start a chat from the users panel</span>
+      </div>
+    </div>
   </mat-sidenav>
+
 
   <!-- CENTER: Chat area -->
   <mat-sidenav-content
