@@ -301,12 +301,290 @@
 }
 
 .rightPane {
-  width: 260px;
-  background: var(--chat-bg-secondary);
+  width: 320px;
+  background: var(--chat-bg-primary);
   display: flex;
   flex-direction: column;
   border-left: 1px solid var(--chat-border-color);
   border-right: none;
+}
+
+.rightPane .paneHeader {
+  padding: 20px 20px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--chat-border-color);
+  box-shadow: none;
+}
+
+.addUserBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(61, 99, 179, 0.08);
+  transition: all 0.2s ease;
+}
+
+.addUserBtn:hover {
+  background: var(--accent-gradient);
+  color: white;
+}
+
+.rightBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.userSearch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--chat-bg-secondary);
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.userSearch:focus-within {
+  border-color: var(--accent-color);
+  background: var(--chat-bg-primary);
+}
+
+.userSearch mat-icon {
+  font-size: 20px;
+  width: 20px;
+  height: 20px;
+  color: var(--chat-text-muted);
+}
+
+.userSearch input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 0.9rem;
+  color: var(--chat-text-primary);
+}
+
+.userSearch input::placeholder {
+  color: var(--chat-text-muted);
+}
+
+.userSearch input:focus {
+  outline: none;
+}
+
+.userSection {
+  margin-bottom: 20px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--chat-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sectionHeader mat-icon {
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+}
+
+.sectionHeader .count {
+  margin-left: auto;
+  background: var(--chat-bg-secondary);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.7rem;
+}
+
+.userList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.userCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.userCard:hover {
+  background: rgba(61, 99, 179, 0.06);
+}
+
+.userCard.pinned {
+  background: rgba(61, 99, 179, 0.04);
+}
+
+.userCard.pinned:hover {
+  background: rgba(61, 99, 179, 0.08);
+}
+
+.userAvatar {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.userAvatar img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.userAvatar .avatarFallback {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(61, 99, 179, 0.15) 0%, rgba(61, 99, 179, 0.08) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.userAvatar .avatarFallback mat-icon {
+  font-size: 20px;
+  width: 20px;
+  height: 20px;
+  color: var(--chat-text-secondary);
+}
+
+.statusRing {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #9ca3af;
+  border: 2px solid var(--chat-bg-primary);
+  transition: background 0.2s ease;
+}
+
+.statusRing.online {
+  background: #4ade80;
+  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.3);
+}
+
+.userInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.userName {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--chat-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pinIcon {
+  color: #f59e0b;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+}
+
+.pinIcon mat-icon {
+  font-size: 14px;
+  width: 14px;
+  height: 14px;
+}
+
+.roleBadge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(61, 99, 179, 0.1);
+  color: var(--accent-color);
+  text-transform: capitalize;
+}
+
+.userStatus {
+  font-size: 0.78rem;
+  color: var(--chat-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.userStatus.typing {
+  color: var(--accent-color);
+  font-weight: 500;
+}
+
+.userActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.userCard:hover .userActions {
+  opacity: 1;
+}
+
+.userActions button {
+  width: 32px;
+  height: 32px;
+}
+
+.userActions .pinBtn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--chat-text-muted);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.userActions .pinBtn:hover {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.userActions .pinBtn mat-icon {
+  font-size: 18px;
+  width: 18px;
+  height: 18px;
+}
+
+.userActions mat-icon-button mat-icon {
+  font-size: 18px;
+  width: 18px;
+  height: 18px;
 }
 
 .centerPane {

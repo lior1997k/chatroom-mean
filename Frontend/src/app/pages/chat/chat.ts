@@ -158,6 +158,9 @@ export class ChatComponent implements AfterViewChecked {
   searchTerm = '';
   filteredOnlineUsers: string[] = [];
 
+  // Pinned users
+  pinnedUsers: string[] = [];
+
   // View state
   selectedUser: string | null = null;
   menuUser: string | null = null;
@@ -2391,6 +2394,50 @@ export class ChatComponent implements AfterViewChecked {
     const key = String(username || '').trim().toLowerCase();
     if (!key) return '';
     return String(this.userPublicProfileByUsername[key]?.statusText || '').trim();
+  }
+
+  isPinnedUser(username: string): boolean {
+    return this.pinnedUsers.includes(username.toLowerCase());
+  }
+
+  togglePinnedUser(username: string): void {
+    const key = username.toLowerCase();
+    if (this.isPinnedUser(key)) {
+      this.pinnedUsers = this.pinnedUsers.filter(u => u !== key);
+    } else {
+      this.pinnedUsers = [key, ...this.pinnedUsers];
+    }
+  }
+
+  getUserActivityStatus(username: string): 'typing' | 'in-public' | 'online' | 'away' {
+    const key = username.toLowerCase();
+    if (this.isTypingMap[key]) return 'typing';
+    if (this.isTypingPublic.has(key)) return 'typing';
+    if (this.onlineUsers.includes(username)) return 'online';
+    return 'away';
+  }
+
+  getUserActivityText(username: string): string {
+    const status = this.getUserActivityStatus(username);
+    switch (status) {
+      case 'typing': return 'Typing...';
+      case 'in-public': return 'In public chat';
+      case 'online': return 'Online';
+      case 'away': return 'Away';
+      default: return '';
+    }
+  }
+
+  get filteredPinnedUsers(): string[] {
+    return this.pinnedUsers.filter(u => 
+      this.onlineUsers.some(ou => ou.toLowerCase() === u) &&
+      (this.searchTerm ? u.includes(this.searchTerm.toLowerCase()) : true)
+    );
+  }
+
+  get filteredOnlineNotPinned(): string[] {
+    const pinnedLower = this.pinnedUsers.map(u => u.toLowerCase());
+    return this.filteredOnlineUsers.filter(u => !pinnedLower.includes(u.toLowerCase()));
   }
 
   hasUserSocialLinks(): boolean {

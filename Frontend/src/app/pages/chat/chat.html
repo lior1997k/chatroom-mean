@@ -1324,78 +1324,102 @@
 
   <!-- RIGHT: Online users -->
   <mat-sidenav mode="side" opened position="end" class="rightPane">
-    <mat-toolbar color="primary" class="paneHeader">
-      Online ({{ filteredOnlineUsers.length }})
-      <span class="flex-spacer"></span>
-      <button mat-icon-button (click)="openAddUserDialog()" matTooltip="Start chat with any user">
+    <div class="paneHeader">
+      <span class="paneTitle">People</span>
+      <button mat-icon-button (click)="openAddUserDialog()" matTooltip="Start chat with any user" class="addUserBtn">
         <mat-icon>add</mat-icon>
       </button>
-    </mat-toolbar>
+    </div>
 
     <div class="rightBody">
-      <mat-form-field appearance="outline" class="w100">
-        <mat-label>Search online users</mat-label>
-        <input matInput [(ngModel)]="searchTerm" (input)="applyFilter()" />
-      </mat-form-field>
+      <div class="userSearch">
+        <mat-icon>search</mat-icon>
+        <input type="text" placeholder="Search users..." [(ngModel)]="searchTerm" (input)="applyFilter()" />
+      </div>
 
-      <!-- Media & Upload Settings - MOVED TO ACCOUNT CENTER SETTINGS -->
-      <!--
-      <div style="border: 1px solid #d8e3f2; border-radius: 10px; background: #f8fbff; padding: 8px; margin: 0 0 10px;">
-        <strong style="font-size: 0.78rem; color: #355271;">Media & Upload Settings</strong>
-        <div style="margin-top: 6px; display: flex; flex-direction: column; gap: 7px;">
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-            <span style="font-size: 0.73rem; color: #516a86;">Upload quality</span>
-            <div style="display: inline-flex; gap: 4px;">
-              <button mat-stroked-button type="button" style="height: 24px; min-width: 58px;" (click)="setUploadQuality('original')" [disabled]="uploadQuality === 'original'">Original</button>
-              <button mat-stroked-button type="button" style="height: 24px; min-width: 66px;" (click)="setUploadQuality('balanced')" [disabled]="uploadQuality === 'balanced'">Balanced</button>
+      <!-- Pinned Users Section -->
+      <div class="userSection" *ngIf="filteredPinnedUsers.length > 0">
+        <div class="sectionHeader">
+          <mat-icon>star</mat-icon>
+          <span>Pinned</span>
+        </div>
+        <div class="userList">
+          <div class="userCard pinned" *ngFor="let u of filteredPinnedUsers" (click)="openDmFromSidebar(u)">
+            <div class="userAvatar">
+              <img *ngIf="avatarUrl(u); else fallbackAvatar" [src]="avatarUrl(u)" alt="avatar" />
+              <ng-template #fallbackAvatar>
+                <div class="avatarFallback">
+                  <mat-icon>person</mat-icon>
+                </div>
+              </ng-template>
+              <span class="statusRing" [class.online]="getUserActivityStatus(u) === 'online' || getUserActivityStatus(u) === 'typing'"></span>
             </div>
-          </div>
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-            <span style="font-size: 0.73rem; color: #516a86;">Autoplay media previews</span>
-            <button mat-stroked-button type="button" style="height: 24px; min-width: 54px;" (click)="toggleAutoplayMediaPreviews()">{{ autoplayMediaPreviews ? 'On' : 'Off' }}</button>
-          </div>
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-            <span style="font-size: 0.73rem; color: #516a86;">Auto-open private media timeline</span>
-            <button mat-stroked-button type="button" style="height: 24px; min-width: 54px;" (click)="toggleAutoOpenPrivateMediaTimeline()">{{ autoOpenPrivateMediaTimeline ? 'On' : 'Off' }}</button>
-          </div>
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-            <span style="font-size: 0.73rem; color: #516a86;">Hide media previews by default</span>
-            <button mat-stroked-button type="button" style="height: 24px; min-width: 54px;" (click)="toggleHideMediaPreviewsByDefault()">{{ hideMediaPreviewsByDefault ? 'On' : 'Off' }}</button>
-          </div>
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-            <span style="font-size: 0.73rem; color: #516a86;">Voice queue auto-play next</span>
-            <button mat-stroked-button type="button" style="height: 24px; min-width: 54px;" (click)="toggleVoiceAutoPlayNext()">{{ isVoiceAutoPlayNextEnabled() ? 'On' : 'Off' }}</button>
-          </div>
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-            <span style="font-size: 0.73rem; color: #516a86;">Silence skip (voice playback)</span>
-            <button mat-stroked-button type="button" style="height: 24px; min-width: 54px;" (click)="toggleVoiceSilenceSkip()">{{ isVoiceSilenceSkipEnabled() ? 'On' : 'Off' }}</button>
-          </div>
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-            <span style="font-size: 0.73rem; color: #516a86;">Keyboard voice controls</span>
-            <button mat-stroked-button type="button" style="height: 24px; min-width: 54px;" (click)="toggleVoiceKeyboardControls()">{{ voiceKeyboardControlsEnabled ? 'On' : 'Off' }}</button>
-          </div>
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-            <span style="font-size: 0.73rem; color: #516a86;">Offline cache recent audio</span>
-            <button mat-stroked-button type="button" style="height: 24px; min-width: 54px;" (click)="toggleOfflineVoiceCache()">{{ offlineVoiceCacheEnabled ? 'On' : 'Off' }}</button>
-          </div>
-          <div style="font-size: 0.69rem; color: #647d98; border-top: 1px dashed #d4e2f4; padding-top: 6px;">
-            Voice keys: Space play/pause, Left/Right seek, [/ ] speed, M mute, Up/Down volume.
+            <div class="userInfo">
+              <div class="userName">
+                {{ userDisplayName(u) }}
+                <span class="pinIcon" (click)="$event.stopPropagation(); togglePinnedUser(u)">
+                  <mat-icon>star</mat-icon>
+                </span>
+              </div>
+              <div class="userStatus" [class.typing]="getUserActivityStatus(u) === 'typing'">
+                {{ getUserActivityText(u) }}
+              </div>
+            </div>
+            <div class="userActions">
+              <button mat-icon-button (click)="$event.stopPropagation(); openDmFromSidebar(u)" matTooltip="Message">
+                <mat-icon>chat_bubble_outline</mat-icon>
+              </button>
+            </div>
           </div>
         </div>
       </div>
-      -->
 
-      <mat-nav-list *ngIf="filteredOnlineUsers.length; else nobody">
-        <a mat-list-item *ngFor="let u of filteredOnlineUsers" (click)="openDmFromSidebar(u)">
-          <mat-icon matListItemIcon>circle</mat-icon>
-          <div matListItemTitle>{{ u }}</div>
-          <div matListItemLine>Click to DM</div>
-        </a>
-      </mat-nav-list>
+      <!-- Online Users Section -->
+      <div class="userSection" *ngIf="filteredOnlineNotPinned.length > 0">
+        <div class="sectionHeader">
+          <mat-icon>circle</mat-icon>
+          <span>Online</span>
+          <span class="count">{{ filteredOnlineNotPinned.length }}</span>
+        </div>
+        <div class="userList">
+          <div class="userCard" *ngFor="let u of filteredOnlineNotPinned" (click)="openDmFromSidebar(u)">
+            <div class="userAvatar">
+              <img *ngIf="avatarUrl(u); else fallbackAvatar2" [src]="avatarUrl(u)" alt="avatar" />
+              <ng-template #fallbackAvatar2>
+                <div class="avatarFallback">
+                  <mat-icon>person</mat-icon>
+                </div>
+              </ng-template>
+              <span class="statusRing" [class.online]="getUserActivityStatus(u) === 'online' || getUserActivityStatus(u) === 'typing'"></span>
+            </div>
+            <div class="userInfo">
+              <div class="userName">
+                {{ userDisplayName(u) }}
+                <span class="roleBadge" *ngIf="userRole(u) !== 'user'">{{ userRole(u) }}</span>
+              </div>
+              <div class="userStatus" [class.typing]="getUserActivityStatus(u) === 'typing'">
+                {{ getUserActivityText(u) }}
+              </div>
+            </div>
+            <div class="userActions">
+              <button class="pinBtn" (click)="$event.stopPropagation(); togglePinnedUser(u)" matTooltip="Pin user">
+                <mat-icon>star_outline</mat-icon>
+              </button>
+              <button mat-icon-button (click)="$event.stopPropagation(); openDmFromSidebar(u)" matTooltip="Message">
+                <mat-icon>chat_bubble_outline</mat-icon>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
-      <ng-template #nobody>
-        <p class="muted">No matching online users.</p>
-      </ng-template>
+      <!-- Empty State -->
+      <div class="emptyState" *ngIf="!filteredOnlineUsers.length">
+        <mat-icon>people_outline</mat-icon>
+        <p>No users found</p>
+        <span *ngIf="searchTerm">Try a different search term</span>
+        <span *ngIf="!searchTerm">No one is online right now</span>
+      </div>
     </div>
   </mat-sidenav>
 </mat-sidenav-container>
