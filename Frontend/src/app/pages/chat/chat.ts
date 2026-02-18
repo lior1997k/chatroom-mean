@@ -7,6 +7,7 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 
 import { SocketService } from '../../services/socket';
 import { AuthService } from '../../services/auth';
+import { ChatPersistenceService } from '../../services/chat-persistence.service';
 import { environment } from '../../../environments/environment';
 import { Attachment, ChatMessage } from '../../models/message.model';
 import { ProfilePreviewComponent } from '../../components/profile-preview.component';
@@ -333,7 +334,8 @@ export class ChatComponent implements AfterViewChecked {
     private http: HttpClient,
     private router: Router,
     public dialog: MatDialog,
-    private sanitizer: DomSanitizer
+    private sanitizer: DomSanitizer,
+    private persistence: ChatPersistenceService
   ) {}
 
   getUserSocialSvgSafe(platform: string): SafeHtml {
@@ -347,6 +349,9 @@ export class ChatComponent implements AfterViewChecked {
       window.location.href = '/login';
       return;
     }
+
+    // Load persisted messages first
+    this.loadPersistedData();
 
     this.socket.connect();
     this.loadUploadPolicy();
@@ -413,6 +418,11 @@ export class ChatComponent implements AfterViewChecked {
           this.unreadMarkerByUser[other] = m.id;
         }
       }
+
+      // Save to persistence
+      this.savePrivateChatsToPersistence();
+      this.saveUsersListToPersistence();
+      this.saveUnreadCountsToPersistence();
     });
 
     this.socket.onEvent<{ counts: Array<{ username: string; count: number }> }>('unreadCountsUpdated')
@@ -2408,6 +2418,7 @@ export class ChatComponent implements AfterViewChecked {
     } else {
       this.pinnedUsers = [key, ...this.pinnedUsers];
     }
+    this.savePinnedUsersToPersistence();
   }
 
   getUserActivityStatus(username: string): 'typing' | 'in-public' | 'online' | 'away' {
@@ -5143,7 +5154,83 @@ export class ChatComponent implements AfterViewChecked {
     return !!message?.id && this.recentlyEditedIds.has(message.id);
   }
 
+  // === PERSISTENCE ===
+  
+  loadPersistedData(): void {
+    // Load persisted messages
+    const persistedPublic = this.persistence.loadPublicMessages();
+    const persistedPrivate = this.persistence.loadPrivateChats();
+    const persistedPinned = this.persistence.loadPinnedUsers();
+    const persistedDrafts = this.persistence.loadDrafts();
+    const persistedUnread = this.persistence.loadUnreadCounts();
+    const persistedUsers = this.persistence.loadUsersList();
+
+    if (persistedPublic.length > 0) {
+      this.publicMessages = persistedPublic;
+    }
+    
+    if (Object.keys(persistedPrivate).length > 0) {
+      this.privateChats = persistedPrivate;
+    }
+    
+    if (persistedPinned.length > 0) {
+      this.pinnedUsers = persistedPinned;
+    }
+    
+    if (Object.keys(persistedDrafts).length > 0) {
+      this.draftsByContext = persistedDrafts;
+    }
+    
+    if (Object.keys(persistedUnread).length > 0) {
+      this.unreadCounts = persistedUnread;
+    }
+    
+    if (persistedUsers.length > 0) {
+      this.users = persistedUsers;
+    }
+  }
+
+  savePublicMessagesToPersistence(): void {
+    this.persistence.savePublicMessages(this.publicMessages);
+  }
+
+  savePrivateChatsToPersistence(): void {
+    this.persistence.savePrivateChats(this.privateChats);
+  }
+
+  savePinnedUsersToPersistence(): void {
+    this.persistence.savePinnedUsers(this.pinnedUsers);
+  }
+
+  saveDraftsToPersistence(): void {
+    this.persistence.saveDrafts(this.draftsByContext);
+  }
+
+  saveUnreadCountsToPersistence(): void {
+    this.persistence.saveUnreadCounts(this.unreadCounts);
+  }
+
+  saveUsersListToPersistence(): void {
+    this.persistence.saveUsersList(this.users);
+  }
+
+  saveAllToPersistence(): void {
+    this.savePublicMessagesToPersistence();
+    this.savePrivateChatsToPersistence();
+    this.savePinnedUsersToPersistence();
+    this.saveDraftsToPersistence();
+    this.saveUnreadCountsToPersistence();
+    this.saveUsersListToPersistence();
+  }
+
+  // Clear persisted data on sign out
+  clearPersistedData(): void {
+    this.persistence.clearAll();
+  }
+
   signOut() {
+    // Save all data before signing out
+    this.saveAllToPersistence();
     this.socket.disconnect();
     this.auth.logout();
     this.router.navigate(['/login']);
@@ -6028,6 +6115,7 @@ export class ChatComponent implements AfterViewChecked {
 
   private appendPublicMessage(msg: ChatMessage) {
     this.publicMessages = this.mergePublicMessages(this.publicMessages, [msg]);
+    this.savePublicMessagesToPersistence();
   }
 
   private mergePublicMessages(base: ChatMessage[], incoming: ChatMessage[]) {
