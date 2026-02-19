@@ -12,7 +12,7 @@ import { environment } from '../../../environments/environment';
 import { Attachment, ChatMessage } from '../../models/message.model';
 import { ProfilePreviewComponent } from '../../components/profile-preview.component';
 
-import { MatSidenavModule } from '@angular/material/sidenav';
+import { MatSidenav, MatSidenavModule } from '@angular/material/sidenav';
 import { MatListModule } from '@angular/material/list';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
@@ -163,6 +163,12 @@ export class ChatComponent implements AfterViewChecked {
   pinnedUsers: string[] = [];
 
   // View state
+  isMobileView = false;
+  leftPaneMode: 'side' | 'over' = 'side';
+  leftPaneOpened = true;
+  rightPaneMode: 'side' | 'over' = 'side';
+  rightPaneOpened = true;
+  private readonly mobileBreakpointPx = 1024;
   selectedUser: string | null = null;
   menuUser: string | null = null;
   menuPublicMessage: ChatMessage | null = null;
@@ -208,8 +214,8 @@ export class ChatComponent implements AfterViewChecked {
 
   // Dialog
   newUser = '';
+  @ViewChild('leftSidenav') leftSidenav?: MatSidenav;
   @ViewChild('startChatTpl') startChatTpl!: TemplateRef<any>;
-  @ViewChild('confirmDeleteTpl') confirmDeleteTpl!: TemplateRef<any>;
   @ViewChild('forwardTpl') forwardTpl!: TemplateRef<any>;
   @ViewChild('imageViewerTpl') imageViewerTpl!: TemplateRef<any>;
   @ViewChild('searchInput') searchInput?: ElementRef<HTMLInputElement>;
@@ -327,6 +333,9 @@ export class ChatComponent implements AfterViewChecked {
     y: number;
     at: number;
   } | null = null;
+  readonly inlineViewerDialogRef = {
+    close: () => this.closeInlineViewer()
+  };
 
   constructor(
     private socket: SocketService,
@@ -343,7 +352,46 @@ export class ChatComponent implements AfterViewChecked {
     return this.sanitizer.bypassSecurityTrustHtml(svg);
   }
 
+  private syncResponsiveLayout() {
+    const wasMobile = this.isMobileView;
+    this.isMobileView = window.innerWidth <= this.mobileBreakpointPx;
+    this.leftPaneMode = this.isMobileView ? 'over' : 'side';
+    this.rightPaneMode = this.isMobileView ? 'over' : 'side';
+
+    if (this.isMobileView) {
+      if (!wasMobile) {
+        this.leftPaneOpened = false;
+        this.rightPaneOpened = false;
+      }
+    } else {
+      this.leftPaneOpened = true;
+      this.rightPaneOpened = true;
+    }
+  }
+
+  toggleMobileChats() {
+    if (!this.isMobileView) return;
+    if (!this.leftPaneOpened) this.rightPaneOpened = false;
+    this.leftPaneOpened = !this.leftPaneOpened;
+  }
+
+  toggleMobilePeople() {
+    if (!this.isMobileView) return;
+    if (!this.rightPaneOpened) this.leftPaneOpened = false;
+    this.rightPaneOpened = !this.rightPaneOpened;
+  }
+
+  closeInlineViewer() {
+    this.imageViewerTarget = null;
+    this.viewerNotice = '';
+    this.viewerDialogRef = null;
+    this.stopViewerMomentum();
+    this.resumeAttachmentPreviewVideo();
+  }
+
   ngOnInit() {
+    this.syncResponsiveLayout();
+
     const token = this.auth.getToken();
     if (!token) {
       window.location.href = '/login';
@@ -631,6 +679,14 @@ export class ChatComponent implements AfterViewChecked {
     }
 
     this.selectedUser = username;
+    if (this.isMobileView) {
+      this.leftPaneOpened = false;
+      this.rightPaneOpened = false;
+    }
+    if (!this.users.includes(username)) {
+      this.users.unshift(username);
+      this.saveUsersListToPersistence();
+    }
     this.privateMediaTimelineOpen = this.autoOpenPrivateMediaTimeline;
     this.privateMediaTimelineCollapsed = false;
     this.threadRenderLimit = 180;
@@ -4200,25 +4256,9 @@ export class ChatComponent implements AfterViewChecked {
     this.imageViewerTarget = { message: { ...message, attachment }, scope, media: mediaList, index };
     this.resetViewerZoom();
     this.prefetchViewerNeighbors();
-    try {
-      const ref = this.dialog.open(this.imageViewerTpl, {
-        width: 'min(920px, 96vw)',
-        maxWidth: '96vw'
-      });
-      this.viewerDialogRef = ref;
-      this.showViewerShortcutHints = false;
-
-      ref.afterClosed().subscribe(() => {
-        this.imageViewerTarget = null;
-        this.viewerNotice = '';
-        this.viewerDialogRef = null;
-        this.stopViewerMomentum();
-        this.resumeAttachmentPreviewVideo();
-      });
-      return true;
-    } catch (error: any) {
-      return false;
-    }
+    this.viewerDialogRef = null;
+    this.showViewerShortcutHints = false;
+    return true;
   }
 
   private prefetchViewerNeighbors() {
@@ -4653,11 +4693,12 @@ export class ChatComponent implements AfterViewChecked {
     }
     this.viewerDragging = false;
     this.viewerPinchDistance = 0;
-    if (this.viewerZoom <= 1.01 && this.viewerDialogRef) {
+    if (this.viewerZoom <= 1.01) {
       const dy = this.viewerTouchLastY - this.viewerSwipeStartY;
       const dx = Math.abs(this.viewerTouchLastX - this.viewerSwipeStartX);
       if (dy > 120 && dx < 80) {
-        this.viewerDialogRef.close();
+        this.closeInlineViewer();
+        return;
       }
     }
     if (this.viewerZoom <= 1.01) {
@@ -4671,7 +4712,7 @@ export class ChatComponent implements AfterViewChecked {
         this.stopViewerMomentum();
         return;
       }
-      const host = document.querySelector('.cdk-overlay-pane [data-viewer-stage="true"]') as HTMLElement | null;
+      const host = document.querySelector('[data-viewer-stage="true"]') as HTMLElement | null;
       if (!host) {
         this.stopViewerMomentum();
         return;
@@ -4865,17 +4906,8 @@ export class ChatComponent implements AfterViewChecked {
     };
     this.resetViewerZoom();
     this.prefetchViewerNeighbors();
-
-    const ref = this.dialog.open(this.imageViewerTpl, {
-      width: 'min(920px, 96vw)',
-      maxWidth: '96vw'
-    });
-
-    ref.afterClosed().subscribe(() => {
-      this.imageViewerTarget = null;
-      this.viewerNotice = '';
-      this.resumeAttachmentPreviewVideo();
-    });
+    this.viewerDialogRef = null;
+    this.showViewerShortcutHints = false;
   }
 
   onTimelineThumbPointerDown(item: { message: ChatMessage; attachment: Attachment }, event: PointerEvent) {
@@ -5107,20 +5139,17 @@ export class ChatComponent implements AfterViewChecked {
       preview: (message.text || '').trim().slice(0, 120)
     };
 
-    const ref = this.dialog.open(this.confirmDeleteTpl, {
-      width: '360px',
-      panelClass: 'confirmDeleteDialog'
-    });
+  }
 
-    ref.afterClosed().subscribe((confirmed: boolean) => {
-      if (!confirmed || !this.deleteCandidate) {
-        this.deleteCandidate = null;
-        return;
-      }
+  cancelDelete() {
+    this.deleteCandidate = null;
+  }
 
+  confirmDelete() {
+    if (this.deleteCandidate) {
       this.socket.deleteMessage(this.deleteCandidate.scope, this.deleteCandidate.id);
-      this.deleteCandidate = null;
-    });
+    }
+    this.deleteCandidate = null;
   }
 
   isPendingDelete(message: ChatMessage): boolean {
@@ -5496,8 +5525,14 @@ export class ChatComponent implements AfterViewChecked {
 
   openDmFromSidebar(u: string) {
     if (!u) return;
-    if (!this.users.includes(u)) this.users.unshift(u);
-    if (!this.privateChats[u]) this.privateChats[u] = [];
+    if (!this.users.includes(u)) {
+      this.users.unshift(u);
+      this.saveUsersListToPersistence();
+    }
+    if (!this.privateChats[u]) {
+      this.privateChats[u] = [];
+      this.savePrivateChatsToPersistence();
+    }
     this.openChat(u);
   }
 
@@ -5512,8 +5547,14 @@ export class ChatComponent implements AfterViewChecked {
     const u = (this.newUser || '').trim();
     if (!u) return;
 
-    if (!this.users.includes(u)) this.users.unshift(u);
-    if (!this.privateChats[u]) this.privateChats[u] = [];
+    if (!this.users.includes(u)) {
+      this.users.unshift(u);
+      this.saveUsersListToPersistence();
+    }
+    if (!this.privateChats[u]) {
+      this.privateChats[u] = [];
+      this.savePrivateChatsToPersistence();
+    }
 
     ref.close();
     this.openChat(u);
@@ -5524,8 +5565,14 @@ export class ChatComponent implements AfterViewChecked {
     const quoted = withReply ? this.menuPublicMessage : null;
     this.menuPublicMessage = null;
 
-    if (!this.users.includes(username)) this.users.unshift(username);
-    if (!this.privateChats[username]) this.privateChats[username] = [];
+    if (!this.users.includes(username)) {
+      this.users.unshift(username);
+      this.saveUsersListToPersistence();
+    }
+    if (!this.privateChats[username]) {
+      this.privateChats[username] = [];
+      this.savePrivateChatsToPersistence();
+    }
     await this.openChat(username);
 
     if (quoted?.id && !quoted.deletedAt) {
@@ -5789,6 +5836,11 @@ export class ChatComponent implements AfterViewChecked {
     return !!item?.users?.includes(me);
   }
 
+  @HostListener('window:resize')
+  onWindowResize() {
+    this.syncResponsiveLayout();
+  }
+
   @HostListener('document:click', ['$event'])
   onDocumentClick(event: Event) {
     if (this.ignoreNextDocumentClick) {
@@ -5826,6 +5878,10 @@ export class ChatComponent implements AfterViewChecked {
   @HostListener('document:keydown', ['$event'])
   onDocumentKeydown(event: KeyboardEvent) {
     if (this.imageViewerTarget) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.closeInlineViewer();
+      }
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
         this.viewerPrev();
@@ -5859,6 +5915,48 @@ export class ChatComponent implements AfterViewChecked {
         event.stopPropagation();
         void this.commitVoiceDraft();
       }
+      return;
+    }
+
+    const target = event.target as HTMLElement | null;
+    const tag = String(target?.tagName || '').toLowerCase();
+    const isTypingTarget = !!target && (tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable);
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      if (!this.searchOpen) this.toggleSearch();
+      setTimeout(() => this.searchInput?.nativeElement.focus(), 0);
+      return;
+    }
+
+    if (event.key === '/' && !isTypingTarget) {
+      event.preventDefault();
+      if (!this.searchOpen) this.toggleSearch();
+      setTimeout(() => this.searchInput?.nativeElement.focus(), 0);
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      if (this.searchOpen) {
+        event.preventDefault();
+        this.toggleSearch();
+        return;
+      }
+      if (this.replyingTo) {
+        event.preventDefault();
+        this.clearReplyTarget();
+        return;
+      }
+      if (this.showEmojiPicker) {
+        event.preventDefault();
+        this.showEmojiPicker = false;
+        return;
+      }
+    }
+
+    if (event.key === 'End' && !isTypingTarget) {
+      event.preventDefault();
+      this.scrollToBottom();
       return;
     }
 

@@ -34,3 +34,5 @@ body { margin: 0; font-family: 'Trebuchet MS', 'Segoe UI', sans-serif; }
 *::-webkit-scrollbar-thumb:hover {
   background: var(--scroll-thumb-hover);
 }
+
+/* Keep overlay defaults for reliable dialogs/menus */
