@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpEventType, HttpHeaders } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
+import { DomSanitizer, SafeHtml, SafeResourceUrl } from '@angular/platform-browser';
 
 import { SocketService } from '../../services/socket';
 import { AuthService } from '../../services/auth';
@@ -29,6 +29,41 @@ const DRAFTS_STORAGE_KEY = 'chatroom:composerDrafts';
 const UPLOAD_UI_STORAGE_KEY = 'chatroom:uploadUiState';
 const CHUNK_UPLOAD_RECOVERY_KEY = 'chatroom:chunkUploadRecovery';
 const VOICE_CACHE_INDEX_STORAGE_KEY = 'chatroom:voiceCacheIndex';
+const VIDEO_LINK_PREFS_STORAGE_KEY = 'chatroom:videoLinkPrefsByUser';
+
+type VideoLinkProvider =
+  | 'youtube'
+  | 'pornhub'
+  | 'vimeo'
+  | 'dailymotion'
+  | 'tiktok'
+  | 'twitch'
+  | 'streamable'
+  | 'loom';
+
+interface VideoLinkPreview {
+  sourceUrl: string;
+  provider: VideoLinkProvider;
+  providerLabel: string;
+  embedUrl: string;
+  displayUrl: string;
+  startSeconds: number;
+}
+
+interface VideoLinkMetadata {
+  title: string;
+  author: string;
+  durationSeconds: number;
+  thumbnailUrl: string;
+  source: 'fallback' | 'oembed' | 'api';
+}
+
+interface VideoLinkWatchLaterItem {
+  sourceUrl: string;
+  providerLabel: string;
+  title: string;
+  addedAt: number;
+}
 
 @Component({
   selector: 'app-chat',
@@ -201,6 +236,24 @@ export class ChatComponent implements AfterViewChecked {
   private ignoreNextDocumentClick = false;
   private searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private userChipStyleCache: Record<string, Record<string, string>> = {};
+  private videoLinkPreviewCache: Record<string, VideoLinkPreview[]> = {};
+  private videoLinkSafeEmbedUrlCache: Record<string, SafeResourceUrl> = {};
+  private videoLinkThumbnailCache: Record<string, string> = {};
+  private videoLinkMetadataCache: Record<string, VideoLinkMetadata> = {};
+  private videoLinkMetadataLoading = new Set<string>();
+  private messageTextHtmlCache: Record<string, string> = {};
+  private hiddenVideoLinkInlineKeys = new Set<string>();
+  private shownVideoLinkInlineKeys = new Set<string>();
+  private videoLinkHoveredKeys = new Set<string>();
+  private pinnedVideoLinkSources = new Set<string>();
+  private watchLaterVideoLinks: VideoLinkWatchLaterItem[] = [];
+  private dockedVideoLinkKey = '';
+  private lastVideoLinkActiveKey = '';
+  private videoLinkDockRaf: number | null = null;
+  private readonly videoLinkHoverSupported =
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(hover: hover) and (pointer: fine)').matches;
   userAvatarUrlByUsername: Record<string, string> = {};
   userPublicProfileByUsername: Record<string, any> = {};
   private userProfileLookupBusy = new Set<string>();
@@ -211,6 +264,10 @@ export class ChatComponent implements AfterViewChecked {
   searchOpen = false;
   searchFilterMenuOpen = false;
   showScrollButton = false;
+  hideAllInlineVideoLinks = false;
+  videoLinkAutoOpenInline = true;
+  videoLinkMutedByDefault = true;
+  videoLinkMotionIntensity: 'full' | 'reduced' = 'full';
 
   // Dialog
   newUser = '';
@@ -384,6 +441,8 @@ export class ChatComponent implements AfterViewChecked {
   closeInlineViewer() {
     this.imageViewerTarget = null;
     this.viewerNotice = '';
+    this.showViewerShortcutHints = false;
+    this.viewerZoomHudVisible = false;
     this.viewerDialogRef = null;
     this.stopViewerMomentum();
     this.resumeAttachmentPreviewVideo();
@@ -405,6 +464,7 @@ export class ChatComponent implements AfterViewChecked {
     this.loadUploadPolicy();
     this.loadDraftsFromStorage();
     this.loadUploadUiState();
+    this.loadVideoLinkPreferences();
     this.loadChunkRecoveryState();
     this.loadVoiceOfflineCacheIndex();
     this.loadUserPreferences();
@@ -596,6 +656,10 @@ export class ChatComponent implements AfterViewChecked {
     this.durationRecheckTimers.clear();
     this.voiceProgressTimers.forEach((t) => clearInterval(t));
     this.voiceProgressTimers.clear();
+    if (this.videoLinkDockRaf !== null && typeof window !== 'undefined') {
+      window.cancelAnimationFrame(this.videoLinkDockRaf);
+      this.videoLinkDockRaf = null;
+    }
     this.discardVoiceDraft();
     this.previewVisibilityObserver?.disconnect();
     this.previewVisibilityObserver = null;
@@ -693,6 +757,7 @@ export class ChatComponent implements AfterViewChecked {
     this.message = this.draftForContext(username);
     if (this.replyingTo?.scope !== 'private' || this.replyingTo?.privatePeer !== username) this.replyingTo = null;
     this.refreshSearchForCurrentContext();
+    this.scheduleVideoLinkDockRefresh();
 
     if (!this.historyLoaded.has(username)) {
       try {
@@ -861,6 +926,7 @@ export class ChatComponent implements AfterViewChecked {
     this.showEmojiPicker = false;
     this.reactionPicker = null;
     this.refreshSearchForCurrentContext();
+    this.scheduleVideoLinkDockRefresh();
   }
 
   toggleEmojiPicker() {
@@ -1428,6 +1494,7 @@ export class ChatComponent implements AfterViewChecked {
             storageProvider: uploaded.storageProvider,
             objectKey: uploaded.objectKey
           };
+          pendingAttachment.isImage = this.isImageAttachment(pendingAttachment);
           this.pendingAttachments.push(pendingAttachment);
           this.ensureVoiceInsightsKnown(pendingAttachment, mediaMetadata.audioInsights);
           this.persistUploadUiState();
@@ -2409,7 +2476,7 @@ export class ChatComponent implements AfterViewChecked {
       if (attachment) {
         if (this.isAudioAttachment(attachment)) return this.audioAttachmentLabel(attachment);
         if (this.isVideoAttachment(attachment)) return 'Video attachment';
-        if (attachment.isImage) return 'Image attachment';
+        if (this.isImageAttachment(attachment)) return 'Image attachment';
         const attachmentName = String(attachment.name || '').trim();
         if (attachmentName) return `[Attachment] ${attachmentName}`;
         return 'Attachment';
@@ -2427,6 +2494,1191 @@ export class ChatComponent implements AfterViewChecked {
     if (!text) return '';
     if (message?.forwardedFrom?.messageId && /^forwarded message$/i.test(text)) return '';
     return text;
+  }
+
+  messageTextHtml(message: ChatMessage): string {
+    const text = this.messageBodyText(message);
+    if (!text) return '';
+
+    const query = this.parseSearchQuery(this.messageSearchQuery).text;
+    const cacheKey = `${this.videoLinkMessageKey(message)}|text:${text}|q:${query}`;
+    const cached = this.messageTextHtmlCache[cacheKey];
+    if (cached) return cached;
+
+    const parts: string[] = [];
+    const urlRegex = /(?:https?:\/\/|www\.)[^\s<>"'`]+/gi;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = urlRegex.exec(text)) !== null) {
+      const raw = String(match[0] || '');
+      const start = match.index;
+
+      if (start > lastIndex) {
+        parts.push(this.highlightSafeTextSegment(this.escapeHtml(text.slice(lastIndex, start)), query));
+      }
+
+      const normalized = raw.trim().replace(/[),.!?;]+$/g, '');
+      const trailing = raw.slice(normalized.length);
+
+      if (normalized) {
+        const preview = this.parseVideoLinkPreview(normalized);
+        const href = this.safeLinkHref(normalized);
+        const label = this.highlightSafeTextSegment(this.escapeHtml(normalized), query);
+        const dataVideoLink = preview ? ` data-video-link="${encodeURIComponent(preview.sourceUrl)}"` : '';
+        const linkClass = preview ? 'messageLink messageVideoLink' : 'messageLink';
+        parts.push(`<a class="${linkClass}" href="${this.escapeHtml(href)}" target="_blank" rel="noopener noreferrer"${dataVideoLink}>${label}</a>`);
+      }
+
+      if (trailing) {
+        parts.push(this.highlightSafeTextSegment(this.escapeHtml(trailing), query));
+      }
+
+      lastIndex = start + raw.length;
+    }
+
+    if (lastIndex < text.length) {
+      parts.push(this.highlightSafeTextSegment(this.escapeHtml(text.slice(lastIndex)), query));
+    }
+
+    const html = parts.join('');
+    this.messageTextHtmlCache[cacheKey] = html;
+    return html;
+  }
+
+  onMessageTextClick(message: ChatMessage, event: MouseEvent) {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+
+    const videoAnchor = target.closest('a[data-video-link]') as HTMLAnchorElement | null;
+    if (!videoAnchor) return;
+
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const encoded = String(videoAnchor.getAttribute('data-video-link') || '').trim();
+    if (!encoded) return;
+
+    let sourceUrl = encoded;
+    try {
+      sourceUrl = decodeURIComponent(encoded);
+    } catch {
+      sourceUrl = encoded;
+    }
+
+    const preview =
+      this.videoLinkPreviews(message).find((item) => item.sourceUrl === sourceUrl) ||
+      this.parseVideoLinkPreview(sourceUrl);
+    if (!preview) return;
+
+    this.showVideoLinkInline(message, preview);
+  }
+
+  videoLinkPreviews(message: ChatMessage): VideoLinkPreview[] {
+    if (!message || message.deletedAt) return [];
+    const text = this.messageBodyText(message);
+    if (!text) return [];
+
+    const cacheKey = `${message.id || 'temp'}|${text}`;
+    const cached = this.videoLinkPreviewCache[cacheKey];
+    if (cached) return cached;
+
+    const previews: VideoLinkPreview[] = [];
+    const seen = new Set<string>();
+
+    for (const rawUrl of this.extractUrlsFromText(text)) {
+      const parsed = this.parseVideoLinkPreview(rawUrl);
+      if (!parsed) continue;
+      if (seen.has(parsed.sourceUrl)) continue;
+      seen.add(parsed.sourceUrl);
+      this.ensureVideoLinkMetadata(parsed);
+      previews.push(parsed);
+      if (previews.length >= 3) break;
+    }
+
+    this.videoLinkPreviewCache[cacheKey] = previews;
+    return previews;
+  }
+
+  openVideoLinkInChat(message: ChatMessage, link: VideoLinkPreview, event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    this.showVideoLinkInline(message, link);
+  }
+
+  toggleVideoLinkInline(message: ChatMessage, link: VideoLinkPreview, event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (this.isVideoLinkInChatOpen(message, link)) {
+      this.hideVideoLinkInline(message, link);
+      return;
+    }
+    this.showVideoLinkInline(message, link);
+  }
+
+  hideVideoLinkInline(message: ChatMessage, link: VideoLinkPreview, event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (!message || !link) return;
+    const key = this.videoLinkItemKey(message, link);
+    this.hiddenVideoLinkInlineKeys.add(key);
+    this.shownVideoLinkInlineKeys.delete(key);
+    if (this.dockedVideoLinkKey === key) this.dockedVideoLinkKey = '';
+    this.scheduleVideoLinkDockRefresh();
+  }
+
+  showVideoLinkInline(message: ChatMessage, link: VideoLinkPreview) {
+    if (!message || !link?.embedUrl) return;
+    this.hideAllInlineVideoLinks = false;
+    const key = this.videoLinkItemKey(message, link);
+    this.hiddenVideoLinkInlineKeys.delete(key);
+    this.shownVideoLinkInlineKeys.add(key);
+    this.lastVideoLinkActiveKey = key;
+    this.ensureVideoLinkMetadata(link);
+    this.scheduleVideoLinkDockRefresh();
+  }
+
+  isVideoLinkInChatOpen(message: ChatMessage, link: VideoLinkPreview): boolean {
+    if (!message || !link || this.hideAllInlineVideoLinks) return false;
+    const key = this.videoLinkItemKey(message, link);
+    if (this.hiddenVideoLinkInlineKeys.has(key)) return false;
+    if (this.videoLinkAutoOpenInline) return true;
+    return this.shownVideoLinkInlineKeys.has(key);
+  }
+
+  videoLinkEmbedUrl(message: ChatMessage, link: VideoLinkPreview): SafeResourceUrl | null {
+    if (!this.isVideoLinkInChatOpen(message, link)) return null;
+    const key = String(link?.embedUrl || '').trim();
+    if (!key) return null;
+    if (!this.videoLinkSafeEmbedUrlCache[key]) {
+      this.videoLinkSafeEmbedUrlCache[key] = this.sanitizer.bypassSecurityTrustResourceUrl(key);
+    }
+    return this.videoLinkSafeEmbedUrlCache[key];
+  }
+
+  videoLinkToggleLabel(message: ChatMessage, link: VideoLinkPreview): string {
+    return this.isVideoLinkInChatOpen(message, link) ? 'Hide player' : 'Show player';
+  }
+
+  videoLinkGlobalToggleLabel(): string {
+    return this.hideAllInlineVideoLinks ? 'Show all players' : 'Hide all players';
+  }
+
+  videoLinkSettingsLabel(): string {
+    return this.videoLinkAutoOpenInline ? 'Auto open on' : 'Auto open off';
+  }
+
+  videoLinkMuteLabel(): string {
+    return this.videoLinkMutedByDefault ? 'Muted default on' : 'Muted default off';
+  }
+
+  videoLinkMotionLabel(): string {
+    return this.videoLinkMotionIntensity === 'full' ? 'Motion full' : 'Motion reduced';
+  }
+
+  toggleVideoLinkAutoOpen(event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (this.videoLinkAutoOpenInline) {
+      this.captureVisibleVideoLinksAsShown();
+    }
+    this.videoLinkAutoOpenInline = !this.videoLinkAutoOpenInline;
+    if (this.videoLinkAutoOpenInline) {
+      this.shownVideoLinkInlineKeys.clear();
+    }
+    this.persistVideoLinkPreferences();
+    this.scheduleVideoLinkDockRefresh();
+  }
+
+  toggleVideoLinkMutedDefault(event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    this.videoLinkMutedByDefault = !this.videoLinkMutedByDefault;
+    this.videoLinkPreviewCache = {};
+    this.videoLinkSafeEmbedUrlCache = {};
+    this.messageTextHtmlCache = {};
+    this.persistVideoLinkPreferences();
+    this.scheduleVideoLinkDockRefresh();
+  }
+
+  toggleVideoLinkMotion(event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    this.videoLinkMotionIntensity = this.videoLinkMotionIntensity === 'full' ? 'reduced' : 'full';
+    this.persistVideoLinkPreferences();
+  }
+
+  isVideoLinkPinned(link: VideoLinkPreview): boolean {
+    const key = this.videoLinkSourceKey(link);
+    return !!key && this.pinnedVideoLinkSources.has(key);
+  }
+
+  toggleVideoLinkPin(message: ChatMessage, link: VideoLinkPreview, event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    const sourceKey = this.videoLinkSourceKey(link);
+    if (!sourceKey) return;
+
+    if (this.pinnedVideoLinkSources.has(sourceKey)) {
+      this.pinnedVideoLinkSources.delete(sourceKey);
+      if (this.dockedVideoLinkKey === this.videoLinkItemKey(message, link)) {
+        this.dockedVideoLinkKey = '';
+      }
+    } else {
+      this.pinnedVideoLinkSources.add(sourceKey);
+      this.showVideoLinkInline(message, link);
+      this.dockedVideoLinkKey = this.videoLinkItemKey(message, link);
+    }
+
+    this.persistVideoLinkPreferences();
+    this.scheduleVideoLinkDockRefresh();
+  }
+
+  isVideoLinkWatchLater(link: VideoLinkPreview): boolean {
+    const sourceKey = this.videoLinkSourceKey(link);
+    if (!sourceKey) return false;
+    return this.watchLaterVideoLinks.some((item) => this.videoLinkSourceKey(item.sourceUrl) === sourceKey);
+  }
+
+  toggleVideoLinkWatchLater(link: VideoLinkPreview, event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    const sourceKey = this.videoLinkSourceKey(link);
+    if (!sourceKey) return;
+
+    const existing = this.watchLaterVideoLinks.findIndex((item) => this.videoLinkSourceKey(item.sourceUrl) === sourceKey);
+    if (existing >= 0) {
+      this.watchLaterVideoLinks.splice(existing, 1);
+    } else {
+      const meta = this.videoLinkMetadata(link);
+      this.watchLaterVideoLinks.unshift({
+        sourceUrl: link.sourceUrl,
+        providerLabel: link.providerLabel,
+        title: meta.title,
+        addedAt: Date.now()
+      });
+      this.watchLaterVideoLinks = this.watchLaterVideoLinks.slice(0, 120);
+    }
+
+    this.persistVideoLinkPreferences();
+  }
+
+  watchLaterCount(): number {
+    return this.watchLaterVideoLinks.length;
+  }
+
+  async copyVideoLink(link: VideoLinkPreview, event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    const url = String(link?.sourceUrl || '').trim();
+    if (!url) return;
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const input = document.createElement('textarea');
+        input.value = url;
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.appendChild(input);
+        input.focus();
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+      }
+    } catch {
+      // no-op
+    }
+  }
+
+  async shareVideoLink(link: VideoLinkPreview, event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    const url = String(link?.sourceUrl || '').trim();
+    if (!url) return;
+
+    try {
+      if (navigator.share) {
+        const meta = this.videoLinkMetadata(link);
+        await navigator.share({
+          title: meta.title,
+          text: `${link.providerLabel} link`,
+          url
+        });
+      } else {
+        await this.copyVideoLink(link);
+      }
+    } catch {
+      // no-op
+    }
+  }
+
+  videoLinkMetadata(link: VideoLinkPreview): VideoLinkMetadata {
+    const key = this.videoLinkSourceKey(link);
+    if (!key) {
+      return {
+        title: `${link.providerLabel} video`,
+        author: '',
+        durationSeconds: 0,
+        thumbnailUrl: '',
+        source: 'fallback'
+      };
+    }
+
+    if (this.videoLinkMetadataCache[key]) return this.videoLinkMetadataCache[key];
+
+    const fallback: VideoLinkMetadata = {
+      title: `${link.providerLabel} video`,
+      author: '',
+      durationSeconds: 0,
+      thumbnailUrl: this.videoLinkThumbnailUrl(link),
+      source: 'fallback'
+    };
+    this.videoLinkMetadataCache[key] = fallback;
+    this.ensureVideoLinkMetadata(link);
+    return fallback;
+  }
+
+  videoLinkMetaTitle(link: VideoLinkPreview): string {
+    return this.videoLinkMetadata(link).title;
+  }
+
+  videoLinkMetaSubtitle(link: VideoLinkPreview): string {
+    const meta = this.videoLinkMetadata(link);
+    if (meta.author) return meta.author;
+    return `${link.providerLabel} link preview`;
+  }
+
+  videoLinkMetaDurationLabel(link: VideoLinkPreview): string {
+    const duration = Number(this.videoLinkMetadata(link).durationSeconds || 0);
+    if (!duration) return '';
+    return this.formatDuration(duration);
+  }
+
+  videoLinkStartLabel(link: VideoLinkPreview): string {
+    const value = Number(link?.startSeconds || 0);
+    if (!value) return '';
+    return this.formatDuration(value);
+  }
+
+  videoLinkDomKey(message: ChatMessage, link: VideoLinkPreview): string {
+    return this.videoLinkItemKey(message, link);
+  }
+
+  isVideoLinkDocked(message: ChatMessage, link: VideoLinkPreview): boolean {
+    return this.dockedVideoLinkKey === this.videoLinkItemKey(message, link);
+  }
+
+  videoLinkPlayerFrameStyle(message: ChatMessage, link: VideoLinkPreview): Record<string, string> {
+    if (!this.isVideoLinkDocked(message, link)) return {};
+    return {
+      position: 'fixed',
+      right: '12px',
+      bottom: '12px',
+      zIndex: '4600',
+      width: 'min(340px, calc(100vw - 24px))',
+      maxWidth: '340px',
+      borderRadius: '12px',
+      overflow: 'hidden',
+      border: '1px solid rgba(152, 191, 232, 0.55)',
+      boxShadow: '0 18px 44px rgba(2, 12, 24, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.16)',
+      background: '#000'
+    };
+  }
+
+  onVideoLinkCardHover(message: ChatMessage, link: VideoLinkPreview, hovering: boolean) {
+    if (!this.videoLinkHoverSupported) return;
+    if (!message || !link) return;
+    const key = this.videoLinkItemKey(message, link);
+    if (hovering) {
+      this.videoLinkHoveredKeys.add(key);
+    } else {
+      this.videoLinkHoveredKeys.delete(key);
+    }
+  }
+
+  isVideoLinkCardHovered(message: ChatMessage, link: VideoLinkPreview): boolean {
+    if (!message || !link) return false;
+    return this.videoLinkHoveredKeys.has(this.videoLinkItemKey(message, link));
+  }
+
+  videoLinkActionBarVisible(message: ChatMessage, link: VideoLinkPreview): boolean {
+    if (this.videoLinkMotionIntensity !== 'full') return true;
+    if (!this.videoLinkHoverSupported) return true;
+    return this.isVideoLinkCardHovered(message, link);
+  }
+
+  videoLinkProviderChipStyle(link: VideoLinkPreview): Record<string, string> {
+    switch (link?.provider) {
+      case 'youtube':
+        return {
+          color: '#fff6f5',
+          background: 'linear-gradient(135deg, #da1f24, #b90f17)',
+          border: '1px solid rgba(255, 200, 196, 0.42)',
+          boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.16)'
+        };
+      case 'pornhub':
+        return {
+          color: '#fff8e6',
+          background: 'linear-gradient(135deg, #c17812, #8f5710)',
+          border: '1px solid rgba(255, 225, 162, 0.42)',
+          boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.16)'
+        };
+      case 'twitch':
+        return {
+          color: '#f3efff',
+          background: 'linear-gradient(135deg, #6a53a7, #4a3a84)',
+          border: '1px solid rgba(216, 203, 255, 0.38)',
+          boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.12)'
+        };
+      case 'tiktok':
+        return {
+          color: '#ecfbff',
+          background: 'linear-gradient(135deg, #1b333d, #142730)',
+          border: '1px solid rgba(149, 228, 241, 0.3)',
+          boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1)'
+        };
+      default:
+        return {
+          color: '#eaf4ff',
+          background: 'linear-gradient(135deg, #2e5889, #23466f)',
+          border: '1px solid rgba(174, 203, 234, 0.4)',
+          boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.15)'
+        };
+    }
+  }
+
+  videoLinkHeroBackground(link: VideoLinkPreview): string {
+    const thumbnail = this.videoLinkThumbnailUrl(link);
+    if (thumbnail) {
+      return `linear-gradient(180deg, rgba(8, 17, 29, 0.2), rgba(8, 17, 29, 0.58)), url("${thumbnail}") center/cover no-repeat`;
+    }
+    return this.videoLinkProviderFallbackGradient(link?.provider);
+  }
+
+  toggleVideoLinkGlobalVisibility(event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    this.hideAllInlineVideoLinks = !this.hideAllInlineVideoLinks;
+    if (this.hideAllInlineVideoLinks) this.dockedVideoLinkKey = '';
+    this.persistVideoLinkPreferences();
+    this.scheduleVideoLinkDockRefresh();
+  }
+
+  closeVideoLinkViewer() {
+    this.hideAllInlineVideoLinks = true;
+    this.dockedVideoLinkKey = '';
+    this.persistVideoLinkPreferences();
+  }
+
+  private captureVisibleVideoLinksAsShown() {
+    this.shownVideoLinkInlineKeys.clear();
+    for (const item of this.openInlineVideoLinkItems()) {
+      this.shownVideoLinkInlineKeys.add(item.key);
+    }
+  }
+
+  private scheduleVideoLinkDockRefresh(host?: HTMLElement | null) {
+    if (typeof window === 'undefined') return;
+    if (this.videoLinkDockRaf !== null) {
+      window.cancelAnimationFrame(this.videoLinkDockRaf);
+      this.videoLinkDockRaf = null;
+    }
+    this.videoLinkDockRaf = window.requestAnimationFrame(() => {
+      this.videoLinkDockRaf = null;
+      this.refreshVideoLinkDockState(host || null);
+    });
+  }
+
+  private refreshVideoLinkDockState(hostOverride: HTMLElement | null) {
+    if (this.hideAllInlineVideoLinks) {
+      this.dockedVideoLinkKey = '';
+      return;
+    }
+
+    const openItems = this.openInlineVideoLinkItems();
+    if (!openItems.length) {
+      this.dockedVideoLinkKey = '';
+      return;
+    }
+
+    const pinned = openItems.find((item) => this.pinnedVideoLinkSources.has(this.videoLinkSourceKey(item.link)));
+    if (pinned) {
+      this.dockedVideoLinkKey = pinned.key;
+      return;
+    }
+
+    const candidate =
+      openItems.find((item) => item.key === this.lastVideoLinkActiveKey) ||
+      openItems[0];
+    if (!candidate) {
+      this.dockedVideoLinkKey = '';
+      return;
+    }
+
+    const messagesHost = hostOverride || (document.querySelector('.messages') as HTMLElement | null);
+    const playerEl = this.inlinePlayerElementByKey(candidate.key);
+    if (!messagesHost || !playerEl) {
+      this.dockedVideoLinkKey = '';
+      return;
+    }
+
+    const hostRect = messagesHost.getBoundingClientRect();
+    const rect = playerEl.getBoundingClientRect();
+    if (!rect.height || !hostRect.height) {
+      this.dockedVideoLinkKey = '';
+      return;
+    }
+
+    const visible = Math.max(0, Math.min(rect.bottom, hostRect.bottom) - Math.max(rect.top, hostRect.top));
+    const visibleRatio = visible / Math.max(rect.height, 1);
+    const scrolledPast = rect.bottom < hostRect.top + 18;
+    const pushedBelow = rect.top > hostRect.bottom - 18;
+    const shouldDock = visibleRatio < 0.32 && (scrolledPast || pushedBelow);
+    this.dockedVideoLinkKey = shouldDock ? candidate.key : '';
+  }
+
+  private inlinePlayerElementByKey(key: string): HTMLElement | null {
+    if (!key) return null;
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>('[data-inline-player-key]'));
+    return nodes.find((node) => String(node.getAttribute('data-inline-player-key') || '') === key) || null;
+  }
+
+  private openInlineVideoLinkItems(): Array<{ message: ChatMessage; link: VideoLinkPreview; key: string }> {
+    const sourceMessages = this.displayedThreadMessages();
+    const open: Array<{ message: ChatMessage; link: VideoLinkPreview; key: string }> = [];
+
+    for (const message of sourceMessages) {
+      const links = this.videoLinkPreviews(message);
+      for (const link of links) {
+        if (!this.isVideoLinkInChatOpen(message, link)) continue;
+        open.push({
+          message,
+          link,
+          key: this.videoLinkItemKey(message, link)
+        });
+      }
+    }
+
+    return open;
+  }
+
+  private videoLinkSourceKey(linkOrUrl: VideoLinkPreview | string | null | undefined): string {
+    if (!linkOrUrl) return '';
+    const source = typeof linkOrUrl === 'string' ? linkOrUrl : linkOrUrl.sourceUrl;
+    return String(source || '').trim().toLowerCase();
+  }
+
+  private ensureVideoLinkMetadata(link: VideoLinkPreview) {
+    const key = this.videoLinkSourceKey(link);
+    if (!key || this.videoLinkMetadataLoading.has(key)) return;
+    this.videoLinkMetadataLoading.add(key);
+
+    const oembedUrl = this.videoLinkOEmbedEndpoint(link);
+    if (!oembedUrl) {
+      this.videoLinkMetadataLoading.delete(key);
+      return;
+    }
+
+    this.http.get<any>(oembedUrl).subscribe({
+      next: (payload) => {
+        const existing = this.videoLinkMetadataCache[key] || {
+          title: `${link.providerLabel} video`,
+          author: '',
+          durationSeconds: 0,
+          thumbnailUrl: this.videoLinkThumbnailUrl(link),
+          source: 'fallback' as const
+        };
+
+        const duration = Number(
+          payload?.duration ||
+          payload?.video_duration ||
+          payload?.duration_seconds ||
+          payload?.files?.mp4?.duration ||
+          payload?.files?.mp4?.meta?.duration ||
+          0
+        ) || existing.durationSeconds || 0;
+        const title = String(payload?.title || payload?.name || existing.title || `${link.providerLabel} video`).trim();
+        const author = String(
+          payload?.author_name ||
+          payload?.author ||
+          payload?.owner?.username ||
+          payload?.channel ||
+          existing.author ||
+          ''
+        ).trim();
+        const thumbnail = String(
+          payload?.thumbnail_url ||
+          payload?.thumbnail ||
+          payload?.thumbnailUrl ||
+          payload?.files?.mp4?.thumb ||
+          existing.thumbnailUrl ||
+          ''
+        ).trim();
+
+        this.videoLinkMetadataCache[key] = {
+          title: title || `${link.providerLabel} video`,
+          author,
+          durationSeconds: duration,
+          thumbnailUrl: thumbnail,
+          source: 'oembed'
+        };
+
+        if (thumbnail) {
+          this.videoLinkThumbnailCache[key] = thumbnail;
+        }
+      },
+      error: () => {
+        // no-op
+      },
+      complete: () => {
+        this.videoLinkMetadataLoading.delete(key);
+      }
+    });
+  }
+
+  private videoLinkOEmbedEndpoint(link: VideoLinkPreview): string | null {
+    const source = encodeURIComponent(link.sourceUrl);
+    switch (link.provider) {
+      case 'youtube':
+        return `https://www.youtube.com/oembed?format=json&url=${source}`;
+      case 'vimeo':
+        return `https://vimeo.com/api/oembed.json?url=${source}`;
+      case 'dailymotion':
+        return `https://www.dailymotion.com/services/oembed?format=json&url=${source}`;
+      case 'tiktok':
+        return `https://www.tiktok.com/oembed?url=${source}`;
+      case 'loom':
+        return `https://www.loom.com/v1/oembed?url=${source}`;
+      case 'streamable': {
+        const parsed = this.tryParseUrl(link.sourceUrl);
+        const id = parsed ? this.streamableVideoId(parsed) : '';
+        return id ? `https://api.streamable.com/videos/${encodeURIComponent(id)}` : null;
+      }
+      default:
+        return null;
+    }
+  }
+
+  private loadVideoLinkPreferences() {
+    try {
+      const raw = localStorage.getItem(VIDEO_LINK_PREFS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, any>;
+      if (!parsed || typeof parsed !== 'object') return;
+
+      const key = String(this.myUsername || 'guest').toLowerCase();
+      const prefs = parsed[key] || parsed['*'];
+      if (!prefs || typeof prefs !== 'object') return;
+
+      if (typeof prefs.autoOpenInline === 'boolean') this.videoLinkAutoOpenInline = prefs.autoOpenInline;
+      if (typeof prefs.hideAllInline === 'boolean') this.hideAllInlineVideoLinks = prefs.hideAllInline;
+      if (typeof prefs.mutedByDefault === 'boolean') this.videoLinkMutedByDefault = prefs.mutedByDefault;
+      if (prefs.motionIntensity === 'full' || prefs.motionIntensity === 'reduced') {
+        this.videoLinkMotionIntensity = prefs.motionIntensity;
+      }
+
+      if (Array.isArray(prefs.pinnedSources)) {
+        this.pinnedVideoLinkSources = new Set(
+          prefs.pinnedSources
+            .map((x: any) => this.videoLinkSourceKey(String(x || '')))
+            .filter((x: string) => !!x)
+        );
+      }
+
+      if (Array.isArray(prefs.watchLater)) {
+        this.watchLaterVideoLinks = prefs.watchLater
+          .map((x: any) => ({
+            sourceUrl: String(x?.sourceUrl || '').trim(),
+            providerLabel: String(x?.providerLabel || 'Video').trim() || 'Video',
+            title: String(x?.title || '').trim() || 'Saved video',
+            addedAt: Number(x?.addedAt || Date.now()) || Date.now()
+          }))
+          .filter((x: VideoLinkWatchLaterItem) => !!x.sourceUrl)
+          .slice(0, 120);
+      }
+    } catch {
+      // no-op
+    }
+  }
+
+  private persistVideoLinkPreferences() {
+    try {
+      const raw = localStorage.getItem(VIDEO_LINK_PREFS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) as Record<string, any> : {};
+      const next = parsed && typeof parsed === 'object' ? parsed : {};
+      const key = String(this.myUsername || 'guest').toLowerCase();
+
+      next[key] = {
+        autoOpenInline: this.videoLinkAutoOpenInline,
+        hideAllInline: this.hideAllInlineVideoLinks,
+        mutedByDefault: this.videoLinkMutedByDefault,
+        motionIntensity: this.videoLinkMotionIntensity,
+        pinnedSources: Array.from(this.pinnedVideoLinkSources).slice(0, 120),
+        watchLater: this.watchLaterVideoLinks.slice(0, 120)
+      };
+
+      localStorage.setItem(VIDEO_LINK_PREFS_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // no-op
+    }
+  }
+
+  private videoLinkStartSeconds(url: URL): number {
+    const candidates = [
+      String(url.searchParams.get('t') || '').trim(),
+      String(url.searchParams.get('start') || '').trim(),
+      String(url.searchParams.get('time_continue') || '').trim()
+    ];
+
+    const hash = String(url.hash || '').replace(/^#/, '').trim();
+    if (hash) {
+      const parts = hash.split('&');
+      const withKey = parts.find((part) => /^t=|^start=/i.test(part));
+      if (withKey) {
+        const [, v] = withKey.split('=');
+        candidates.push(String(v || '').trim());
+      } else {
+        candidates.push(hash);
+      }
+    }
+
+    for (const candidate of candidates) {
+      const value = this.parseTimestampToken(candidate);
+      if (value > 0) return value;
+    }
+
+    return 0;
+  }
+
+  private parseTimestampToken(value: string): number {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw) return 0;
+
+    if (/^\d+$/.test(raw)) return Number(raw) || 0;
+
+    if (/^\d+:\d{1,2}(:\d{1,2})?$/.test(raw)) {
+      const parts = raw.split(':').map((x) => Number(x));
+      if (parts.length === 2) return parts[0] * 60 + parts[1];
+      if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+
+    const h = /([0-9]+)h/.exec(raw);
+    const m = /([0-9]+)m/.exec(raw);
+    const s = /([0-9]+)s/.exec(raw);
+    if (h || m || s) {
+      return (Number(h?.[1] || 0) * 3600) + (Number(m?.[1] || 0) * 60) + Number(s?.[1] || 0);
+    }
+
+    return 0;
+  }
+
+  private formatSecondsAsHmsToken(totalSeconds: number): string {
+    const value = Math.max(0, Math.floor(Number(totalSeconds || 0)));
+    const hours = Math.floor(value / 3600);
+    const mins = Math.floor((value % 3600) / 60);
+    const secs = value % 60;
+    const parts: string[] = [];
+    if (hours > 0) parts.push(`${hours}h`);
+    if (mins > 0) parts.push(`${mins}m`);
+    if (secs > 0 || !parts.length) parts.push(`${secs}s`);
+    return parts.join('');
+  }
+
+  private hasVisibleInlineVideoPlayer(): boolean {
+    if (this.hideAllInlineVideoLinks) return false;
+    const sourceMessages = this.displayedThreadMessages();
+    return sourceMessages.some((message: ChatMessage) => {
+      const links = this.videoLinkPreviews(message);
+      return links.some((link) => this.isVideoLinkInChatOpen(message, link));
+    });
+  }
+
+  private videoLinkProviderFallbackGradient(provider: VideoLinkProvider): string {
+    switch (provider) {
+      case 'youtube':
+        return 'linear-gradient(135deg, #6d1a22, #992530 48%, #4c1522)';
+      case 'pornhub':
+        return 'linear-gradient(135deg, #5d3e1c, #8a5c1e 52%, #3a2a17)';
+      case 'vimeo':
+        return 'linear-gradient(135deg, #1d3b58, #2b5a87 52%, #142a41)';
+      case 'dailymotion':
+        return 'linear-gradient(135deg, #173a67, #20528f 52%, #102846)';
+      case 'tiktok':
+        return 'linear-gradient(135deg, #152531, #203745 52%, #111f28)';
+      case 'twitch':
+        return 'linear-gradient(135deg, #352f59, #4f4784 52%, #2a2448)';
+      case 'streamable':
+        return 'linear-gradient(135deg, #183f4d, #23647b 52%, #12303b)';
+      case 'loom':
+        return 'linear-gradient(135deg, #2b3d51, #3b5673 52%, #202e3d)';
+      default:
+        return 'linear-gradient(135deg, #1a3655, #25527f 52%, #132a41)';
+    }
+  }
+
+  private videoLinkThumbnailUrl(link: VideoLinkPreview): string {
+    const key = this.videoLinkSourceKey(link);
+    if (!key) return '';
+    if (Object.prototype.hasOwnProperty.call(this.videoLinkThumbnailCache, key)) {
+      return this.videoLinkThumbnailCache[key];
+    }
+
+    const metaThumb = String(this.videoLinkMetadataCache[key]?.thumbnailUrl || '').trim();
+    if (metaThumb) {
+      this.videoLinkThumbnailCache[key] = metaThumb;
+      return metaThumb;
+    }
+
+    let thumbnail = '';
+    const parsed = this.tryParseUrl(link.sourceUrl);
+    if (parsed) {
+      if (link.provider === 'youtube') {
+        const id = this.youtubeVideoId(parsed);
+        if (id) thumbnail = `https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg`;
+      } else if (link.provider === 'dailymotion') {
+        const id = this.dailymotionVideoId(parsed);
+        if (id) thumbnail = `https://www.dailymotion.com/thumbnail/video/${encodeURIComponent(id)}`;
+      } else if (link.provider === 'vimeo') {
+        const id = this.vimeoVideoId(parsed);
+        if (id) thumbnail = `https://vumbnail.com/${encodeURIComponent(id)}.jpg`;
+      } else if (link.provider === 'streamable') {
+        const id = this.streamableVideoId(parsed);
+        if (id) thumbnail = `https://cdn-cf-east.streamable.com/image/${encodeURIComponent(id)}.jpg`;
+      } else if (link.provider === 'loom') {
+        const id = this.loomVideoId(parsed);
+        if (id) thumbnail = `https://cdn.loom.com/sessions/thumbnails/${encodeURIComponent(id)}-with-play.jpg`;
+      } else if (link.provider === 'twitch') {
+        const clipSlug = this.twitchClipSlug(parsed);
+        if (clipSlug) thumbnail = `https://clips-media-assets2.twitch.tv/${encodeURIComponent(clipSlug)}-preview-480x272.jpg`;
+      }
+    }
+
+    this.videoLinkThumbnailCache[key] = thumbnail;
+    return thumbnail;
+  }
+
+  private twitchClipSlug(url: URL): string {
+    const host = url.hostname.toLowerCase().replace(/^www\./, '');
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (host === 'clips.twitch.tv') {
+      return String(parts[0] || '').trim();
+    }
+    if (parts[0]?.toLowerCase() === 'clip') {
+      return String(parts[1] || '').trim();
+    }
+    const idx = parts.findIndex((part) => part.toLowerCase() === 'clip');
+    return idx >= 0 ? String(parts[idx + 1] || '').trim() : '';
+  }
+
+  private videoLinkItemKey(message: ChatMessage, link: VideoLinkPreview): string {
+    const messageKey = this.videoLinkMessageKey(message);
+    const sourceKey = String(link?.sourceUrl || '').trim().toLowerCase();
+    return `${messageKey}|${sourceKey}`;
+  }
+
+  private videoLinkMessageKey(message: ChatMessage): string {
+    return message?.id || `${message?.from || ''}|${message?.to || ''}|${message?.timestamp || ''}|${message?.text || ''}`;
+  }
+
+  private safeLinkHref(url: string): string {
+    const value = String(url || '').trim();
+    if (!value) return '#';
+    return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  }
+
+  private highlightSafeTextSegment(safeText: string, query: string): string {
+    if (!query || query.length < 2) return safeText;
+    const re = new RegExp(this.escapeRegex(query), 'gi');
+    return safeText.replace(re, (m) => `<mark>${m}</mark>`);
+  }
+
+  private extractUrlsFromText(text: string): string[] {
+    const matches = String(text || '').match(/(?:https?:\/\/|www\.)[^\s<>"'`]+/gi) || [];
+    return matches
+      .map((item) => String(item || '').trim().replace(/[),.!?;]+$/g, ''))
+      .filter((item) => !!item);
+  }
+
+  private parseVideoLinkPreview(rawUrl: string): VideoLinkPreview | null {
+    const parsed = this.tryParseUrl(rawUrl);
+    if (!parsed) return null;
+
+    const host = parsed.hostname.toLowerCase();
+    const bareHost = host.replace(/^www\./, '').replace(/^m\./, '');
+    const startSeconds = this.videoLinkStartSeconds(parsed);
+
+    const makeDisplay = () => {
+      const compact = `${bareHost}${parsed.pathname}${parsed.search}`;
+      return compact.length > 54 ? `${compact.slice(0, 54)}...` : compact;
+    };
+
+    if (bareHost === 'youtu.be' || bareHost.endsWith('youtube.com')) {
+      const id = this.youtubeVideoId(parsed);
+      if (!id) return null;
+      const params = ['rel=0'];
+      if (this.videoLinkMutedByDefault) params.push('mute=1');
+      if (startSeconds > 0) params.push(`start=${Math.floor(startSeconds)}`);
+      return {
+        sourceUrl: parsed.toString(),
+        provider: 'youtube',
+        providerLabel: 'YouTube',
+        embedUrl: `https://www.youtube.com/embed/${encodeURIComponent(id)}?${params.join('&')}`,
+        displayUrl: makeDisplay(),
+        startSeconds
+      };
+    }
+
+    if (bareHost.endsWith('pornhub.com')) {
+      const viewKey = this.pornhubViewKey(parsed);
+      if (!viewKey) return null;
+      const params: string[] = [];
+      if (this.videoLinkMutedByDefault) params.push('mute=1');
+      if (startSeconds > 0) params.push(`start=${Math.floor(startSeconds)}`);
+      return {
+        sourceUrl: parsed.toString(),
+        provider: 'pornhub',
+        providerLabel: 'Pornhub',
+        embedUrl: `https://www.pornhub.com/embed/${encodeURIComponent(viewKey)}${params.length ? `?${params.join('&')}` : ''}`,
+        displayUrl: makeDisplay(),
+        startSeconds
+      };
+    }
+
+    if (bareHost === 'vimeo.com' || bareHost.endsWith('.vimeo.com')) {
+      const id = this.vimeoVideoId(parsed);
+      if (!id) return null;
+      const params: string[] = [];
+      if (this.videoLinkMutedByDefault) params.push('muted=1');
+      const hash = startSeconds > 0 ? `#t=${Math.floor(startSeconds)}s` : '';
+      return {
+        sourceUrl: parsed.toString(),
+        provider: 'vimeo',
+        providerLabel: 'Vimeo',
+        embedUrl: `https://player.vimeo.com/video/${encodeURIComponent(id)}${params.length ? `?${params.join('&')}` : ''}${hash}`,
+        displayUrl: makeDisplay(),
+        startSeconds
+      };
+    }
+
+    if (bareHost === 'dai.ly' || bareHost === 'dailymotion.com' || bareHost.endsWith('.dailymotion.com')) {
+      const id = this.dailymotionVideoId(parsed);
+      if (!id) return null;
+      const params: string[] = [];
+      if (this.videoLinkMutedByDefault) params.push('mute=1');
+      if (startSeconds > 0) params.push(`start=${Math.floor(startSeconds)}`);
+      return {
+        sourceUrl: parsed.toString(),
+        provider: 'dailymotion',
+        providerLabel: 'Dailymotion',
+        embedUrl: `https://www.dailymotion.com/embed/video/${encodeURIComponent(id)}${params.length ? `?${params.join('&')}` : ''}`,
+        displayUrl: makeDisplay(),
+        startSeconds
+      };
+    }
+
+    if (bareHost.endsWith('tiktok.com')) {
+      const id = this.tiktokVideoId(parsed);
+      if (!id) return null;
+      const params: string[] = [];
+      if (this.videoLinkMutedByDefault) params.push('mute=1');
+      return {
+        sourceUrl: parsed.toString(),
+        provider: 'tiktok',
+        providerLabel: 'TikTok',
+        embedUrl: `https://www.tiktok.com/embed/v2/${encodeURIComponent(id)}${params.length ? `?${params.join('&')}` : ''}`,
+        displayUrl: makeDisplay(),
+        startSeconds
+      };
+    }
+
+    if (bareHost.endsWith('twitch.tv')) {
+      const twitchEmbed = this.twitchEmbedInfo(parsed, startSeconds);
+      if (!twitchEmbed) return null;
+      return {
+        sourceUrl: parsed.toString(),
+        provider: 'twitch',
+        providerLabel: 'Twitch',
+        embedUrl: twitchEmbed,
+        displayUrl: makeDisplay(),
+        startSeconds
+      };
+    }
+
+    if (bareHost === 'streamable.com' || bareHost.endsWith('.streamable.com')) {
+      const id = this.streamableVideoId(parsed);
+      if (!id) return null;
+      const params: string[] = [];
+      if (startSeconds > 0) params.push(`start=${Math.floor(startSeconds)}`);
+      if (this.videoLinkMutedByDefault) params.push('muted=1');
+      return {
+        sourceUrl: parsed.toString(),
+        provider: 'streamable',
+        providerLabel: 'Streamable',
+        embedUrl: `https://streamable.com/e/${encodeURIComponent(id)}${params.length ? `?${params.join('&')}` : ''}`,
+        displayUrl: makeDisplay(),
+        startSeconds
+      };
+    }
+
+    if (bareHost === 'loom.com' || bareHost.endsWith('.loom.com')) {
+      const id = this.loomVideoId(parsed);
+      if (!id) return null;
+      const params: string[] = [];
+      if (this.videoLinkMutedByDefault) params.push('muted=true');
+      return {
+        sourceUrl: parsed.toString(),
+        provider: 'loom',
+        providerLabel: 'Loom',
+        embedUrl: `https://www.loom.com/embed/${encodeURIComponent(id)}${params.length ? `?${params.join('&')}` : ''}`,
+        displayUrl: makeDisplay(),
+        startSeconds
+      };
+    }
+
+    return null;
+  }
+
+  private tryParseUrl(rawUrl: string): URL | null {
+    const value = String(rawUrl || '').trim();
+    if (!value) return null;
+    const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+    try {
+      return new URL(withProtocol);
+    } catch {
+      return null;
+    }
+  }
+
+  private youtubeVideoId(url: URL): string {
+    const host = url.hostname.toLowerCase();
+    const bareHost = host.replace(/^www\./, '').replace(/^m\./, '');
+    if (bareHost === 'youtu.be') {
+      const id = url.pathname.split('/').filter(Boolean)[0] || '';
+      return /^[a-zA-Z0-9_-]{6,}$/.test(id) ? id : '';
+    }
+
+    const fromQuery = url.searchParams.get('v') || '';
+    if (/^[a-zA-Z0-9_-]{6,}$/.test(fromQuery)) return fromQuery;
+
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (parts[0] === 'shorts' || parts[0] === 'embed') {
+      const id = parts[1] || '';
+      return /^[a-zA-Z0-9_-]{6,}$/.test(id) ? id : '';
+    }
+    return '';
+  }
+
+  private pornhubViewKey(url: URL): string {
+    const queryKey = String(url.searchParams.get('viewkey') || '').trim();
+    if (/^[a-zA-Z0-9]+$/.test(queryKey)) return queryKey;
+
+    const parts = url.pathname.split('/').filter(Boolean);
+    const embedIndex = parts.findIndex((part) => part.toLowerCase() === 'embed');
+    if (embedIndex >= 0) {
+      const key = parts[embedIndex + 1] || '';
+      return /^[a-zA-Z0-9]+$/.test(key) ? key : '';
+    }
+    return '';
+  }
+
+  private vimeoVideoId(url: URL): string {
+    const parts = url.pathname.split('/').filter(Boolean);
+    const numeric = parts.find((part) => /^\d{6,12}$/.test(part));
+    return numeric || '';
+  }
+
+  private dailymotionVideoId(url: URL): string {
+    const host = url.hostname.toLowerCase().replace(/^www\./, '');
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (host === 'dai.ly') {
+      const id = parts[0] || '';
+      return /^[a-zA-Z0-9]+$/.test(id) ? id : '';
+    }
+    const videoIdx = parts.findIndex((part) => part.toLowerCase() === 'video');
+    if (videoIdx >= 0) {
+      const id = (parts[videoIdx + 1] || '').split('_')[0];
+      return /^[a-zA-Z0-9]+$/.test(id) ? id : '';
+    }
+    return '';
+  }
+
+  private tiktokVideoId(url: URL): string {
+    const parts = url.pathname.split('/').filter(Boolean);
+    const videoIdx = parts.findIndex((part) => part.toLowerCase() === 'video');
+    if (videoIdx >= 0) {
+      const id = String(parts[videoIdx + 1] || '').replace(/[^0-9]/g, '');
+      return /^\d{5,24}$/.test(id) ? id : '';
+    }
+
+    if (parts[0]?.toLowerCase() === 'embed' && parts[1]?.toLowerCase() === 'v2') {
+      const id = String(parts[2] || '').replace(/[^0-9]/g, '');
+      return /^\d{5,24}$/.test(id) ? id : '';
+    }
+
+    return '';
+  }
+
+  private twitchEmbedInfo(url: URL, startSeconds = 0): string | null {
+    const host = url.hostname.toLowerCase().replace(/^www\./, '');
+    const parts = url.pathname.split('/').filter(Boolean);
+    const parent = this.twitchParentHost();
+    const timeToken = startSeconds > 0 ? this.formatSecondsAsHmsToken(startSeconds) : '';
+
+    const clipFromPath = (() => {
+      if (host === 'clips.twitch.tv') return parts[0] || '';
+      if (parts[0]?.toLowerCase() === 'clip') return parts[1] || '';
+      const idx = parts.findIndex((part) => part.toLowerCase() === 'clip');
+      return idx >= 0 ? parts[idx + 1] || '' : '';
+    })();
+
+    if (/^[A-Za-z0-9_-]{4,}$/.test(clipFromPath)) {
+      return `https://clips.twitch.tv/embed?clip=${encodeURIComponent(clipFromPath)}&parent=${encodeURIComponent(parent)}${timeToken ? `&t=${encodeURIComponent(timeToken)}` : ''}`;
+    }
+
+    const videoQuery = String(url.searchParams.get('video') || '').trim();
+    if (/^v?\d+$/.test(videoQuery)) {
+      const normalized = videoQuery.startsWith('v') ? videoQuery : `v${videoQuery}`;
+      return `https://player.twitch.tv/?video=${encodeURIComponent(normalized)}&parent=${encodeURIComponent(parent)}&autoplay=false${this.videoLinkMutedByDefault ? '&muted=true' : ''}${timeToken ? `&time=${encodeURIComponent(timeToken)}` : ''}`;
+    }
+
+    if (parts[0]?.toLowerCase() === 'videos' && /^\d+$/.test(parts[1] || '')) {
+      const normalized = `v${parts[1]}`;
+      return `https://player.twitch.tv/?video=${encodeURIComponent(normalized)}&parent=${encodeURIComponent(parent)}&autoplay=false${this.videoLinkMutedByDefault ? '&muted=true' : ''}${timeToken ? `&time=${encodeURIComponent(timeToken)}` : ''}`;
+    }
+
+    return null;
+  }
+
+  private twitchParentHost(): string {
+    if (typeof window !== 'undefined' && window?.location?.hostname) {
+      const host = String(window.location.hostname || '').trim();
+      if (host) return host;
+    }
+    return 'localhost';
+  }
+
+  private streamableVideoId(url: URL): string {
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (!parts.length) return '';
+    const candidate = parts[0].toLowerCase() === 'e' ? parts[1] || '' : parts[0];
+    return /^[a-zA-Z0-9]{4,20}$/.test(candidate) ? candidate : '';
+  }
+
+  private loomVideoId(url: URL): string {
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (!parts.length) return '';
+
+    if ((parts[0]?.toLowerCase() === 'share' || parts[0]?.toLowerCase() === 'embed') && parts[1]) {
+      return /^[a-zA-Z0-9-]{8,}$/.test(parts[1]) ? parts[1] : '';
+    }
+
+    return '';
   }
 
   attachmentUrl(attachment: ChatMessage['attachment']): string {
@@ -2797,6 +4049,15 @@ export class ChatComponent implements AfterViewChecked {
     const imageUrl = this.attachmentUrl(attachment);
     if (!imageUrl) return 'https://images.google.com/';
     return `https://www.google.com/searchbyimage?image_url=${encodeURIComponent(imageUrl)}`;
+  }
+
+  isImageAttachment(attachment: ChatMessage['attachment']): boolean {
+    if (!attachment) return false;
+    if (attachment.isImage) return true;
+    const mime = String(attachment.mimeType || '').trim().toLowerCase();
+    if (mime.startsWith('image/')) return true;
+    const source = `${String(attachment.name || '')} ${String(attachment.url || '')}`.toLowerCase();
+    return /\.(png|jpe?g|gif|webp|bmp|avif|svg|heic|heif|tiff?)($|[?#])/i.test(source);
   }
 
   isAudioAttachment(attachment: ChatMessage['attachment']): boolean {
@@ -3447,7 +4708,7 @@ export class ChatComponent implements AfterViewChecked {
     const mime = String(attachment?.mimeType || '').trim().toLowerCase();
     if (mime.startsWith('video/')) return true;
     const name = String(attachment?.name || '').toLowerCase();
-    return /\.(mp4|mov|mkv|avi|m4v)$/i.test(name);
+    return /\.(mp4|mov|mkv|avi|m4v|webm|ogv)$/i.test(name);
   }
 
   private applyVoicePlaybackRateToDom(key: string, rate: number) {
@@ -4011,7 +5272,7 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   canSearchByImage(attachment: ChatMessage['attachment']): boolean {
-    return !!attachment?.isImage;
+    return this.isImageAttachment(attachment);
   }
 
   viewerCurrentAttachment(): Attachment | null {
@@ -4108,7 +5369,7 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   canPreviewMediaAttachment(attachment: ChatMessage['attachment']): boolean {
-    return !!attachment && (attachment.isImage || this.isVideoAttachment(attachment));
+    return !!attachment && (this.isImageAttachment(attachment) || this.isVideoAttachment(attachment));
   }
 
   enforceMutedPreview(event: Event) {
@@ -4245,7 +5506,7 @@ export class ChatComponent implements AfterViewChecked {
   openAttachmentViewer(message: ChatMessage, scope: 'public' | 'private', attachmentOverride?: Attachment | null): boolean {
     const attachment = attachmentOverride || message?.attachment || this.messageAttachments(message)[0] || null;
     if (!attachment) return false;
-    if (!attachment.isImage && !this.isVideoAttachment(attachment)) return false;
+    if (!this.isImageAttachment(attachment) && !this.isVideoAttachment(attachment)) return false;
 
     this.pauseAttachmentPreviewVideo(this.attachmentPreviewKey(message, attachment, scope));
 
@@ -4254,6 +5515,7 @@ export class ChatComponent implements AfterViewChecked {
     const index = Math.max(0, mediaList.findIndex((m) => m.url === attachment.url));
 
     this.imageViewerTarget = { message: { ...message, attachment }, scope, media: mediaList, index };
+    this.viewerNotice = '';
     this.resetViewerZoom();
     this.prefetchViewerNeighbors();
     this.viewerDialogRef = null;
@@ -4275,7 +5537,7 @@ export class ChatComponent implements AfterViewChecked {
       const url = this.attachmentUrl(attachment);
       if (!url) return;
 
-      if (attachment.isImage) {
+      if (this.isImageAttachment(attachment)) {
         const img = new Image();
         img.decoding = 'async';
         img.src = url;
@@ -4460,11 +5722,15 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   private resetViewerZoom() {
+    this.stopViewerMomentum();
     this.viewerZoom = 1;
     this.viewerZoomControlOpen = false;
     this.viewerPanX = 0;
     this.viewerPanY = 0;
+    this.viewerPanVx = 0;
+    this.viewerPanVy = 0;
     this.viewerDragging = false;
+    this.viewerZoomHudVisible = false;
   }
 
   viewerZoomIn() {
@@ -4489,7 +5755,7 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   toggleViewerZoomControl() {
-    if (!this.viewerCurrentAttachment()?.isImage) return;
+    if (!this.isImageAttachment(this.viewerCurrentAttachment())) return;
 
     if (this.viewerZoom > 1.01 || this.viewerZoomControlOpen) {
       this.viewerZoomReset();
@@ -4530,7 +5796,7 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   onViewerImageDoubleClick(event: MouseEvent) {
-    if (!this.viewerCurrentAttachment()?.isImage) return;
+    if (!this.isImageAttachment(this.viewerCurrentAttachment())) return;
     const host = event.currentTarget as HTMLElement | null;
     if (!host) return;
 
@@ -4554,12 +5820,12 @@ export class ChatComponent implements AfterViewChecked {
       border: '1px solid #d7e2f0',
       boxShadow: '0 12px 24px rgba(26, 48, 78, 0.15)',
       background: '#0d1726',
-      touchAction: this.viewerCurrentAttachment()?.isImage ? 'none' : 'auto'
+      touchAction: this.isImageAttachment(this.viewerCurrentAttachment()) ? 'none' : 'auto'
     };
   }
 
   onViewerImageWheel(event: WheelEvent) {
-    if (!this.viewerCurrentAttachment()?.isImage) return;
+    if (!this.isImageAttachment(this.viewerCurrentAttachment())) return;
     event.preventDefault();
     if (event.deltaY < 0) {
       this.viewerZoom = Math.min(4, Number((this.viewerZoom + 0.2).toFixed(2)));
@@ -4571,7 +5837,7 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   onViewerDragStart(event: MouseEvent) {
-    if (!this.viewerCurrentAttachment()?.isImage || this.viewerZoom <= 1) return;
+    if (!this.isImageAttachment(this.viewerCurrentAttachment()) || this.viewerZoom <= 1) return;
     event.preventDefault();
     this.viewerDragging = true;
     this.stopViewerMomentum();
@@ -4604,7 +5870,7 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   onViewerTouchStart(event: TouchEvent) {
-    if (!this.viewerCurrentAttachment()?.isImage) return;
+    if (!this.isImageAttachment(this.viewerCurrentAttachment())) return;
 
     if (event.touches.length === 1) {
       const touch = event.touches[0];
@@ -4654,7 +5920,7 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   onViewerTouchMove(event: TouchEvent) {
-    if (!this.viewerCurrentAttachment()?.isImage) return;
+    if (!this.isImageAttachment(this.viewerCurrentAttachment())) return;
     const host = event.currentTarget as HTMLElement | null;
 
     if (event.touches.length === 2) {
@@ -4814,7 +6080,7 @@ export class ChatComponent implements AfterViewChecked {
 
     if (this.privateMediaTimelineFilter === 'all') return base;
     if (this.privateMediaTimelineFilter === 'image') {
-      return base.filter((item) => !!item.attachment.isImage);
+      return base.filter((item) => this.isImageAttachment(item.attachment));
     }
     return base.filter((item) => this.isVideoAttachment(item.attachment));
   }
@@ -4879,8 +6145,7 @@ export class ChatComponent implements AfterViewChecked {
     }
 
     const attachment = item.attachment;
-    const mime = String(attachment.mimeType || '').toLowerCase();
-    const isImageLike = !!attachment.isImage || mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(String(attachment.name || attachment.url || ''));
+    const isImageLike = this.isImageAttachment(attachment);
     const isVideoLike = this.isVideoAttachment(attachment) || /\.(mp4|webm|mov|m4v|avi|mkv)$/i.test(String(attachment.name || attachment.url || ''));
     if (!isImageLike && !isVideoLike) {
       this.pushUploadError(`Timeline open blocked: unsupported preview type (${attachment.mimeType || 'unknown'}).`);
@@ -4904,6 +6169,7 @@ export class ChatComponent implements AfterViewChecked {
       media: mediaList,
       index
     };
+    this.viewerNotice = '';
     this.resetViewerZoom();
     this.prefetchViewerNeighbors();
     this.viewerDialogRef = null;
@@ -5195,11 +6461,19 @@ export class ChatComponent implements AfterViewChecked {
     const persistedUsers = this.persistence.loadUsersList();
 
     if (persistedPublic.length > 0) {
-      this.publicMessages = persistedPublic;
+      this.publicMessages = persistedPublic
+        .map((message) => this.normalizeMessage(message))
+        .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
     }
     
     if (Object.keys(persistedPrivate).length > 0) {
-      this.privateChats = persistedPrivate;
+      const normalizedPrivate: Record<string, ChatMessage[]> = {};
+      Object.entries(persistedPrivate).forEach(([username, messages]) => {
+        normalizedPrivate[username] = (messages || [])
+          .map((message) => this.normalizeMessage(message))
+          .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+      });
+      this.privateChats = normalizedPrivate;
     }
     
     if (persistedPinned.length > 0) {
@@ -5755,6 +7029,7 @@ export class ChatComponent implements AfterViewChecked {
     const target = event.target as HTMLElement;
     const threshold = 150;
     this.showScrollButton = target.scrollTop + target.clientHeight < target.scrollHeight - threshold;
+    this.scheduleVideoLinkDockRefresh(target);
   }
 
   scrollToBottom(): void {
@@ -5839,6 +7114,7 @@ export class ChatComponent implements AfterViewChecked {
   @HostListener('window:resize')
   onWindowResize() {
     this.syncResponsiveLayout();
+    this.scheduleVideoLinkDockRefresh();
   }
 
   @HostListener('document:click', ['$event'])
@@ -5937,6 +7213,11 @@ export class ChatComponent implements AfterViewChecked {
     }
 
     if (event.key === 'Escape') {
+      if (this.hasVisibleInlineVideoPlayer()) {
+        event.preventDefault();
+        this.closeVideoLinkViewer();
+        return;
+      }
       if (this.searchOpen) {
         event.preventDefault();
         this.toggleSearch();
@@ -6231,7 +7512,7 @@ export class ChatComponent implements AfterViewChecked {
   private normalizeMessage(message: ChatMessage): ChatMessage {
     const normalizeAttachment = (a: any): Attachment | null => {
       if (!a?.url) return null;
-      return {
+      const normalized: Attachment = {
         url: a.url,
         name: a.name || 'Attachment',
         mimeType: a.mimeType || 'application/octet-stream',
@@ -6247,6 +7528,8 @@ export class ChatComponent implements AfterViewChecked {
         storageProvider: a.storageProvider,
         objectKey: a.objectKey
       };
+      normalized.isImage = this.isImageAttachment(normalized);
+      return normalized;
     };
 
     const normalizeAttachments = (list?: any[] | null, fallback?: any): Attachment[] => {
@@ -6637,7 +7920,7 @@ export class ChatComponent implements AfterViewChecked {
     const attachments = this.messageAttachments(message);
     if (!attachments.length) return !filters.hasMedia && !filters.hasAttachment && !filters.types.length && !filters.minSizeBytes && !filters.minDurationSeconds;
 
-    const hasMediaAttachment = attachments.some((a) => a.isImage || this.isVideoAttachment(a));
+    const hasMediaAttachment = attachments.some((a) => this.isImageAttachment(a) || this.isVideoAttachment(a));
     if (filters.hasMedia && !hasMediaAttachment) return false;
     if (filters.hasAttachment && !attachments.length) return false;
     if (filters.minSizeBytes > 0 && !attachments.some((a) => Number(a.size || 0) >= filters.minSizeBytes)) return false;
@@ -6645,12 +7928,12 @@ export class ChatComponent implements AfterViewChecked {
     if (!filters.types.length) return true;
 
     return attachments.some((attachment) => {
-      if (filters.types.includes('image') && attachment.isImage) return true;
+      if (filters.types.includes('image') && this.isImageAttachment(attachment)) return true;
       if (filters.types.includes('video') && this.isVideoAttachment(attachment)) return true;
       if (filters.types.includes('audio') && this.isAudioAttachment(attachment)) return true;
       if (
         filters.types.includes('document') &&
-        !attachment.isImage &&
+        !this.isImageAttachment(attachment) &&
         !this.isVideoAttachment(attachment) &&
         !this.isAudioAttachment(attachment)
       ) {
@@ -6871,7 +8154,7 @@ export class ChatComponent implements AfterViewChecked {
               name: a.name || 'Attachment',
               mimeType: a.mimeType || 'application/octet-stream',
               size: Number(a.size || 0),
-              isImage: !!a.isImage,
+              isImage: this.isImageAttachment(a as Attachment),
               durationSeconds: Number(a.durationSeconds || 0) || undefined,
               waveform: Array.isArray(a.waveform)
                 ? a.waveform.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 96)
