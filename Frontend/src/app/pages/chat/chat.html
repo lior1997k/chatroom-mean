@@ -249,7 +249,17 @@
               </div>
             </div>
             <ng-template #publicTextView>
-              <button class="replySnippet" type="button" *ngIf="m.forwardedFrom" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToForwardTarget(m)">
+              <button
+                class="replySnippet"
+                type="button"
+                *ngIf="m.forwardedFrom"
+                [style.background]="m.from === myUsername ? 'rgba(8, 20, 38, 0.34)' : null"
+                [style.borderLeftColor]="m.from === myUsername ? 'rgba(214, 236, 255, 0.92)' : null"
+                [style.color]="m.from === myUsername ? '#eaf4ff' : null"
+                (mousedown)="$event.stopPropagation()"
+                (touchstart)="$event.stopPropagation()"
+                (click)="$event.stopPropagation(); jumpToForwardTarget(m)"
+              >
                 <span class="replyAuthor">Forwarded from {{ replyAuthorLabel(m.forwardedFrom.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.forwardedFrom.text, m.forwardedFrom.attachment, m.forwardedFrom.attachments) }}</span>
                 <img *ngIf="isImageAttachment(m.forwardedFrom.attachment)" [src]="attachmentUrl(m.forwardedFrom.attachment)" [alt]="m.forwardedFrom.attachment?.name" loading="lazy" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
@@ -295,7 +305,17 @@
                   </div>
                 </ng-container>
               </ng-container>
-              <button class="replySnippet" type="button" *ngIf="m.replyTo" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToReplyTarget(m)">
+              <button
+                class="replySnippet"
+                type="button"
+                *ngIf="m.replyTo"
+                [style.background]="m.from === myUsername ? 'rgba(8, 20, 38, 0.34)' : null"
+                [style.borderLeftColor]="m.from === myUsername ? 'rgba(214, 236, 255, 0.92)' : null"
+                [style.color]="m.from === myUsername ? '#eaf4ff' : null"
+                (mousedown)="$event.stopPropagation()"
+                (touchstart)="$event.stopPropagation()"
+                (click)="$event.stopPropagation(); jumpToReplyTarget(m)"
+              >
                 <span class="replyAuthor">{{ replyAuthorLabel(m.replyTo.from) }}</span>
                 <span class="replyText">{{ replyPreviewText(m.replyTo.text, m.replyTo.attachment, m.replyTo.attachments) }}</span>
                 <img *ngIf="isImageAttachment(m.replyTo.attachment)" [src]="attachmentUrl(m.replyTo.attachment)" [alt]="m.replyTo.attachment?.name" loading="lazy" style="margin-top: 4px; max-width: 84px; max-height: 52px; border-radius: 6px; border: 1px solid #d9e2ef;" />
@@ -728,9 +748,19 @@
               </div>
             </div>
             <ng-template #privateTextView>
-              <button class="replySnippet" type="button" *ngIf="m.forwardedFrom" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToForwardTarget(m)">
-                <span class="replyAuthor">Forwarded from {{ replyAuthorLabel(m.forwardedFrom.from) }}</span>
-                <span class="replyText">{{ replyPreviewText(m.forwardedFrom.text, m.forwardedFrom.attachment, m.forwardedFrom.attachments) }}</span>
+              <button
+                class="replySnippet"
+                type="button"
+                *ngIf="m.forwardedFrom"
+                [style.background]="m.from === myUsername ? 'rgba(7, 20, 40, 0.34)' : null"
+                [style.borderLeftColor]="m.from === myUsername ? 'rgba(214, 236, 255, 0.9)' : null"
+                [style.color]="m.from === myUsername ? '#eaf4ff' : null"
+                (mousedown)="$event.stopPropagation()"
+                (touchstart)="$event.stopPropagation()"
+                (click)="$event.stopPropagation(); jumpToForwardTarget(m)"
+              >
+                <span class="replyAuthor" [style.color]="m.from === myUsername ? '#f2f8ff' : null">Forwarded from {{ replyAuthorLabel(m.forwardedFrom.from) }}</span>
+                <span class="replyText" [style.color]="m.from === myUsername ? '#deedff' : null">{{ replyPreviewText(m.forwardedFrom.text, m.forwardedFrom.attachment, m.forwardedFrom.attachments) }}</span>
                 <span class="replyText" *ngIf="referenceMetaLabel(m.forwardedFrom) as forwardedMeta">{{ forwardedMeta }}</span>
                 <span
                   class="replyText"
@@ -818,9 +848,19 @@
                   </div>
                 </div>
               </ng-container>
-              <button class="replySnippet" type="button" *ngIf="m.replyTo" (mousedown)="$event.stopPropagation()" (touchstart)="$event.stopPropagation()" (click)="$event.stopPropagation(); jumpToReplyTarget(m)">
-                <span class="replyAuthor">{{ replyAuthorLabel(m.replyTo.from) }}</span>
-                <span class="replyText">{{ replyPreviewText(m.replyTo.text, m.replyTo.attachment, m.replyTo.attachments) }}</span>
+              <button
+                class="replySnippet"
+                type="button"
+                *ngIf="m.replyTo"
+                [style.background]="m.from === myUsername ? 'rgba(7, 20, 40, 0.34)' : null"
+                [style.borderLeftColor]="m.from === myUsername ? 'rgba(214, 236, 255, 0.9)' : null"
+                [style.color]="m.from === myUsername ? '#eaf4ff' : null"
+                (mousedown)="$event.stopPropagation()"
+                (touchstart)="$event.stopPropagation()"
+                (click)="$event.stopPropagation(); jumpToReplyTarget(m)"
+              >
+                <span class="replyAuthor" [style.color]="m.from === myUsername ? '#f2f8ff' : null">{{ replyAuthorLabel(m.replyTo.from) }}</span>
+                <span class="replyText" [style.color]="m.from === myUsername ? '#deedff' : null">{{ replyPreviewText(m.replyTo.text, m.replyTo.attachment, m.replyTo.attachments) }}</span>
                 <span class="replyText" *ngIf="referenceMetaLabel(m.replyTo) as replyMeta">{{ replyMeta }}</span>
                 <span
                   class="replyText"

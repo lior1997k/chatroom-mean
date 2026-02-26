@@ -2591,7 +2591,7 @@ export class ChatComponent implements AfterViewChecked {
 
   videoLinkPreviews(message: ChatMessage): VideoLinkPreview[] {
     if (!message || message.deletedAt) return [];
-    const text = this.messageBodyText(message);
+    const text = this.videoLinkPreviewText(message);
     if (!text) return [];
 
     const cacheKey = `${message.id || 'temp'}|${text}`;
@@ -2613,6 +2613,24 @@ export class ChatComponent implements AfterViewChecked {
 
     this.videoLinkPreviewCache[cacheKey] = previews;
     return previews;
+  }
+
+  private videoLinkPreviewText(message: ChatMessage): string {
+    const parts: string[] = [];
+    const body = this.messageBodyText(message);
+    if (body) parts.push(body);
+
+    const replyText = String(message?.replyTo?.text || '').trim();
+    if (replyText) {
+      parts.push(replyText);
+    }
+
+    const forwardedText = String(message?.forwardedFrom?.text || '').trim();
+    if (forwardedText && !/^forwarded message$/i.test(forwardedText)) {
+      parts.push(forwardedText);
+    }
+
+    return parts.join('\n');
   }
 
   openVideoLinkInChat(message: ChatMessage, link: VideoLinkPreview, event?: Event) {
