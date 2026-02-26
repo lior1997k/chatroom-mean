@@ -58,11 +58,16 @@ interface VideoLinkMetadata {
   source: 'fallback' | 'oembed' | 'api';
 }
 
-interface VideoLinkWatchLaterItem {
+interface WatchPartyState {
+  scope: 'public' | 'private';
+  withUser: string | null;
+  host: string;
   sourceUrl: string;
   providerLabel: string;
   title: string;
-  addedAt: number;
+  startSeconds: number;
+  startedAt: number;
+  updatedAt: number;
 }
 
 @Component({
@@ -245,11 +250,10 @@ export class ChatComponent implements AfterViewChecked {
   private hiddenVideoLinkInlineKeys = new Set<string>();
   private shownVideoLinkInlineKeys = new Set<string>();
   private videoLinkHoveredKeys = new Set<string>();
-  private pinnedVideoLinkSources = new Set<string>();
-  private watchLaterVideoLinks: VideoLinkWatchLaterItem[] = [];
   private dockedVideoLinkKey = '';
   private lastVideoLinkActiveKey = '';
   private videoLinkDockRaf: number | null = null;
+  private joinedWatchPartyContext: { scope: 'public' | 'private'; withUser?: string } | null = null;
   private readonly videoLinkHoverSupported =
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&
@@ -264,10 +268,8 @@ export class ChatComponent implements AfterViewChecked {
   searchOpen = false;
   searchFilterMenuOpen = false;
   showScrollButton = false;
-  hideAllInlineVideoLinks = false;
-  videoLinkAutoOpenInline = true;
-  videoLinkMutedByDefault = true;
   videoLinkMotionIntensity: 'full' | 'reduced' = 'full';
+  watchPartyState: WatchPartyState | null = null;
 
   // Dialog
   newUser = '';
@@ -632,6 +634,12 @@ export class ChatComponent implements AfterViewChecked {
         if (this.selectedUser === ev.from) this.isTypingMap[ev.from] = false;
         this.clearPrivateTypingTimeout(ev.from);
       });
+
+    this.socket.onEvent<any>('watchParty:state').subscribe((payload) => {
+      this.applyWatchPartyState(payload);
+    });
+
+    this.syncWatchPartyContext(true);
   }
 
   ngOnDestroy() {
@@ -660,6 +668,7 @@ export class ChatComponent implements AfterViewChecked {
       window.cancelAnimationFrame(this.videoLinkDockRaf);
       this.videoLinkDockRaf = null;
     }
+    this.leaveWatchPartyContext();
     this.discardVoiceDraft();
     this.previewVisibilityObserver?.disconnect();
     this.previewVisibilityObserver = null;
@@ -758,6 +767,7 @@ export class ChatComponent implements AfterViewChecked {
     if (this.replyingTo?.scope !== 'private' || this.replyingTo?.privatePeer !== username) this.replyingTo = null;
     this.refreshSearchForCurrentContext();
     this.scheduleVideoLinkDockRefresh();
+    this.syncWatchPartyContext();
 
     if (!this.historyLoaded.has(username)) {
       try {
@@ -927,6 +937,7 @@ export class ChatComponent implements AfterViewChecked {
     this.reactionPicker = null;
     this.refreshSearchForCurrentContext();
     this.scheduleVideoLinkDockRefresh();
+    this.syncWatchPartyContext();
   }
 
   toggleEmojiPicker() {
@@ -2633,7 +2644,6 @@ export class ChatComponent implements AfterViewChecked {
 
   showVideoLinkInline(message: ChatMessage, link: VideoLinkPreview) {
     if (!message || !link?.embedUrl) return;
-    this.hideAllInlineVideoLinks = false;
     const key = this.videoLinkItemKey(message, link);
     this.hiddenVideoLinkInlineKeys.delete(key);
     this.shownVideoLinkInlineKeys.add(key);
@@ -2643,11 +2653,9 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   isVideoLinkInChatOpen(message: ChatMessage, link: VideoLinkPreview): boolean {
-    if (!message || !link || this.hideAllInlineVideoLinks) return false;
+    if (!message || !link) return false;
     const key = this.videoLinkItemKey(message, link);
-    if (this.hiddenVideoLinkInlineKeys.has(key)) return false;
-    if (this.videoLinkAutoOpenInline) return true;
-    return this.shownVideoLinkInlineKeys.has(key);
+    return this.shownVideoLinkInlineKeys.has(key) && !this.hiddenVideoLinkInlineKeys.has(key);
   }
 
   videoLinkEmbedUrl(message: ChatMessage, link: VideoLinkPreview): SafeResourceUrl | null {
@@ -2664,45 +2672,8 @@ export class ChatComponent implements AfterViewChecked {
     return this.isVideoLinkInChatOpen(message, link) ? 'Hide player' : 'Show player';
   }
 
-  videoLinkGlobalToggleLabel(): string {
-    return this.hideAllInlineVideoLinks ? 'Show all players' : 'Hide all players';
-  }
-
-  videoLinkSettingsLabel(): string {
-    return this.videoLinkAutoOpenInline ? 'Auto open on' : 'Auto open off';
-  }
-
-  videoLinkMuteLabel(): string {
-    return this.videoLinkMutedByDefault ? 'Muted default on' : 'Muted default off';
-  }
-
   videoLinkMotionLabel(): string {
     return this.videoLinkMotionIntensity === 'full' ? 'Motion full' : 'Motion reduced';
-  }
-
-  toggleVideoLinkAutoOpen(event?: Event) {
-    event?.preventDefault();
-    event?.stopPropagation();
-    if (this.videoLinkAutoOpenInline) {
-      this.captureVisibleVideoLinksAsShown();
-    }
-    this.videoLinkAutoOpenInline = !this.videoLinkAutoOpenInline;
-    if (this.videoLinkAutoOpenInline) {
-      this.shownVideoLinkInlineKeys.clear();
-    }
-    this.persistVideoLinkPreferences();
-    this.scheduleVideoLinkDockRefresh();
-  }
-
-  toggleVideoLinkMutedDefault(event?: Event) {
-    event?.preventDefault();
-    event?.stopPropagation();
-    this.videoLinkMutedByDefault = !this.videoLinkMutedByDefault;
-    this.videoLinkPreviewCache = {};
-    this.videoLinkSafeEmbedUrlCache = {};
-    this.messageTextHtmlCache = {};
-    this.persistVideoLinkPreferences();
-    this.scheduleVideoLinkDockRefresh();
   }
 
   toggleVideoLinkMotion(event?: Event) {
@@ -2712,64 +2683,6 @@ export class ChatComponent implements AfterViewChecked {
     this.persistVideoLinkPreferences();
   }
 
-  isVideoLinkPinned(link: VideoLinkPreview): boolean {
-    const key = this.videoLinkSourceKey(link);
-    return !!key && this.pinnedVideoLinkSources.has(key);
-  }
-
-  toggleVideoLinkPin(message: ChatMessage, link: VideoLinkPreview, event?: Event) {
-    event?.preventDefault();
-    event?.stopPropagation();
-    const sourceKey = this.videoLinkSourceKey(link);
-    if (!sourceKey) return;
-
-    if (this.pinnedVideoLinkSources.has(sourceKey)) {
-      this.pinnedVideoLinkSources.delete(sourceKey);
-      if (this.dockedVideoLinkKey === this.videoLinkItemKey(message, link)) {
-        this.dockedVideoLinkKey = '';
-      }
-    } else {
-      this.pinnedVideoLinkSources.add(sourceKey);
-      this.showVideoLinkInline(message, link);
-      this.dockedVideoLinkKey = this.videoLinkItemKey(message, link);
-    }
-
-    this.persistVideoLinkPreferences();
-    this.scheduleVideoLinkDockRefresh();
-  }
-
-  isVideoLinkWatchLater(link: VideoLinkPreview): boolean {
-    const sourceKey = this.videoLinkSourceKey(link);
-    if (!sourceKey) return false;
-    return this.watchLaterVideoLinks.some((item) => this.videoLinkSourceKey(item.sourceUrl) === sourceKey);
-  }
-
-  toggleVideoLinkWatchLater(link: VideoLinkPreview, event?: Event) {
-    event?.preventDefault();
-    event?.stopPropagation();
-    const sourceKey = this.videoLinkSourceKey(link);
-    if (!sourceKey) return;
-
-    const existing = this.watchLaterVideoLinks.findIndex((item) => this.videoLinkSourceKey(item.sourceUrl) === sourceKey);
-    if (existing >= 0) {
-      this.watchLaterVideoLinks.splice(existing, 1);
-    } else {
-      const meta = this.videoLinkMetadata(link);
-      this.watchLaterVideoLinks.unshift({
-        sourceUrl: link.sourceUrl,
-        providerLabel: link.providerLabel,
-        title: meta.title,
-        addedAt: Date.now()
-      });
-      this.watchLaterVideoLinks = this.watchLaterVideoLinks.slice(0, 120);
-    }
-
-    this.persistVideoLinkPreferences();
-  }
-
-  watchLaterCount(): number {
-    return this.watchLaterVideoLinks.length;
-  }
 
   async copyVideoLink(link: VideoLinkPreview, event?: Event) {
     event?.preventDefault();
@@ -2816,6 +2729,73 @@ export class ChatComponent implements AfterViewChecked {
     } catch {
       // no-op
     }
+  }
+
+  toggleWatchPartyFromLink(message: ChatMessage, link: VideoLinkPreview, event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (!message || !link) return;
+
+    if (this.isWatchPartyHost() && this.isWatchPartyForLink(link)) {
+      this.endWatchParty();
+      return;
+    }
+
+    const context = this.currentWatchPartyContext();
+    if (!context) return;
+
+    const meta = this.videoLinkMetadata(link);
+    this.showVideoLinkInline(message, link);
+    this.lastVideoLinkActiveKey = this.videoLinkItemKey(message, link);
+    this.dockedVideoLinkKey = this.videoLinkItemKey(message, link);
+    this.socket.emitEvent('watchParty:start', {
+      ...context,
+      sourceUrl: link.sourceUrl,
+      providerLabel: link.providerLabel,
+      title: String(meta.title || `${link.providerLabel} video`).slice(0, 160),
+      startSeconds: Number(link.startSeconds || 0)
+    });
+  }
+
+  syncWatchParty(event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    this.socket.emitEvent('watchParty:sync', this.currentWatchPartyContext());
+  }
+
+  endWatchParty(event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    this.socket.emitEvent('watchParty:end', this.currentWatchPartyContext());
+  }
+
+  isWatchPartyHost(): boolean {
+    return !!this.watchPartyState && this.watchPartyState.host === this.myUsername;
+  }
+
+  isWatchPartyForLink(link: VideoLinkPreview): boolean {
+    if (!this.watchPartyState) return false;
+    return this.videoLinkSourceKey(this.watchPartyState.sourceUrl) === this.videoLinkSourceKey(link);
+  }
+
+  watchPartyToggleLabel(link: VideoLinkPreview): string {
+    if (this.isWatchPartyHost() && this.isWatchPartyForLink(link)) return 'End watch party';
+    if (this.watchPartyState && this.isWatchPartyForLink(link)) return 'Re-sync this watch party';
+    return 'Start watch party';
+  }
+
+  watchPartyTitle(): string {
+    if (!this.watchPartyState) return '';
+    return this.watchPartyState.title || `${this.watchPartyState.providerLabel} watch party`;
+  }
+
+  watchPartyHostLabel(): string {
+    if (!this.watchPartyState) return '';
+    return this.watchPartyState.host === this.myUsername ? 'You are hosting' : `${this.userDisplayName(this.watchPartyState.host)} is hosting`;
+  }
+
+  watchPartyContextLabel(): string {
+    return this.selectedUser ? `Private with ${this.selectedUser}` : 'Public room';
   }
 
   videoLinkMetadata(link: VideoLinkPreview): VideoLinkMetadata {
@@ -2961,26 +2941,11 @@ export class ChatComponent implements AfterViewChecked {
     return this.videoLinkProviderFallbackGradient(link?.provider);
   }
 
-  toggleVideoLinkGlobalVisibility(event?: Event) {
-    event?.preventDefault();
-    event?.stopPropagation();
-    this.hideAllInlineVideoLinks = !this.hideAllInlineVideoLinks;
-    if (this.hideAllInlineVideoLinks) this.dockedVideoLinkKey = '';
-    this.persistVideoLinkPreferences();
-    this.scheduleVideoLinkDockRefresh();
-  }
-
   closeVideoLinkViewer() {
-    this.hideAllInlineVideoLinks = true;
+    this.hiddenVideoLinkInlineKeys.clear();
+    this.shownVideoLinkInlineKeys.clear();
     this.dockedVideoLinkKey = '';
     this.persistVideoLinkPreferences();
-  }
-
-  private captureVisibleVideoLinksAsShown() {
-    this.shownVideoLinkInlineKeys.clear();
-    for (const item of this.openInlineVideoLinkItems()) {
-      this.shownVideoLinkInlineKeys.add(item.key);
-    }
   }
 
   private scheduleVideoLinkDockRefresh(host?: HTMLElement | null) {
@@ -2996,20 +2961,9 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   private refreshVideoLinkDockState(hostOverride: HTMLElement | null) {
-    if (this.hideAllInlineVideoLinks) {
-      this.dockedVideoLinkKey = '';
-      return;
-    }
-
     const openItems = this.openInlineVideoLinkItems();
     if (!openItems.length) {
       this.dockedVideoLinkKey = '';
-      return;
-    }
-
-    const pinned = openItems.find((item) => this.pinnedVideoLinkSources.has(this.videoLinkSourceKey(item.link)));
-    if (pinned) {
-      this.dockedVideoLinkKey = pinned.key;
       return;
     }
 
@@ -3066,6 +3020,77 @@ export class ChatComponent implements AfterViewChecked {
     }
 
     return open;
+  }
+
+  private currentWatchPartyContext(): { scope: 'public' | 'private'; withUser?: string } {
+    if (this.selectedUser) {
+      return { scope: 'private', withUser: this.selectedUser };
+    }
+    return { scope: 'public' };
+  }
+
+  private syncWatchPartyContext(force = false) {
+    const next = this.currentWatchPartyContext();
+    const same =
+      !force &&
+      !!this.joinedWatchPartyContext &&
+      this.joinedWatchPartyContext.scope === next.scope &&
+      String(this.joinedWatchPartyContext.withUser || '').toLowerCase() === String(next.withUser || '').toLowerCase();
+    if (same) return;
+
+    if (this.joinedWatchPartyContext) {
+      this.socket.emitEvent('watchParty:leaveContext', this.joinedWatchPartyContext);
+    }
+    this.joinedWatchPartyContext = next;
+    this.watchPartyState = null;
+    this.socket.emitEvent('watchParty:joinContext', next);
+  }
+
+  private leaveWatchPartyContext() {
+    if (!this.joinedWatchPartyContext) return;
+    this.socket.emitEvent('watchParty:leaveContext', this.joinedWatchPartyContext);
+    this.joinedWatchPartyContext = null;
+    this.watchPartyState = null;
+  }
+
+  private applyWatchPartyState(payload: any) {
+    if (!payload || !payload.sourceUrl) {
+      this.watchPartyState = null;
+      return;
+    }
+
+    const scope: 'public' | 'private' = payload.scope === 'private' ? 'private' : 'public';
+    const withUser = scope === 'private' ? String(payload.withUser || '').trim() : '';
+    this.watchPartyState = {
+      scope,
+      withUser: withUser || null,
+      host: String(payload.host || '').trim(),
+      sourceUrl: String(payload.sourceUrl || '').trim(),
+      providerLabel: String(payload.providerLabel || 'Video').trim(),
+      title: String(payload.title || '').trim(),
+      startSeconds: Math.max(0, Number(payload.startSeconds || 0) || 0),
+      startedAt: Math.max(0, Number(payload.startedAt || Date.now()) || Date.now()),
+      updatedAt: Math.max(0, Number(payload.updatedAt || Date.now()) || Date.now())
+    };
+
+    this.focusWatchPartyVideo(this.watchPartyState.sourceUrl);
+  }
+
+  private focusWatchPartyVideo(sourceUrl: string) {
+    const sourceKey = this.videoLinkSourceKey(sourceUrl);
+    if (!sourceKey) return;
+    const thread = this.displayedThreadMessages();
+    for (let i = thread.length - 1; i >= 0; i -= 1) {
+      const message = thread[i];
+      const links = this.videoLinkPreviews(message);
+      const link = links.find((item) => this.videoLinkSourceKey(item.sourceUrl) === sourceKey);
+      if (!link) continue;
+      this.showVideoLinkInline(message, link);
+      this.lastVideoLinkActiveKey = this.videoLinkItemKey(message, link);
+      this.dockedVideoLinkKey = this.videoLinkItemKey(message, link);
+      this.scheduleVideoLinkDockRefresh();
+      return;
+    }
   }
 
   private videoLinkSourceKey(linkOrUrl: VideoLinkPreview | string | null | undefined): string {
@@ -3176,31 +3201,8 @@ export class ChatComponent implements AfterViewChecked {
       const prefs = parsed[key] || parsed['*'];
       if (!prefs || typeof prefs !== 'object') return;
 
-      if (typeof prefs.autoOpenInline === 'boolean') this.videoLinkAutoOpenInline = prefs.autoOpenInline;
-      if (typeof prefs.hideAllInline === 'boolean') this.hideAllInlineVideoLinks = prefs.hideAllInline;
-      if (typeof prefs.mutedByDefault === 'boolean') this.videoLinkMutedByDefault = prefs.mutedByDefault;
       if (prefs.motionIntensity === 'full' || prefs.motionIntensity === 'reduced') {
         this.videoLinkMotionIntensity = prefs.motionIntensity;
-      }
-
-      if (Array.isArray(prefs.pinnedSources)) {
-        this.pinnedVideoLinkSources = new Set(
-          prefs.pinnedSources
-            .map((x: any) => this.videoLinkSourceKey(String(x || '')))
-            .filter((x: string) => !!x)
-        );
-      }
-
-      if (Array.isArray(prefs.watchLater)) {
-        this.watchLaterVideoLinks = prefs.watchLater
-          .map((x: any) => ({
-            sourceUrl: String(x?.sourceUrl || '').trim(),
-            providerLabel: String(x?.providerLabel || 'Video').trim() || 'Video',
-            title: String(x?.title || '').trim() || 'Saved video',
-            addedAt: Number(x?.addedAt || Date.now()) || Date.now()
-          }))
-          .filter((x: VideoLinkWatchLaterItem) => !!x.sourceUrl)
-          .slice(0, 120);
       }
     } catch {
       // no-op
@@ -3215,12 +3217,7 @@ export class ChatComponent implements AfterViewChecked {
       const key = String(this.myUsername || 'guest').toLowerCase();
 
       next[key] = {
-        autoOpenInline: this.videoLinkAutoOpenInline,
-        hideAllInline: this.hideAllInlineVideoLinks,
-        mutedByDefault: this.videoLinkMutedByDefault,
-        motionIntensity: this.videoLinkMotionIntensity,
-        pinnedSources: Array.from(this.pinnedVideoLinkSources).slice(0, 120),
-        watchLater: this.watchLaterVideoLinks.slice(0, 120)
+        motionIntensity: this.videoLinkMotionIntensity
       };
 
       localStorage.setItem(VIDEO_LINK_PREFS_STORAGE_KEY, JSON.stringify(next));
@@ -3291,7 +3288,6 @@ export class ChatComponent implements AfterViewChecked {
   }
 
   private hasVisibleInlineVideoPlayer(): boolean {
-    if (this.hideAllInlineVideoLinks) return false;
     const sourceMessages = this.displayedThreadMessages();
     return sourceMessages.some((message: ChatMessage) => {
       const links = this.videoLinkPreviews(message);
@@ -3422,7 +3418,6 @@ export class ChatComponent implements AfterViewChecked {
       const id = this.youtubeVideoId(parsed);
       if (!id) return null;
       const params = ['rel=0'];
-      if (this.videoLinkMutedByDefault) params.push('mute=1');
       if (startSeconds > 0) params.push(`start=${Math.floor(startSeconds)}`);
       return {
         sourceUrl: parsed.toString(),
@@ -3438,7 +3433,6 @@ export class ChatComponent implements AfterViewChecked {
       const viewKey = this.pornhubViewKey(parsed);
       if (!viewKey) return null;
       const params: string[] = [];
-      if (this.videoLinkMutedByDefault) params.push('mute=1');
       if (startSeconds > 0) params.push(`start=${Math.floor(startSeconds)}`);
       return {
         sourceUrl: parsed.toString(),
@@ -3454,7 +3448,6 @@ export class ChatComponent implements AfterViewChecked {
       const id = this.vimeoVideoId(parsed);
       if (!id) return null;
       const params: string[] = [];
-      if (this.videoLinkMutedByDefault) params.push('muted=1');
       const hash = startSeconds > 0 ? `#t=${Math.floor(startSeconds)}s` : '';
       return {
         sourceUrl: parsed.toString(),
@@ -3470,7 +3463,6 @@ export class ChatComponent implements AfterViewChecked {
       const id = this.dailymotionVideoId(parsed);
       if (!id) return null;
       const params: string[] = [];
-      if (this.videoLinkMutedByDefault) params.push('mute=1');
       if (startSeconds > 0) params.push(`start=${Math.floor(startSeconds)}`);
       return {
         sourceUrl: parsed.toString(),
@@ -3485,13 +3477,11 @@ export class ChatComponent implements AfterViewChecked {
     if (bareHost.endsWith('tiktok.com')) {
       const id = this.tiktokVideoId(parsed);
       if (!id) return null;
-      const params: string[] = [];
-      if (this.videoLinkMutedByDefault) params.push('mute=1');
       return {
         sourceUrl: parsed.toString(),
         provider: 'tiktok',
         providerLabel: 'TikTok',
-        embedUrl: `https://www.tiktok.com/embed/v2/${encodeURIComponent(id)}${params.length ? `?${params.join('&')}` : ''}`,
+        embedUrl: `https://www.tiktok.com/embed/v2/${encodeURIComponent(id)}`,
         displayUrl: makeDisplay(),
         startSeconds
       };
@@ -3515,7 +3505,6 @@ export class ChatComponent implements AfterViewChecked {
       if (!id) return null;
       const params: string[] = [];
       if (startSeconds > 0) params.push(`start=${Math.floor(startSeconds)}`);
-      if (this.videoLinkMutedByDefault) params.push('muted=1');
       return {
         sourceUrl: parsed.toString(),
         provider: 'streamable',
@@ -3529,13 +3518,11 @@ export class ChatComponent implements AfterViewChecked {
     if (bareHost === 'loom.com' || bareHost.endsWith('.loom.com')) {
       const id = this.loomVideoId(parsed);
       if (!id) return null;
-      const params: string[] = [];
-      if (this.videoLinkMutedByDefault) params.push('muted=true');
       return {
         sourceUrl: parsed.toString(),
         provider: 'loom',
         providerLabel: 'Loom',
-        embedUrl: `https://www.loom.com/embed/${encodeURIComponent(id)}${params.length ? `?${params.join('&')}` : ''}`,
+        embedUrl: `https://www.loom.com/embed/${encodeURIComponent(id)}`,
         displayUrl: makeDisplay(),
         startSeconds
       };
@@ -3644,12 +3631,12 @@ export class ChatComponent implements AfterViewChecked {
     const videoQuery = String(url.searchParams.get('video') || '').trim();
     if (/^v?\d+$/.test(videoQuery)) {
       const normalized = videoQuery.startsWith('v') ? videoQuery : `v${videoQuery}`;
-      return `https://player.twitch.tv/?video=${encodeURIComponent(normalized)}&parent=${encodeURIComponent(parent)}&autoplay=false${this.videoLinkMutedByDefault ? '&muted=true' : ''}${timeToken ? `&time=${encodeURIComponent(timeToken)}` : ''}`;
+      return `https://player.twitch.tv/?video=${encodeURIComponent(normalized)}&parent=${encodeURIComponent(parent)}&autoplay=false${timeToken ? `&time=${encodeURIComponent(timeToken)}` : ''}`;
     }
 
     if (parts[0]?.toLowerCase() === 'videos' && /^\d+$/.test(parts[1] || '')) {
       const normalized = `v${parts[1]}`;
-      return `https://player.twitch.tv/?video=${encodeURIComponent(normalized)}&parent=${encodeURIComponent(parent)}&autoplay=false${this.videoLinkMutedByDefault ? '&muted=true' : ''}${timeToken ? `&time=${encodeURIComponent(timeToken)}` : ''}`;
+      return `https://player.twitch.tv/?video=${encodeURIComponent(normalized)}&parent=${encodeURIComponent(parent)}&autoplay=false${timeToken ? `&time=${encodeURIComponent(timeToken)}` : ''}`;
     }
 
     return null;
@@ -6992,6 +6979,7 @@ export class ChatComponent implements AfterViewChecked {
     this.users = this.users.filter(user => user !== u);
     if (this.selectedUser === u) {
       this.selectedUser = null;
+      this.syncWatchPartyContext();
     }
   }
 

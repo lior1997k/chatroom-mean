@@ -165,6 +165,23 @@
       <button class="scrollToBottom" *ngIf="showScrollButton" (click)="scrollToBottom()" matTooltip="Scroll to bottom">
         <mat-icon>keyboard_arrow_down</mat-icon>
       </button>
+      <div
+        *ngIf="watchPartyState"
+        style="position: absolute; left: 12px; right: 12px; top: 12px; z-index: 3; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 10px; border-radius: 11px; border: 1px solid #b9d2ef; background: linear-gradient(180deg, rgba(244,250,255,0.98), rgba(234,244,255,0.98)); box-shadow: 0 8px 20px rgba(30, 56, 89, 0.16);"
+      >
+        <div style="min-width: 0; display: flex; flex-direction: column; gap: 1px;">
+          <strong style="font-size: 0.72rem; color: #204261; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Watch party live: {{ watchPartyTitle() }}</strong>
+          <span style="font-size: 0.65rem; color: #4a6a8c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ watchPartyHostLabel() }} · {{ watchPartyContextLabel() }}</span>
+        </div>
+        <div style="display: inline-flex; align-items: center; gap: 4px;">
+          <button mat-stroked-button type="button" style="height: 27px; line-height: 25px; border-radius: 8px;" (click)="syncWatchParty($event)">
+            Sync now
+          </button>
+          <button mat-flat-button color="warn" type="button" *ngIf="isWatchPartyHost()" style="height: 27px; line-height: 25px; border-radius: 8px;" (click)="endWatchParty($event)">
+            End
+          </button>
+        </div>
+      </div>
       <div class="messages" (scroll)="onMessagesScroll($event)">
       
       <ng-container *ngIf="!selectedUser; else privateView">
@@ -508,7 +525,7 @@
                     *ngFor="let link of videoLinks; let i = index"
                     (mouseenter)="onVideoLinkCardHover(m, link, true)"
                     (mouseleave)="onVideoLinkCardHover(m, link, false)"
-                    [style.transform]="videoLinkMotionIntensity === 'full' && isVideoLinkCardHovered(m, link) ? 'translateY(-2px) scale(1.005)' : 'translateY(0) scale(1)'"
+                    [style.transform]="videoLinkMotionIntensity === 'full' && isVideoLinkCardHovered(m, link) ? 'translateY(-2px) scale(1.005)' : 'none'"
                     [style.boxShadow]="videoLinkMotionIntensity === 'full' && isVideoLinkCardHovered(m, link) ? '0 16px 34px rgba(2, 10, 22, 0.34), 0 0 0 1px rgba(137, 179, 227, 0.36)' : '0 10px 24px rgba(3, 12, 23, 0.28)'"
                     [style.animation]="videoLinkMotionIntensity === 'full' ? 'messagePop 320ms cubic-bezier(0.2, 0.8, 0.2, 1)' : 'none'"
                     style="position: relative; border-radius: 16px; padding: 1px; background: linear-gradient(128deg, rgba(103, 158, 225, 0.76), rgba(35, 88, 153, 0.54) 52%, rgba(39, 141, 194, 0.48)); transition: transform 220ms ease, box-shadow 220ms ease;"
@@ -517,7 +534,7 @@
                       <span [style.opacity]="isVideoLinkCardHovered(m, link) ? '0.9' : '0.6'" style="position: absolute; left: -18%; top: -40%; width: 60%; height: 90%; border-radius: 999px; background: radial-gradient(circle, rgba(118, 181, 255, 0.42), transparent 68%); filter: blur(18px); pointer-events: none; transition: opacity 200ms ease;"></span>
                       <span [style.opacity]="videoLinkMotionIntensity === 'full' && isVideoLinkCardHovered(m, link) ? '0.28' : '0.12'" [style.animation]="videoLinkMotionIntensity === 'full' ? 'shimmer 3.4s linear infinite' : 'none'" style="position: absolute; inset: 0; pointer-events: none; background: linear-gradient(110deg, rgba(255,255,255,0) 26%, rgba(188,220,255,0.3) 48%, rgba(255,255,255,0) 70%); background-size: 220% 100%;"></span>
 
-                      <div style="position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px;">
+                      <div style="position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px;">
                         <div style="display: inline-flex; align-items: center; gap: 6px; min-width: 0;">
                           <span [ngStyle]="videoLinkProviderChipStyle(link)" style="display: inline-flex; align-items: center; height: 21px; border-radius: 999px; padding: 0 9px; font-size: 0.63rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;">{{ link.providerLabel }}</span>
                           <span style="font-size: 0.63rem; color: #a9c7e8;">inline preview</span>
@@ -526,38 +543,32 @@
                           [style.opacity]="videoLinkActionBarVisible(m, link) ? '1' : '0.02'"
                           [style.transform]="videoLinkActionBarVisible(m, link) ? 'translateY(0)' : 'translateY(-6px)'"
                           [style.pointerEvents]="videoLinkActionBarVisible(m, link) ? 'auto' : 'none'"
+                          class="videoLinkActionBar"
                           style="display: inline-flex; align-items: center; gap: 4px; transition: opacity 180ms ease, transform 220ms ease;"
                         >
-                          <button mat-icon-button type="button" *ngIf="i === 0" (click)="toggleVideoLinkGlobalVisibility($event)" [matTooltip]="videoLinkGlobalToggleLabel()" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ hideAllInlineVideoLinks ? 'visibility' : 'visibility_off' }}</mat-icon>
-                          </button>
-                          <button mat-icon-button type="button" *ngIf="i === 0" (click)="toggleVideoLinkAutoOpen($event)" [matTooltip]="videoLinkSettingsLabel()" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ videoLinkAutoOpenInline ? 'bolt' : 'bolt_off' }}</mat-icon>
-                          </button>
-                          <button mat-icon-button type="button" *ngIf="i === 0" (click)="toggleVideoLinkMutedDefault($event)" [matTooltip]="videoLinkMuteLabel()" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ videoLinkMutedByDefault ? 'volume_off' : 'volume_up' }}</mat-icon>
-                          </button>
-                          <button mat-icon-button type="button" *ngIf="i === 0" (click)="toggleVideoLinkMotion($event)" [matTooltip]="videoLinkMotionLabel()" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ videoLinkMotionIntensity === 'full' ? 'animation' : 'motion_photos_off' }}</mat-icon>
-                          </button>
-                          <a mat-icon-button [href]="link.sourceUrl" target="_blank" rel="noopener" matTooltip="Open in new tab" (click)="$event.stopPropagation()" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">open_in_new</mat-icon>
+                          <a class="videoLinkActionLink" style="width: 29px; height: 29px; min-width: 29px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56); display: inline-flex; align-items: center; justify-content: center; text-decoration: none;" [href]="link.sourceUrl" target="_blank" rel="noopener" matTooltip="Open in new tab" (click)="$event.stopPropagation()">
+                            <mat-icon>open_in_new</mat-icon>
                           </a>
-                          <button mat-icon-button type="button" (click)="copyVideoLink(link, $event)" matTooltip="Copy link" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">content_copy</mat-icon>
+                          <button type="button" class="videoLinkActionBtn" style="width: 29px; height: 29px; min-width: 29px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56); display: inline-flex; align-items: center; justify-content: center; padding: 0; line-height: 1; cursor: pointer;" (click)="toggleVideoLinkInline(m, link, $event)" [matTooltip]="videoLinkToggleLabel(m, link)">
+                            <mat-icon>{{ isVideoLinkInChatOpen(m, link) ? 'expand_less' : 'expand_more' }}</mat-icon>
                           </button>
-                          <button mat-icon-button type="button" (click)="shareVideoLink(link, $event)" matTooltip="Share" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">ios_share</mat-icon>
+                          <button type="button" class="videoLinkActionBtn" style="width: 29px; height: 29px; min-width: 29px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56); display: inline-flex; align-items: center; justify-content: center; padding: 0; line-height: 1; cursor: pointer;" [matMenuTriggerFor]="videoLinkMoreMenuPublic" (click)="$event.stopPropagation()" matTooltip="More actions">
+                            <mat-icon>more_horiz</mat-icon>
                           </button>
-                          <button mat-icon-button type="button" (click)="toggleVideoLinkWatchLater(link, $event)" [matTooltip]="isVideoLinkWatchLater(link) ? 'Remove watch later' : 'Watch later'" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ isVideoLinkWatchLater(link) ? 'bookmark' : 'bookmark_add' }}</mat-icon>
-                          </button>
-                          <button mat-icon-button type="button" (click)="toggleVideoLinkPin(m, link, $event)" [matTooltip]="isVideoLinkPinned(link) ? 'Unpin dock' : 'Pin dock'" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ isVideoLinkPinned(link) ? 'push_pin' : 'keep_off' }}</mat-icon>
-                          </button>
-                          <button mat-icon-button type="button" (click)="toggleVideoLinkInline(m, link, $event)" [matTooltip]="videoLinkToggleLabel(m, link)" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ isVideoLinkInChatOpen(m, link) ? 'expand_less' : 'expand_more' }}</mat-icon>
-                          </button>
+                          <mat-menu #videoLinkMoreMenuPublic="matMenu" xPosition="before">
+                            <button mat-menu-item type="button" (click)="copyVideoLink(link)">
+                              <mat-icon>content_copy</mat-icon>
+                              <span>Copy link</span>
+                            </button>
+                            <button mat-menu-item type="button" (click)="shareVideoLink(link)">
+                              <mat-icon>ios_share</mat-icon>
+                              <span>Share link</span>
+                            </button>
+                            <button mat-menu-item type="button" (click)="toggleWatchPartyFromLink(m, link)" [matTooltip]="watchPartyToggleLabel(link)">
+                              <mat-icon>{{ isWatchPartyForLink(link) ? 'groups' : 'group_add' }}</mat-icon>
+                              <span>{{ watchPartyToggleLabel(link) }}</span>
+                            </button>
+                          </mat-menu>
                         </div>
                       </div>
 
@@ -567,8 +578,6 @@
                           <span style="max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ videoLinkMetaSubtitle(link) }}</span>
                           <span *ngIf="videoLinkMetaDurationLabel(link) as metaDuration" style="border-radius: 999px; padding: 1px 7px; background: rgba(133, 173, 215, 0.18); border: 1px solid rgba(148, 187, 226, 0.26);">{{ metaDuration }}</span>
                           <span *ngIf="videoLinkStartLabel(link) as startLabel" style="border-radius: 999px; padding: 1px 7px; background: rgba(133, 173, 215, 0.18); border: 1px solid rgba(148, 187, 226, 0.26);">starts {{ startLabel }}</span>
-                          <span *ngIf="isVideoLinkPinned(link)" style="border-radius: 999px; padding: 1px 7px; background: rgba(196, 166, 97, 0.2); border: 1px solid rgba(209, 183, 125, 0.32); color: #ffeec7;">pinned</span>
-                          <span *ngIf="i === 0 && watchLaterCount()" style="border-radius: 999px; padding: 1px 7px; background: rgba(133, 173, 215, 0.18); border: 1px solid rgba(148, 187, 226, 0.26);">{{ watchLaterCount() }} watch later</span>
                         </div>
                       </div>
 
@@ -601,9 +610,6 @@
                           <div *ngIf="isVideoLinkDocked(m, link)" style="position: absolute; left: 0; right: 0; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 6px; color: #e4f2ff; background: linear-gradient(180deg, rgba(4, 11, 20, 0.86), rgba(4, 11, 20, 0.5));">
                             <span style="font-size: 0.62rem; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.86;">Docked player</span>
                             <div style="display: inline-flex; gap: 4px;">
-                              <button mat-icon-button type="button" (click)="toggleVideoLinkPin(m, link, $event)" style="width: 20px; height: 20px; min-width: 20px; color: #eef8ff;">
-                                <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ isVideoLinkPinned(link) ? 'push_pin' : 'keep_off' }}</mat-icon>
-                              </button>
                               <button mat-icon-button type="button" (click)="toggleVideoLinkInline(m, link, $event)" style="width: 20px; height: 20px; min-width: 20px; color: #eef8ff;">
                                 <mat-icon style="font-size: 14px; width: 14px; height: 14px;">close</mat-icon>
                               </button>
@@ -1086,7 +1092,7 @@
                     *ngFor="let link of videoLinks; let i = index"
                     (mouseenter)="onVideoLinkCardHover(m, link, true)"
                     (mouseleave)="onVideoLinkCardHover(m, link, false)"
-                    [style.transform]="videoLinkMotionIntensity === 'full' && isVideoLinkCardHovered(m, link) ? 'translateY(-2px) scale(1.005)' : 'translateY(0) scale(1)'"
+                    [style.transform]="videoLinkMotionIntensity === 'full' && isVideoLinkCardHovered(m, link) ? 'translateY(-2px) scale(1.005)' : 'none'"
                     [style.boxShadow]="videoLinkMotionIntensity === 'full' && isVideoLinkCardHovered(m, link) ? '0 16px 34px rgba(2, 10, 22, 0.34), 0 0 0 1px rgba(137, 179, 227, 0.36)' : '0 10px 24px rgba(3, 12, 23, 0.28)'"
                     [style.animation]="videoLinkMotionIntensity === 'full' ? 'messagePop 320ms cubic-bezier(0.2, 0.8, 0.2, 1)' : 'none'"
                     style="position: relative; border-radius: 16px; padding: 1px; background: linear-gradient(128deg, rgba(103, 158, 225, 0.76), rgba(35, 88, 153, 0.54) 52%, rgba(39, 141, 194, 0.48)); transition: transform 220ms ease, box-shadow 220ms ease;"
@@ -1095,7 +1101,7 @@
                       <span [style.opacity]="isVideoLinkCardHovered(m, link) ? '0.9' : '0.6'" style="position: absolute; left: -18%; top: -40%; width: 60%; height: 90%; border-radius: 999px; background: radial-gradient(circle, rgba(118, 181, 255, 0.42), transparent 68%); filter: blur(18px); pointer-events: none; transition: opacity 200ms ease;"></span>
                       <span [style.opacity]="videoLinkMotionIntensity === 'full' && isVideoLinkCardHovered(m, link) ? '0.28' : '0.12'" [style.animation]="videoLinkMotionIntensity === 'full' ? 'shimmer 3.4s linear infinite' : 'none'" style="position: absolute; inset: 0; pointer-events: none; background: linear-gradient(110deg, rgba(255,255,255,0) 26%, rgba(188,220,255,0.3) 48%, rgba(255,255,255,0) 70%); background-size: 220% 100%;"></span>
 
-                      <div style="position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px;">
+                      <div style="position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px;">
                         <div style="display: inline-flex; align-items: center; gap: 6px; min-width: 0;">
                           <span [ngStyle]="videoLinkProviderChipStyle(link)" style="display: inline-flex; align-items: center; height: 21px; border-radius: 999px; padding: 0 9px; font-size: 0.63rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;">{{ link.providerLabel }}</span>
                           <span style="font-size: 0.63rem; color: #a9c7e8;">inline preview</span>
@@ -1104,38 +1110,32 @@
                           [style.opacity]="videoLinkActionBarVisible(m, link) ? '1' : '0.02'"
                           [style.transform]="videoLinkActionBarVisible(m, link) ? 'translateY(0)' : 'translateY(-6px)'"
                           [style.pointerEvents]="videoLinkActionBarVisible(m, link) ? 'auto' : 'none'"
+                          class="videoLinkActionBar"
                           style="display: inline-flex; align-items: center; gap: 4px; transition: opacity 180ms ease, transform 220ms ease;"
                         >
-                          <button mat-icon-button type="button" *ngIf="i === 0" (click)="toggleVideoLinkGlobalVisibility($event)" [matTooltip]="videoLinkGlobalToggleLabel()" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ hideAllInlineVideoLinks ? 'visibility' : 'visibility_off' }}</mat-icon>
-                          </button>
-                          <button mat-icon-button type="button" *ngIf="i === 0" (click)="toggleVideoLinkAutoOpen($event)" [matTooltip]="videoLinkSettingsLabel()" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ videoLinkAutoOpenInline ? 'bolt' : 'bolt_off' }}</mat-icon>
-                          </button>
-                          <button mat-icon-button type="button" *ngIf="i === 0" (click)="toggleVideoLinkMutedDefault($event)" [matTooltip]="videoLinkMuteLabel()" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ videoLinkMutedByDefault ? 'volume_off' : 'volume_up' }}</mat-icon>
-                          </button>
-                          <button mat-icon-button type="button" *ngIf="i === 0" (click)="toggleVideoLinkMotion($event)" [matTooltip]="videoLinkMotionLabel()" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ videoLinkMotionIntensity === 'full' ? 'animation' : 'motion_photos_off' }}</mat-icon>
-                          </button>
-                          <a mat-icon-button [href]="link.sourceUrl" target="_blank" rel="noopener" matTooltip="Open in new tab" (click)="$event.stopPropagation()" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">open_in_new</mat-icon>
+                          <a class="videoLinkActionLink" style="width: 29px; height: 29px; min-width: 29px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56); display: inline-flex; align-items: center; justify-content: center; text-decoration: none;" [href]="link.sourceUrl" target="_blank" rel="noopener" matTooltip="Open in new tab" (click)="$event.stopPropagation()">
+                            <mat-icon>open_in_new</mat-icon>
                           </a>
-                          <button mat-icon-button type="button" (click)="copyVideoLink(link, $event)" matTooltip="Copy link" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">content_copy</mat-icon>
+                          <button type="button" class="videoLinkActionBtn" style="width: 29px; height: 29px; min-width: 29px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56); display: inline-flex; align-items: center; justify-content: center; padding: 0; line-height: 1; cursor: pointer;" (click)="toggleVideoLinkInline(m, link, $event)" [matTooltip]="videoLinkToggleLabel(m, link)">
+                            <mat-icon>{{ isVideoLinkInChatOpen(m, link) ? 'expand_less' : 'expand_more' }}</mat-icon>
                           </button>
-                          <button mat-icon-button type="button" (click)="shareVideoLink(link, $event)" matTooltip="Share" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">ios_share</mat-icon>
+                          <button type="button" class="videoLinkActionBtn" style="width: 29px; height: 29px; min-width: 29px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56); display: inline-flex; align-items: center; justify-content: center; padding: 0; line-height: 1; cursor: pointer;" [matMenuTriggerFor]="videoLinkMoreMenuPrivate" (click)="$event.stopPropagation()" matTooltip="More actions">
+                            <mat-icon>more_horiz</mat-icon>
                           </button>
-                          <button mat-icon-button type="button" (click)="toggleVideoLinkWatchLater(link, $event)" [matTooltip]="isVideoLinkWatchLater(link) ? 'Remove watch later' : 'Watch later'" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ isVideoLinkWatchLater(link) ? 'bookmark' : 'bookmark_add' }}</mat-icon>
-                          </button>
-                          <button mat-icon-button type="button" (click)="toggleVideoLinkPin(m, link, $event)" [matTooltip]="isVideoLinkPinned(link) ? 'Unpin dock' : 'Pin dock'" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ isVideoLinkPinned(link) ? 'push_pin' : 'keep_off' }}</mat-icon>
-                          </button>
-                          <button mat-icon-button type="button" (click)="toggleVideoLinkInline(m, link, $event)" [matTooltip]="videoLinkToggleLabel(m, link)" style="width: 25px; height: 25px; min-width: 25px; border-radius: 8px; border: 1px solid rgba(173, 205, 236, 0.42); color: #e8f4ff; background: rgba(18, 36, 58, 0.56);">
-                            <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ isVideoLinkInChatOpen(m, link) ? 'expand_less' : 'expand_more' }}</mat-icon>
-                          </button>
+                          <mat-menu #videoLinkMoreMenuPrivate="matMenu" xPosition="before">
+                            <button mat-menu-item type="button" (click)="copyVideoLink(link)">
+                              <mat-icon>content_copy</mat-icon>
+                              <span>Copy link</span>
+                            </button>
+                            <button mat-menu-item type="button" (click)="shareVideoLink(link)">
+                              <mat-icon>ios_share</mat-icon>
+                              <span>Share link</span>
+                            </button>
+                            <button mat-menu-item type="button" (click)="toggleWatchPartyFromLink(m, link)" [matTooltip]="watchPartyToggleLabel(link)">
+                              <mat-icon>{{ isWatchPartyForLink(link) ? 'groups' : 'group_add' }}</mat-icon>
+                              <span>{{ watchPartyToggleLabel(link) }}</span>
+                            </button>
+                          </mat-menu>
                         </div>
                       </div>
 
@@ -1145,8 +1145,6 @@
                           <span style="max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ videoLinkMetaSubtitle(link) }}</span>
                           <span *ngIf="videoLinkMetaDurationLabel(link) as metaDuration" style="border-radius: 999px; padding: 1px 7px; background: rgba(133, 173, 215, 0.18); border: 1px solid rgba(148, 187, 226, 0.26);">{{ metaDuration }}</span>
                           <span *ngIf="videoLinkStartLabel(link) as startLabel" style="border-radius: 999px; padding: 1px 7px; background: rgba(133, 173, 215, 0.18); border: 1px solid rgba(148, 187, 226, 0.26);">starts {{ startLabel }}</span>
-                          <span *ngIf="isVideoLinkPinned(link)" style="border-radius: 999px; padding: 1px 7px; background: rgba(196, 166, 97, 0.2); border: 1px solid rgba(209, 183, 125, 0.32); color: #ffeec7;">pinned</span>
-                          <span *ngIf="i === 0 && watchLaterCount()" style="border-radius: 999px; padding: 1px 7px; background: rgba(133, 173, 215, 0.18); border: 1px solid rgba(148, 187, 226, 0.26);">{{ watchLaterCount() }} watch later</span>
                         </div>
                       </div>
 
@@ -1179,9 +1177,6 @@
                           <div *ngIf="isVideoLinkDocked(m, link)" style="position: absolute; left: 0; right: 0; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 6px; color: #e4f2ff; background: linear-gradient(180deg, rgba(4, 11, 20, 0.86), rgba(4, 11, 20, 0.5));">
                             <span style="font-size: 0.62rem; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.86;">Docked player</span>
                             <div style="display: inline-flex; gap: 4px;">
-                              <button mat-icon-button type="button" (click)="toggleVideoLinkPin(m, link, $event)" style="width: 20px; height: 20px; min-width: 20px; color: #eef8ff;">
-                                <mat-icon style="font-size: 14px; width: 14px; height: 14px;">{{ isVideoLinkPinned(link) ? 'push_pin' : 'keep_off' }}</mat-icon>
-                              </button>
                               <button mat-icon-button type="button" (click)="toggleVideoLinkInline(m, link, $event)" style="width: 20px; height: 20px; min-width: 20px; color: #eef8ff;">
                                 <mat-icon style="font-size: 14px; width: 14px; height: 14px;">close</mat-icon>
                               </button>

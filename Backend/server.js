@@ -740,6 +740,8 @@ const publicTypingActive = new Set();
 const publicTypingTimers = new Map();
 const privateTypingStates = new Map();
 const ALLOWED_REACTIONS = new Set(['👍', '❤️', '😂', '😮', '😢', '🔥']);
+const watchPartySessions = new Map();
+const watchPartyContextBySocketId = new Map();
 
 function privateTypingKey(from, to) {
   return `${from}::${to}`;
@@ -804,6 +806,40 @@ function stopPrivateTyping(from, to, shouldBroadcast = true) {
   if (shouldBroadcast) {
     io.to(`user:${state.toUserId}`).emit('typing:privateStop', { from: state.from, to: state.to });
   }
+}
+
+function watchPartyRoomName(contextKey) {
+  return `watchparty:${contextKey}`;
+}
+
+function watchPartyContextKey(scope, username, withUser) {
+  const normalizedScope = scope === 'private' ? 'private' : 'public';
+  const me = String(username || '').trim().toLowerCase();
+  if (!me) return '';
+  if (normalizedScope === 'public') return 'public';
+  const peer = String(withUser || '').trim().toLowerCase();
+  if (!peer || peer === me) return '';
+  return `private:${[me, peer].sort().join('|')}`;
+}
+
+function normalizeWatchPartyPayload(payload) {
+  const sourceUrl = String(payload?.sourceUrl || '').trim();
+  if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) return null;
+  const providerLabel = String(payload?.providerLabel || 'Video').trim().slice(0, 48) || 'Video';
+  const title = String(payload?.title || '').trim().slice(0, 180);
+  const startSeconds = Math.max(0, Number(payload?.startSeconds || 0) || 0);
+  return {
+    sourceUrl,
+    providerLabel,
+    title,
+    startSeconds
+  };
+}
+
+function cleanupWatchPartyIfIdle(contextKey) {
+  const room = io.sockets.adapter.rooms.get(watchPartyRoomName(contextKey));
+  if (room && room.size > 0) return;
+  watchPartySessions.delete(contextKey);
 }
 
 function normalizeReactions(reactions) {
@@ -1543,6 +1579,82 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('watchParty:joinContext', ({ scope, withUser }) => {
+    const contextKey = watchPartyContextKey(scope, username, withUser);
+    if (!contextKey) return;
+
+    const previousContextKey = watchPartyContextBySocketId.get(socket.id);
+    if (previousContextKey && previousContextKey !== contextKey) {
+      socket.leave(watchPartyRoomName(previousContextKey));
+      cleanupWatchPartyIfIdle(previousContextKey);
+    }
+
+    watchPartyContextBySocketId.set(socket.id, contextKey);
+    socket.join(watchPartyRoomName(contextKey));
+    socket.emit('watchParty:state', watchPartySessions.get(contextKey) || null);
+  });
+
+  socket.on('watchParty:leaveContext', ({ scope, withUser } = {}) => {
+    const requestedKey = watchPartyContextKey(scope, username, withUser);
+    const activeKey = watchPartyContextBySocketId.get(socket.id);
+    const contextKey = requestedKey || activeKey;
+    if (!contextKey) return;
+    socket.leave(watchPartyRoomName(contextKey));
+    if (activeKey === contextKey) {
+      watchPartyContextBySocketId.delete(socket.id);
+    }
+    cleanupWatchPartyIfIdle(contextKey);
+  });
+
+  socket.on('watchParty:start', (payload) => {
+    const contextKey = watchPartyContextKey(payload?.scope, username, payload?.withUser);
+    if (!contextKey) return;
+    const normalized = normalizeWatchPartyPayload(payload);
+    if (!normalized) return;
+
+    const previous = watchPartySessions.get(contextKey);
+    const now = Date.now();
+    const session = {
+      scope: contextKey === 'public' ? 'public' : 'private',
+      withUser: payload?.scope === 'private' ? String(payload?.withUser || '').trim() : null,
+      host: username,
+      sourceUrl: normalized.sourceUrl,
+      providerLabel: normalized.providerLabel,
+      title: normalized.title,
+      startSeconds: normalized.startSeconds,
+      startedAt: Number(previous?.startedAt || now),
+      updatedAt: now
+    };
+
+    watchPartySessions.set(contextKey, session);
+    socket.join(watchPartyRoomName(contextKey));
+    watchPartyContextBySocketId.set(socket.id, contextKey);
+    io.to(watchPartyRoomName(contextKey)).emit('watchParty:state', session);
+  });
+
+  socket.on('watchParty:sync', ({ scope, withUser } = {}) => {
+    const requested = watchPartyContextKey(scope, username, withUser);
+    const contextKey = requested || watchPartyContextBySocketId.get(socket.id);
+    if (!contextKey) return;
+    const session = watchPartySessions.get(contextKey);
+    if (!session) return;
+    io.to(watchPartyRoomName(contextKey)).emit('watchParty:state', {
+      ...session,
+      updatedAt: Date.now()
+    });
+  });
+
+  socket.on('watchParty:end', ({ scope, withUser } = {}) => {
+    const requested = watchPartyContextKey(scope, username, withUser);
+    const contextKey = requested || watchPartyContextBySocketId.get(socket.id);
+    if (!contextKey) return;
+    const session = watchPartySessions.get(contextKey);
+    if (!session) return;
+    if (String(session.host || '').toLowerCase() !== String(username || '').toLowerCase()) return;
+    watchPartySessions.delete(contextKey);
+    io.to(watchPartyRoomName(contextKey)).emit('watchParty:state', null);
+  });
+
   socket.on('disconnect', () => {
     stopPublicTyping(username, true);
 
@@ -1551,6 +1663,12 @@ io.on('connection', (socket) => {
       clearTimeout(state.timer);
       privateTypingStates.delete(key);
       io.to(`user:${state.toUserId}`).emit('typing:privateStop', { from: state.from, to: state.to });
+    }
+
+    const watchPartyContextKeyForSocket = watchPartyContextBySocketId.get(socket.id);
+    if (watchPartyContextKeyForSocket) {
+      watchPartyContextBySocketId.delete(socket.id);
+      cleanupWatchPartyIfIdle(watchPartyContextKeyForSocket);
     }
 
     const set = socketsByUserId.get(userId);
